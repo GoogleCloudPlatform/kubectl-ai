@@ -306,7 +306,7 @@ func (a *Agent) generateFromTemplate(data Data) (string, error) {
 }
 
 // Move the default template to a constant
-const defaultTemplate = `You are a Kubernetes Assitant tasked with answering the following query:
+const defaultTemplate = `You are a Kubernetes Assistant tasked with answering the following query:
 
 <query> {{.Query}} </query>
 
