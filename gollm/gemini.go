@@ -105,10 +105,10 @@ func (c *GeminiClient) GenerateCompletion(ctx context.Context, request *Completi
 	}
 
 	if len(geminiResponse.Candidates) > 1 {
-		klog.Infof("only considering first candidate")
+		log.Info("only considering first candidate")
 		for i := 1; i < len(geminiResponse.Candidates); i++ {
 			candidate := geminiResponse.Candidates[i]
-			klog.Infof("ignoring candidate: %q", candidate.Content)
+			log.Info("ignoring candidate: %q", candidate.Content)
 		}
 	}
 	var response strings.Builder

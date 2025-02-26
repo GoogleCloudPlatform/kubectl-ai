@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/GoogleCloudPlatform/kubectl-ai/gollm"
 	"github.com/charmbracelet/glamour"
+	"k8s.io/klog/v2"
 )
 
 // LLM capability that the Agent depends on.
@@ -35,46 +37,46 @@ type Agent struct {
 }
 
 func (a *Agent) Execute(ctx context.Context) error {
-	logger := loggerFromContext(ctx)
-	logger.Info("Executing query:", "query", a.Query)
+	log := klog.FromContext(ctx)
+	log.Info("Executing query:", "query", a.Query)
 
 	// Create a temporary working directory
 	workDir, err := os.MkdirTemp("", "agent-workdir-*")
 	if err != nil {
-		logger.Error("Failed to create temporary working directory", "error", err)
+		log.Error(err, "Failed to create temporary working directory")
 		return err
 	}
 	if a.RemoveWorkDir {
 		defer os.RemoveAll(workDir)
 	}
-	logger.Info("Created temporary working directory", "workDir", workDir)
+	log.Info("Created temporary working directory", "workDir", workDir)
 
 	WriteToFile(a.tracePath, "\n----------------------------\n")
 	WriteToFile(a.promptFilePath, "\n----------------------------\n")
 
 	// Main execution loop
 	for a.CurrentIteration < a.MaxIterations {
-		logger.Info("Starting iteration", "iteration", a.CurrentIteration)
+		log.Info("Starting iteration", "iteration", a.CurrentIteration)
 
 		// Get next action from LLM
 		reActResp, err := a.AskLLM(ctx)
 		if err != nil {
-			logger.Error("Error asking LLM", "error", err)
+			log.Error(err, "Error asking LLM")
 			fmt.Printf("\nSorry, Couldn't complete the task. LLM error %v\n", err)
 			return err
 		}
 
 		// Log the thought process
-		logger.Info("Thinking...", "thought", reActResp.Thought)
+		log.Info("Thinking...", "thought", reActResp.Thought)
 		a.Trace(ctx, "assistant", fmt.Sprintf("Thought: %s", reActResp.Thought))
 
 		// Handle final answer
 		if reActResp.Answer != "" {
-			logger.Info("Final answer received", "answer", reActResp.Answer)
+			log.Info("Final answer received", "answer", reActResp.Answer)
 			a.Trace(ctx, "assistant", fmt.Sprintf("Final Answer: %s", reActResp.Answer))
 			out, err := a.markdownRenderer.Render(reActResp.Answer)
 			if err != nil {
-				logger.Error("Error rendering markdown", "error", err)
+				log.Error(err, "Error rendering markdown")
 				fmt.Printf("\n%s\n>>", reActResp.Answer)
 			} else {
 				fmt.Println(out)
@@ -84,7 +86,7 @@ func (a *Agent) Execute(ctx context.Context) error {
 
 		// Handle action
 		if reActResp.Action != nil {
-			logger.Info("Executing action",
+			log.Info("Executing action",
 				"name", reActResp.Action.Name,
 				"reason", reActResp.Action.Reason,
 				"input", reActResp.Action.Input,
@@ -99,7 +101,7 @@ func (a *Agent) Execute(ctx context.Context) error {
 			fmt.Printf("\033[32m%s\033[0m", toolOutRendered)
 			renderedReason, err := a.markdownRenderer.Render(reActResp.Action.Reason)
 			if err != nil {
-				logger.Error("Error rendering markdown", "error", err)
+				log.Error(err, "Error rendering markdown")
 				fmt.Printf("\033[37m%s\033[0m \n", reActResp.Action.Reason)
 			} else {
 				fmt.Println(renderedReason)
@@ -108,7 +110,7 @@ func (a *Agent) Execute(ctx context.Context) error {
 			// Execute action
 			output, err := a.executeAction(ctx, reActResp.Action, workDir)
 			if err != nil {
-				logger.Error("Error executing action", "error", err)
+				log.Error(err, "Error executing action")
 				return err
 			}
 
@@ -122,14 +124,14 @@ func (a *Agent) Execute(ctx context.Context) error {
 	}
 
 	// Handle max iterations reached
-	logger.Info("Max iterations reached", "iterations", a.CurrentIteration)
+	log.Info("Max iterations reached", "iterations", a.CurrentIteration)
 	fmt.Printf("\nSorry, Couldn't complete the task after %d attempts.\n", a.MaxIterations)
 	return fmt.Errorf("max iterations reached")
 }
 
 // executeAction handles the execution of a single action
 func (a *Agent) executeAction(ctx context.Context, action *Action, workDir string) (string, error) {
-	logger := loggerFromContext(ctx)
+	log := klog.FromContext(ctx)
 
 	switch action.Name {
 	case "kubectl":
@@ -152,14 +154,14 @@ func (a *Agent) executeAction(ctx context.Context, action *Action, workDir strin
 		return output, nil
 	default:
 		a.Trace(ctx, "system", fmt.Sprintf("Error: Tool %s not found", action.Name))
-		logger.Info("Unknown action: ", "action", action.Name)
+		log.Info("Unknown action: ", "action", action.Name)
 		return "", fmt.Errorf("unknown action: %s", action.Name)
 	}
 }
 
 func (a *Agent) AskLLM(ctx context.Context) (*ReActResponse, error) {
-	logger := loggerFromContext(ctx)
-	logger.Info("Asking LLM...")
+	log := klog.FromContext(ctx)
+	log.Info("Asking LLM...")
 
 	data := Data{
 		Query:       a.Query,
@@ -174,11 +176,11 @@ func (a *Agent) AskLLM(ctx context.Context) (*ReActResponse, error) {
 		return nil, err
 	}
 
-	logger.Info("Asking LLM", "prompt", prompt)
+	log.Info("Asking LLM", "prompt", prompt)
 	WriteToFile(a.promptFilePath, prompt)
 	WriteToFile(a.promptFilePath, "\n========\n")
 
-	logger.Info("Thinking...", "prompt", prompt)
+	log.Info("Thinking...", "prompt", prompt)
 
 	response, err := a.ContentGenerator.GenerateCompletion(ctx, &gollm.CompletionRequest{
 		Prompt: prompt,
@@ -199,8 +201,8 @@ func sanitizeToolInput(input string) string {
 }
 
 func (a *Agent) Trace(ctx context.Context, role, content string) error {
-	logger := loggerFromContext(ctx)
-	logger.Info("Tracing...")
+	log := klog.FromContext(ctx)
+	log.Info("Tracing...")
 	msg := Message{
 		Role:    role,
 		Content: content,
@@ -212,7 +214,7 @@ func (a *Agent) Trace(ctx context.Context, role, content string) error {
 		return nil
 	}
 	if err := WriteToFile(a.tracePath, fmt.Sprintf("%s: %s\n", role, content)); err != nil {
-		logger.Error("Error writing to trace file", "error", err)
+		log.Error(err, "Error writing to trace file")
 		// tracing is secondary to the main logic, so ignore the failures.
 	}
 	return nil
@@ -303,6 +305,29 @@ func (a *Agent) generateFromTemplate(data Data) (string, error) {
 	}
 
 	return result.String(), nil
+}
+
+// parseReActResponse parses the LLM response into a ReActResponse struct
+func parseReActResponse(input string) (*ReActResponse, error) {
+	cleaned := strings.TrimSpace(input)
+
+	first := strings.Index(cleaned, "```json")
+	last := strings.LastIndex(cleaned, "```")
+	if first == -1 || last == -1 {
+		fmt.Printf("\n%s\n", cleaned)
+		return nil, fmt.Errorf("no JSON code block found")
+	}
+	cleaned = cleaned[first+7 : last]
+
+	cleaned = strings.ReplaceAll(cleaned, "\n", "")
+	cleaned = strings.TrimSpace(cleaned)
+
+	var reActResp ReActResponse
+	if err := json.Unmarshal([]byte(cleaned), &reActResp); err != nil {
+		fmt.Printf("\n%s\n", cleaned)
+		return nil, err
+	}
+	return &reActResp, nil
 }
 
 // Move the default template to a constant

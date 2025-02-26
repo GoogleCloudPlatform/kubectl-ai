@@ -19,7 +19,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"log/slog"
 	"os"
 	"os/signal"
 	"strings"
@@ -27,6 +26,7 @@ import (
 
 	"github.com/GoogleCloudPlatform/kubectl-ai/gollm"
 	"github.com/charmbracelet/glamour"
+	"k8s.io/klog/v2"
 )
 
 // models
@@ -63,16 +63,14 @@ func run(ctx context.Context) error {
 	tracePath := flag.String("trace-path", "trace.log", "path to the trace file")
 	promptFilePath := flag.String("prompt-log-path", "prompt.log", "path to the prompt file")
 	removeWorkDir := flag.Bool("remove-workdir", false, "remove the temporary working directory after execution")
+
+	// add commandline flags for logging
+	klog.InitFlags(nil)
+
+	flag.Set("logtostderr", "false") // disable logging to stderr
+	flag.Set("log_file", "/tmp/kubectl-ai.log")
+
 	flag.Parse()
-
-	logFile, err := os.OpenFile("app.log", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0644)
-	if err != nil {
-		return fmt.Errorf("error opening log file: %w", err)
-	}
-	defer logFile.Close()
-
-	textHandler := slog.NewTextHandler(logFile, nil)
-	logger := slog.New(textHandler)
 
 	mdRenderer, err := glamour.NewTermRenderer(
 		glamour.WithAutoStyle(),
@@ -83,9 +81,7 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("error initializing the markdown renderer: %w", err)
 	}
 
-	logger.Info("Application started", "pid", os.Getpid())
-
-	ctx = withLogger(ctx, logger)
+	klog.Info("Application started", "pid", os.Getpid())
 
 	var llmClient gollm.Client
 
@@ -214,23 +210,6 @@ type session struct {
 
 func (s *session) PreviousQueries() string {
 	return strings.Join(s.Queries, "\n")
-}
-
-// Logger key for context
-type loggerKey struct{}
-
-// Function to create a new context with the logger.
-func withLogger(ctx context.Context, logger *slog.Logger) context.Context {
-	return context.WithValue(ctx, loggerKey{}, logger)
-}
-
-// Function to extract the logger from the context.
-func loggerFromContext(ctx context.Context) *slog.Logger {
-	logger, ok := ctx.Value(loggerKey{}).(*slog.Logger)
-	if !ok {
-		return slog.Default()
-	}
-	return logger
 }
 
 func clearScreen() {
