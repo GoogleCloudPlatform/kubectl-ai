@@ -1,6 +1,6 @@
 module github.com/GoogleCloudPlatform/kubectl-ai/gollm
 
-go 1.23.2
+go 1.23.4
 
 require (
 	cloud.google.com/go/vertexai v0.13.3
