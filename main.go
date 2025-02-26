@@ -26,6 +26,7 @@ import (
 	"syscall"
 
 	"github.com/GoogleCloudPlatform/kubectl-ai/gollm"
+	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/journal"
 	"github.com/charmbracelet/glamour"
 )
 
@@ -61,7 +62,6 @@ func run(ctx context.Context) error {
 	model := flag.String("model", geminiModels[0], "language model")
 	templateFile := flag.String("prompt-template-path", "", "path to custom prompt template file")
 	tracePath := flag.String("trace-path", "trace.log", "path to the trace file")
-	promptFilePath := flag.String("prompt-log-path", "prompt.log", "path to the prompt file")
 	removeWorkDir := flag.Bool("remove-workdir", false, "remove the temporary working directory after execution")
 	flag.Parse()
 
@@ -119,19 +119,28 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("invalid language model provider: %s", *llmProvider)
 	}
 
+	var recorder journal.Recorder
+	if *tracePath != "" {
+		recorder, err = journal.NewFileRecorder(*tracePath)
+		if err != nil {
+			return fmt.Errorf("creating trace recorder: %w", err)
+		}
+		defer recorder.Close()
+	}
+
 	if *queryFromCmd != "" {
 		query := *queryFromCmd
+
 		agent := Agent{
 			Model:            *model,
 			Query:            query,
 			ContentGenerator: llmClient,
 			MaxIterations:    *maxIterations,
-			tracePath:        *tracePath,
-			promptFilePath:   *promptFilePath,
 			Kubeconfig:       *kubeconfig,
 			RemoveWorkDir:    *removeWorkDir,
 			templateFile:     *templateFile,
 			markdownRenderer: mdRenderer,
+			Recorder:         recorder,
 		}
 		agent.Execute(ctx)
 		return nil
@@ -193,12 +202,11 @@ func run(ctx context.Context) error {
 				PastQueries:      chatSession.PreviousQueries(),
 				ContentGenerator: llmClient,
 				MaxIterations:    *maxIterations,
-				tracePath:        *tracePath,
-				promptFilePath:   *promptFilePath,
 				Kubeconfig:       *kubeconfig,
 				RemoveWorkDir:    *removeWorkDir,
 				templateFile:     *templateFile,
 				markdownRenderer: mdRenderer,
+				Recorder:         recorder,
 			}
 			agent.Execute(ctx)
 			chatSession.Queries = append(chatSession.Queries, query)

@@ -16,6 +16,7 @@ package gollm
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -358,6 +359,14 @@ type GeminiCompletionResponse struct {
 }
 
 var _ CompletionResponse = &GeminiCompletionResponse{}
+
+func (r *GeminiCompletionResponse) MarshalJSON() ([]byte, error) {
+	formatted := RecordCompletionResponse{
+		Text: r.text,
+		Raw:  r.geminiResponse,
+	}
+	return json.Marshal(&formatted)
+}
 
 func (r *GeminiCompletionResponse) Response() string {
 	return r.text
