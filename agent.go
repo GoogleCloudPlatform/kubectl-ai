@@ -6,16 +6,12 @@ import (
 	"os"
 	"strings"
 	"text/template"
+	"time"
 
 	"github.com/GoogleCloudPlatform/kubectl-ai/gollm"
+	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/journal"
 	"github.com/charmbracelet/glamour"
 )
-
-// LLM capability that the Agent depends on.
-type LLM interface {
-	GenerateContent(ctx context.Context, model, prompt string) (*ReActResponse, error)
-	ListModels(ctx context.Context) ([]string, error)
-}
 
 // Agent knows how to execute a multi-step task. Goal is provided in the query argument.
 type Agent struct {
@@ -26,12 +22,12 @@ type Agent struct {
 	Messages         []Message
 	MaxIterations    int
 	CurrentIteration int
-	tracePath        string
-	promptFilePath   string
 	Kubeconfig       string
 	RemoveWorkDir    bool
 	markdownRenderer *glamour.TermRenderer
 	templateFile     string
+
+	Recorder journal.Recorder
 }
 
 func (a *Agent) Execute(ctx context.Context) error {
@@ -49,9 +45,6 @@ func (a *Agent) Execute(ctx context.Context) error {
 	}
 	logger.Info("Created temporary working directory", "workDir", workDir)
 
-	WriteToFile(a.tracePath, "\n----------------------------\n")
-	WriteToFile(a.promptFilePath, "\n----------------------------\n")
-
 	// Main execution loop
 	for a.CurrentIteration < a.MaxIterations {
 		logger.Info("Starting iteration", "iteration", a.CurrentIteration)
@@ -66,12 +59,12 @@ func (a *Agent) Execute(ctx context.Context) error {
 
 		// Log the thought process
 		logger.Info("Thinking...", "thought", reActResp.Thought)
-		a.Trace(ctx, "assistant", fmt.Sprintf("Thought: %s", reActResp.Thought))
+		a.addMessage(ctx, "assistant", fmt.Sprintf("Thought: %s", reActResp.Thought))
 
 		// Handle final answer
 		if reActResp.Answer != "" {
 			logger.Info("Final answer received", "answer", reActResp.Answer)
-			a.Trace(ctx, "assistant", fmt.Sprintf("Final Answer: %s", reActResp.Answer))
+			a.addMessage(ctx, "assistant", fmt.Sprintf("Final Answer: %s", reActResp.Answer))
 			out, err := a.markdownRenderer.Render(reActResp.Answer)
 			if err != nil {
 				logger.Error("Error rendering markdown", "error", err)
@@ -92,7 +85,7 @@ func (a *Agent) Execute(ctx context.Context) error {
 
 			// Sanitize and prepare action
 			reActResp.Action.Input = sanitizeToolInput(reActResp.Action.Input)
-			a.Trace(ctx, "assistant", fmt.Sprintf("Action: Using %s tool", reActResp.Action.Name))
+			a.addMessage(ctx, "assistant", fmt.Sprintf("Action: Using %s tool", reActResp.Action.Name))
 
 			// Display action details
 			toolOutRendered := fmt.Sprintf("  Running: %s", reActResp.Action.Input)
@@ -114,17 +107,15 @@ func (a *Agent) Execute(ctx context.Context) error {
 
 			// Record observation
 			observation := fmt.Sprintf("Observation from %s:\n%s", reActResp.Action.Name, output)
-			a.Trace(ctx, "system", observation)
-			a.Messages = append(a.Messages, Message{Role: "system", Content: observation})
+			a.addMessage(ctx, "system", observation)
 		}
 
 		a.CurrentIteration++
 	}
 
 	// Handle max iterations reached
-	logger.Info("Max iterations reached", "iterations", a.CurrentIteration)
 	fmt.Printf("\nSorry, Couldn't complete the task after %d attempts.\n", a.MaxIterations)
-	return fmt.Errorf("max iterations reached")
+	return a.recordError(ctx, fmt.Errorf("max iterations reached"))
 }
 
 // executeAction handles the execution of a single action
@@ -151,12 +142,13 @@ func (a *Agent) executeAction(ctx context.Context, action *Action, workDir strin
 		}
 		return output, nil
 	default:
-		a.Trace(ctx, "system", fmt.Sprintf("Error: Tool %s not found", action.Name))
+		a.addMessage(ctx, "system", fmt.Sprintf("Error: Tool %s not found", action.Name))
 		logger.Info("Unknown action: ", "action", action.Name)
-		return "", fmt.Errorf("unknown action: %s", action.Name)
+		return "", a.recordError(ctx, fmt.Errorf("unknown action: %s", action.Name))
 	}
 }
 
+// AskLLM asks the LLM for the next action, sending a prompt including the .History
 func (a *Agent) AskLLM(ctx context.Context) (*ReActResponse, error) {
 	logger := loggerFromContext(ctx)
 	logger.Info("Asking LLM...")
@@ -175,8 +167,11 @@ func (a *Agent) AskLLM(ctx context.Context) (*ReActResponse, error) {
 	}
 
 	logger.Info("Asking LLM", "prompt", prompt)
-	WriteToFile(a.promptFilePath, prompt)
-	WriteToFile(a.promptFilePath, "\n========\n")
+	a.record(ctx, &journal.Event{
+		Timestamp: time.Now(),
+		Action:    "llm-request",
+		Payload:   prompt,
+	})
 
 	logger.Info("Thinking...", "prompt", prompt)
 
@@ -186,6 +181,12 @@ func (a *Agent) AskLLM(ctx context.Context) (*ReActResponse, error) {
 	if err != nil {
 		return nil, fmt.Errorf("generating LLM completion: %w", err)
 	}
+
+	a.record(ctx, &journal.Event{
+		Timestamp: time.Now(),
+		Action:    "llm-response",
+		Payload:   response,
+	})
 
 	reActResp, err := parseReActResponse(response.Response())
 	if err != nil {
@@ -198,24 +199,40 @@ func sanitizeToolInput(input string) string {
 	return strings.TrimSpace(input)
 }
 
-func (a *Agent) Trace(ctx context.Context, role, content string) error {
-	logger := loggerFromContext(ctx)
-	logger.Info("Tracing...")
+func (a *Agent) addMessage(ctx context.Context, role, content string) error {
 	msg := Message{
 		Role:    role,
 		Content: content,
 	}
-	if role != "system" {
-		a.Messages = append(a.Messages, msg)
-	}
-	if a.tracePath == "" {
-		return nil
-	}
-	if err := WriteToFile(a.tracePath, fmt.Sprintf("%s: %s\n", role, content)); err != nil {
-		logger.Error("Error writing to trace file", "error", err)
-		// tracing is secondary to the main logic, so ignore the failures.
-	}
+	a.Messages = append(a.Messages, msg)
+	a.record(ctx, &journal.Event{
+		Timestamp: time.Now(),
+		Action:    "trace",
+		Payload:   msg,
+	})
+
 	return nil
+}
+
+func (a *Agent) recordError(ctx context.Context, err error) error {
+	a.record(ctx, &journal.Event{
+		Timestamp: time.Now(),
+		Action:    "error",
+		Payload:   err.Error(),
+	})
+	return err
+}
+
+func (a *Agent) record(ctx context.Context, event *journal.Event) {
+	log := loggerFromContext(ctx)
+
+	log.Info("Tracing event", "event", event)
+
+	if a.Recorder != nil {
+		if err := a.Recorder.Write(ctx, event); err != nil {
+			log.Error("Error recording event", "error", err)
+		}
+	}
 }
 
 func (a *Agent) History() string {
@@ -241,26 +258,6 @@ type Action struct {
 type Message struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
-}
-
-// WriteToFile appends the given content to a file.
-// If the file does not exist, it is created.
-// Returns an error if any operation fails.
-func WriteToFile(fileName string, content string) error {
-	// Open the file in append mode, create if it doesn't exist
-	file, err := os.OpenFile(fileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return err
-	}
-	defer file.Close() // Ensure the file is closed after the function exits
-
-	// Append the content to the file
-	_, err = file.WriteString(content)
-	if err != nil {
-		return err
-	}
-
-	return nil
 }
 
 // Data represents the structure of the data to be filled into the template.
