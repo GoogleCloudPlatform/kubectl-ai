@@ -70,7 +70,7 @@ func (c *GeminiClient) ListModels(ctx context.Context) (modelNames []string, err
 		m, err := models.Next()
 		if err != nil {
 			if err == iterator.Done {
-				return modelNames, nil
+				break
 			}
 			return nil, err
 		}
@@ -103,6 +103,10 @@ func (c *GeminiClient) GenerateCompletion(ctx context.Context, request *Completi
 	geminiResponse, err := model.GenerateContent(ctx, geminiParts...)
 	if err != nil {
 		return nil, err
+	}
+
+	if len(geminiResponse.Candidates) == 0 {
+		return nil, fmt.Errorf("got no responses from gemini")
 	}
 
 	if len(geminiResponse.Candidates) > 1 {
@@ -184,11 +188,19 @@ func (c *GeminiChat) SetFunctionDefinitions(functionDefinitions []*FunctionDefin
 	c.model.Tools = append(c.model.Tools, &genai.Tool{
 		FunctionDeclarations: geminiFunctionDefinitions,
 	})
+	c.model.ToolConfig = &genai.ToolConfig{
+		FunctionCallingConfig: &genai.FunctionCallingConfig{
+			Mode: genai.FunctionCallingAuto,
+		},
+	}
 	return nil
 }
 
 // toGeminiSchema converts our generic Schema to a genai.Schema
 func toGeminiSchema(schema *Schema) (*genai.Schema, error) {
+	if schema == nil {
+		return nil, nil
+	}
 	ret := &genai.Schema{
 		Description: schema.Description,
 		Required:    schema.Required,
@@ -199,6 +211,8 @@ func toGeminiSchema(schema *Schema) (*genai.Schema, error) {
 		ret.Type = genai.TypeObject
 	case TypeString:
 		ret.Type = genai.TypeString
+	case TypeBoolean:
+		ret.Type = genai.TypeBoolean
 	default:
 		return nil, fmt.Errorf("type %q not handled by genai.Schema", schema.Type)
 	}

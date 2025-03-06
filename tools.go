@@ -11,6 +11,16 @@ var (
 	bashBin = "/bin/bash"
 )
 
+func buildTools() map[string]func(input string, kubeconfig string, workDir string) (string, error) {
+	tools := make(map[string]func(input string, kubeconfig string, workDir string) (string, error))
+
+	tools["kubectl"] = kubectlRunner
+	tools["cat"] = bashRunner
+	tools["bash"] = bashRunner
+
+	return tools
+}
+
 // kubectlRunner executes a kubectl command with the specified kubeconfig and returns the output.
 func kubectlRunner(command string, kubeconfig string, workDir string) (string, error) {
 	args := strings.Fields(command)
@@ -54,7 +64,7 @@ func expandShellVar(value string) (string, error) {
 }
 
 // bashRunner executes a bash command and returns the output
-func bashRunner(command string, workDir string, kubeconfig string) (string, error) {
+func bashRunner(command string, kubeconfig string, workDir string) (string, error) {
 	cmd := exec.Command(bashBin, "-c", command)
 	cmd.Dir = workDir
 	cmd.Env = os.Environ()

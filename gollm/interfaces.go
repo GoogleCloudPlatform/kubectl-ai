@@ -80,6 +80,7 @@ type SchemaType string
 const (
 	TypeObject SchemaType = "object"
 	TypeString SchemaType = "string"
+	TypeBoolean SchemaType = "boolean"
 )
 
 // FunctionCallResult is the result of a function call.
