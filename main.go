@@ -39,18 +39,6 @@ var geminiModels = []string{
 	"gemini-2.0-flash-thinking-exp-01-21",
 }
 
-type AgentType string
-
-const (
-	AgentTypeChatBased AgentType = "chat-based"
-	AgentTypeReAct     AgentType = "react"
-)
-
-var allAgentTypes = []AgentType{
-	AgentTypeChatBased,
-	AgentTypeReAct,
-}
-
 func main() {
 	ctx := context.Background()
 
@@ -76,6 +64,7 @@ type Options struct {
 }
 
 func (o *Options) InitDefaults() {
+	// default to react because default model doesn't support function calling.
 	o.Strategy = "react"
 	o.ProviderID = "gemini"
 	o.ModelID = geminiModels[0]
@@ -87,8 +76,6 @@ func run(ctx context.Context) error {
 	opt.InitDefaults()
 
 	maxIterations := flag.Int("max-iterations", 20, "maximum number of iterations agent will try before giving up")
-	// default to react because default model doesn't support function calling.
-	agentType := flag.String("agent-type", string(AgentTypeReAct), fmt.Sprintf("agent type e.g. %v", allAgentTypes))
 	kubeconfig := flag.String("kubeconfig", "", "path to the kubeconfig file")
 	promptTemplateFile := flag.String("prompt-template-file", "", "path to custom prompt template file")
 	tracePath := flag.String("trace-path", "trace.log", "path to the trace file")
@@ -190,6 +177,19 @@ func run(ctx context.Context) error {
 		defer vertexAIClient.Close()
 		llmClient = vertexAIClient
 
+	case "ollama":
+		ollamaClient, err := gollm.NewOllamaClient(ctx)
+		if err != nil {
+			return fmt.Errorf("creating ollama client: %w", err)
+		}
+		defer ollamaClient.Close()
+		llmClient = ollamaClient
+
+		modelNames, err := ollamaClient.ListModels(ctx)
+		if err != nil {
+			return fmt.Errorf("listing ollama models: %w", err)
+		}
+		availableModels = modelNames
 	default:
 		return fmt.Errorf("invalid language model provider: %s", opt.ProviderID)
 	}
@@ -219,8 +219,8 @@ func run(ctx context.Context) error {
 	}
 
 	var strategy llmstrategy.Strategy
-	switch AgentType(*agentType) {
-	case AgentTypeChatBased:
+	switch opt.Strategy {
+	case "chat-based":
 		strategy = &chatbased.Strategy{
 			Kubeconfig:         kubeconfigPath,
 			LLM:                llmClient,
@@ -230,7 +230,7 @@ func run(ctx context.Context) error {
 			Recorder:           recorder,
 			RemoveWorkDir:      *removeWorkDir,
 		}
-	case AgentTypeReAct:
+	case "react":
 		strategy = &react.Strategy{
 			Kubeconfig:         kubeconfigPath,
 			LLM:                llmClient,
@@ -241,7 +241,7 @@ func run(ctx context.Context) error {
 			RemoveWorkDir:      *removeWorkDir,
 		}
 	default:
-		return fmt.Errorf("invalid agent type: %s", *agentType)
+		return fmt.Errorf("invalid strategy: %s", opt.Strategy)
 	}
 
 	if queryFromCmd != "" {

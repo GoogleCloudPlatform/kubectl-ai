@@ -1,10 +1,13 @@
 module github.com/GoogleCloudPlatform/kubectl-ai/gollm
 
-go 1.23.4
+go 1.24.0
+
+toolchain go1.24.1
 
 require (
 	cloud.google.com/go/vertexai v0.13.3
 	github.com/google/generative-ai-go v0.19.0
+	github.com/ollama/ollama v0.5.13
 	golang.org/x/oauth2 v0.26.0
 	google.golang.org/api v0.222.0
 	k8s.io/klog/v2 v2.130.1

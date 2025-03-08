@@ -59,13 +59,13 @@ func (a *Strategy) RunOnce(ctx context.Context, query string, u ui.UI) error {
 	// Define the kubectl function
 	kubectlFunction := &gollm.FunctionDefinition{
 		Name:        "kubectl",
-		Description: "Executes kubectl command against user's Kubernetes cluster. Use this tool only when you need to query or modify the state of user's Kubernetes cluster.",
+		Description: "Executes a kubectl command against user's Kubernetes cluster. Use this tool only when you need to query or modify the state of user's Kubernetes cluster.",
 		Parameters: &gollm.Schema{
 			Type: gollm.TypeObject,
 			Properties: map[string]*gollm.Schema{
 				"command": {
 					Type: gollm.TypeString,
-					Description: `The kubectl command to execute (including the kubectl prefix).
+					Description: `The complete kubectl command to execute. Please including the kubectl prefix as well.
 
 Example:
 user: what pods are running in the cluster?
@@ -113,9 +113,9 @@ assistant: kubectl get pod my-pod -o jsonpath='{.status.phase}'
 		var functionCalls []gollm.FunctionCall
 
 		for _, part := range candidate.Parts() {
-
 			// Check if it's a text response
 			if text, ok := part.AsText(); ok {
+				log.Info("text response", "text", text)
 				textResponse := text
 				// If we have a text response, render it
 				if textResponse != "" {
@@ -126,6 +126,7 @@ assistant: kubectl get pod my-pod -o jsonpath='{.status.phase}'
 
 			// Check if it's a function call
 			if calls, ok := part.AsFunctionCalls(); ok && len(calls) > 0 {
+				log.Info("function calls", "calls", calls)
 				functionCalls = append(functionCalls, calls...)
 
 				// TODO(droot): Run all function calls in parallel
@@ -133,7 +134,7 @@ assistant: kubectl get pod my-pod -o jsonpath='{.status.phase}'
 				for _, call := range calls {
 					functionName := call.Name
 					command, _ := call.Arguments["command"].(string)
-
+					log.Info("function call", "functionName", functionName, "command", command)
 					u.RenderOutput(ctx, fmt.Sprintf("  Running: %s\n", command), ui.Foreground(ui.ColorGreen))
 
 					output, err := a.executeAction(ctx, functionName, command, workDir)
