@@ -5,7 +5,7 @@ for i in {1..30}; do
     endpoints=$(kubectl get endpoints nginx -n web -o jsonpath='{.subsets[0].addresses}')
     if [[ ! -z "$endpoints" ]]; then
         # Verify service can access the pod
-        if kubectl run -n web test-connection --image=busybox --restart=Never --rm -i --timeout=10s \
+        if timeout 10 kubectl run -n web test-connection --image=busybox --restart=Never --rm -i  \
             -- wget -qO- nginx; then
             exit 0
         fi
