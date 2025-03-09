@@ -137,7 +137,7 @@ func run(ctx context.Context) error {
 		}
 	}
 
-	if err := runEvaluation(config); err != nil {
+	if err := runEvaluation(ctx, config); err != nil {
 		return fmt.Errorf("running evaluation: %w", err)
 	}
 
