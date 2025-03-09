@@ -50,6 +50,32 @@ jobs:
           ./dev/ci/presubmits/go-vet
 
 
+  verify-autogen:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+      - name: "Run dev/ci/presubmits/verify-autogen"
+        run: |
+          ./dev/ci/presubmits/verify-autogen
+
+
+  verify-format:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+      - name: "Run dev/ci/presubmits/verify-format"
+        run: |
+          ./dev/ci/presubmits/verify-format
+
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
