@@ -292,6 +292,15 @@ type GeminiChatResponse struct {
 	geminiResponse *genai.GenerateContentResponse
 }
 
+var _ ChatResponse = &GeminiChatResponse{}
+
+func (r *GeminiChatResponse) MarshalJSON() ([]byte, error) {
+	formatted := RecordChatResponse{
+		Raw: r.geminiResponse,
+	}
+	return json.Marshal(&formatted)
+}
+
 // String returns a string representation of the response.
 func (r *GeminiChatResponse) String() string {
 	var response strings.Builder

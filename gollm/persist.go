@@ -21,3 +21,8 @@ type RecordCompletionResponse struct {
 	Text string `json:"text"`
 	Raw  any    `json:"raw"`
 }
+
+type RecordChatResponse struct {
+	// TODO: Structured data?
+	Raw any `json:"raw"`
+}

@@ -143,27 +143,41 @@ func evaluateTask(ctx context.Context, config EvalConfig, taskID string, task Ta
 		}
 	}
 
-	cmd := exec.CommandContext(ctx,
-		config.AgentBin,
-		"--kubeconfig", config.KubeConfig,
-		"--llm-provider", llmConfig.ProviderID,
-		"--strategy", llmConfig.Strategy,
-		"--model", llmConfig.ModelID,
-		task.Goal,
-	)
+	// Run the agent
+	{
+		args := []string{
+			"--kubeconfig", config.KubeConfig,
+			"--llm-provider", llmConfig.ProviderID,
+			"--strategy", llmConfig.Strategy,
+			"--model", llmConfig.ModelID,
+		}
 
-	cmd.Env = append(os.Environ(), fmt.Sprintf("KUBECONFIG=%s", config.KubeConfig))
-	fmt.Printf("\nRunning %s for task %s with %+v\n", config.AgentBin, taskID, llmConfig)
+		if config.OutputDir != "" {
+			taskOutputDir := filepath.Join(config.OutputDir, taskID, llmConfig.ID)
+			args = append(args, "--trace-path", filepath.Join(taskOutputDir, "trace.yaml"))
+		}
 
-	if err := runCommand(cmd, log); err != nil {
-		result.Error = err.Error()
-		return result
+		args = append(args, task.Goal)
+
+		cmd := exec.CommandContext(ctx,
+			config.AgentBin,
+			args...,
+		)
+
+		cmd.Env = append(os.Environ(), fmt.Sprintf("KUBECONFIG=%s", config.KubeConfig))
+		fmt.Printf("\nRunning %s for task %s with %+v\n", config.AgentBin, taskID, llmConfig)
+
+		if err := runCommand(cmd, log); err != nil {
+			result.Result = "fail"
+			result.Error = err.Error()
+			return result
+		}
 	}
 
 	// Run verifier if specified
 	if task.Verifier != "" {
 		verifierPath := filepath.Join(config.TasksDir, taskID, task.Verifier)
-		cmd = exec.CommandContext(ctx, verifierPath)
+		cmd := exec.CommandContext(ctx, verifierPath)
 		cmd.Env = append(os.Environ(), fmt.Sprintf("KUBECONFIG=%s", config.KubeConfig))
 		fmt.Printf("\nRunning verifier for task %s\n", taskID)
 

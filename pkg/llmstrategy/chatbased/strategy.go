@@ -20,6 +20,7 @@ import (
 	"html/template"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/GoogleCloudPlatform/kubectl-ai/gollm"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/journal"
@@ -118,11 +119,24 @@ Possible values:
 	for a.CurrentIteration < a.MaxIterations {
 		log.Info("Starting iteration", "iteration", a.CurrentIteration)
 
+		a.Recorder.Write(ctx, &journal.Event{
+			Timestamp: time.Now(),
+			Action:    "llm-chat",
+			Payload:   []any{currChatContent},
+		})
+
 		response, err := chat.Send(ctx, currChatContent...)
 		if err != nil {
 			log.Error(err, "Error sending initial message")
 			return err
 		}
+
+		a.Recorder.Write(ctx, &journal.Event{
+			Timestamp: time.Now(),
+			Action:    "llm-response",
+			Payload:   response,
+		})
+
 		currChatContent = nil
 
 		if len(response.Candidates()) == 0 {
@@ -209,10 +223,23 @@ func (a *Strategy) executeAction(ctx context.Context, actionName string, actionI
 		return "", fmt.Errorf("tool %q not found", actionName)
 	}
 
+	a.Recorder.Write(ctx, &journal.Event{
+		Timestamp: time.Now(),
+		Action:    "tool-request",
+		Payload:   actionInput,
+	})
+
 	output, err := tool(actionInput, a.Kubeconfig, workDir)
 	if err != nil {
 		return fmt.Sprintf("Error executing %q command: %v", actionName, err), err
 	}
+
+	a.Recorder.Write(ctx, &journal.Event{
+		Timestamp: time.Now(),
+		Action:    "tool-response",
+		Payload:   output,
+	})
+
 	return output, nil
 }
 

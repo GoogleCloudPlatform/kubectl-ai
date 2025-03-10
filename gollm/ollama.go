@@ -16,6 +16,7 @@ package gollm
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/ollama/ollama/api"
@@ -162,6 +163,7 @@ func (c *OllamaChat) Send(ctx context.Context, contents ...any) (ChatResponse, e
 	respFunc := func(resp api.ChatResponse) error {
 		log.Info("recieved response from ollama", "resp", resp)
 		ollamaResponse = &OllamaChatResponse{
+			ollamaResponse: resp,
 			candidates: []*OllamaCandidate{
 				{
 					parts: []OllamaPart{
@@ -187,7 +189,17 @@ func (c *OllamaChat) Send(ctx context.Context, contents ...any) (ChatResponse, e
 }
 
 type OllamaChatResponse struct {
-	candidates []*OllamaCandidate
+	candidates     []*OllamaCandidate
+	ollamaResponse api.ChatResponse
+}
+
+var _ ChatResponse = &OllamaChatResponse{}
+
+func (r *OllamaChatResponse) MarshalJSON() ([]byte, error) {
+	formatted := RecordChatResponse{
+		Raw: r.ollamaResponse,
+	}
+	return json.Marshal(&formatted)
 }
 
 func (r *OllamaChatResponse) String() string {

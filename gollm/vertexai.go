@@ -290,6 +290,15 @@ type VertexAIChatResponse struct {
 	vertexaiResponse *genai.GenerateContentResponse
 }
 
+var _ ChatResponse = &VertexAIChatResponse{}
+
+func (r *VertexAIChatResponse) MarshalJSON() ([]byte, error) {
+	formatted := RecordChatResponse{
+		Raw: r.vertexaiResponse,
+	}
+	return json.Marshal(&formatted)
+}
+
 // String returns a string representation of the response.
 func (r *VertexAIChatResponse) String() string {
 	var response strings.Builder
