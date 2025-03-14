@@ -24,4 +24,4 @@ go build -o "${BINDIR}/kubectl-ai" .
 cd "${REPO_ROOT}/k8s-bench"
 go build -o "${BINDIR}/k8s-bench" .
 
-"${BINDIR}/k8s-bench" --agent-bin "${BINDIR}/kubectl-ai" --kubeconfig "${KUBECONFIG:-~/.kube/config}" --output-dir "${OUTPUT_DIR}" ${TEST_ARGS:-}
+"${BINDIR}/k8s-bench" run --agent-bin "${BINDIR}/kubectl-ai" --kubeconfig "${KUBECONFIG:-~/.kube/config}" --output-dir "${OUTPUT_DIR}" ${TEST_ARGS:-}

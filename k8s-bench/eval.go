@@ -227,7 +227,7 @@ func printResults(allResults []model.TaskResult) {
 
 	for _, result := range allResults {
 		fmt.Printf("\nTask: %s\n", result.Task)
-		fmt.Printf("  LLM Config: %+vv\n", result.LLMConfig)
+		fmt.Printf("  LLM Config: %+v\n", result.LLMConfig)
 		fmt.Printf("    %v\n", result.Result)
 		if result.Error != "" {
 			fmt.Printf("    Error: %s\n", result.Error)
