@@ -1,4 +1,5 @@
-goal: "Scale down the replicas of deployment 'web-service' in namespace 'scale-down-test' by 50%"
+script:
+- prompt: "Scale down the replicas of deployment 'web-service' in namespace 'scale-down-test' by 50%"
 setup: "setup.sh"
 verifier: "verify.sh"
 cleanup: "cleanup.sh"

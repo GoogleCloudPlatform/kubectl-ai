@@ -1,4 +1,5 @@
-goal: "What images are my pods running?"
+script:
+- prompt: "What images are my pods running?"
 setup: "setup.sh"
 verifier: "verify.sh"
 cleanup: "cleanup.sh"

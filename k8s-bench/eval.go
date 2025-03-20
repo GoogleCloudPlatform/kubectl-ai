@@ -175,7 +175,10 @@ func evaluateTask(ctx context.Context, config EvalConfig, taskID string, task Ta
 			"--trace-path", tracePath,
 		}
 
-		args = append(args, task.Goal)
+		// TODO: support multiple steps
+		for _, scriptStep := range task.Script {
+			args = append(args, scriptStep.Prompt)
+		}
 
 		cmd := exec.CommandContext(ctx,
 			config.AgentBin,
