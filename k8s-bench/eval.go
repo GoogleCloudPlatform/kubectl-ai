@@ -139,6 +139,15 @@ func evaluateTask(ctx context.Context, config EvalConfig, taskID string, task Ta
 		LLMConfig: llmConfig,
 	}
 
+	x := &TaskExecution{
+		result:    &result,
+		config:    config,
+		llmConfig: llmConfig,
+		log:       log,
+		task:      &task,
+		taskID:    taskID,
+	}
+
 	taskDir := filepath.Join(config.TasksDir, taskID)
 	taskDirAbs, err := filepath.Abs(taskDir)
 	if err != nil {
@@ -162,36 +171,11 @@ func evaluateTask(ctx context.Context, config EvalConfig, taskID string, task Ta
 		}
 	}
 
-	taskOutputDir := filepath.Join(config.OutputDir, taskID, llmConfig.ID)
-	tracePath := filepath.Join(taskOutputDir, "trace.yaml")
-
 	// Run the agent
-	{
-		args := []string{
-			"--kubeconfig", config.KubeConfig,
-			"--llm-provider", llmConfig.ProviderID,
-			"--strategy", llmConfig.Strategy,
-			"--model", llmConfig.ModelID,
-			"--trace-path", tracePath,
-		}
-
-		// TODO: support multiple steps
-		for _, scriptStep := range task.Script {
-			args = append(args, scriptStep.Prompt)
-		}
-
-		cmd := exec.CommandContext(ctx,
-			config.AgentBin,
-			args...,
-		)
-
-		cmd.Env = append(os.Environ(), fmt.Sprintf("KUBECONFIG=%s", config.KubeConfig))
-
-		if err := runCommand(cmd, log); err != nil {
-			result.Result = "fail"
-			result.Error = err.Error()
-			return result
-		}
+	if err := x.runAgent(ctx); err != nil {
+		// Unexpected error
+		result.Error = err.Error()
+		return result
 	}
 
 	// Run verifier if specified
@@ -213,39 +197,6 @@ func evaluateTask(ctx context.Context, config EvalConfig, taskID string, task Ta
 		}
 	}
 
-	// Run expectations if specified
-	if len(task.Expect) != 0 {
-		events, err := journal.ParseEventsFromFile(tracePath)
-		if err != nil {
-			// Unexpected error
-			result.Error = err.Error()
-			return result
-		} else {
-			var lastEvent *journal.Event
-			for _, event := range events {
-				if event.Action == journal.ActionUIRender {
-					lastEvent = event
-				}
-			}
-
-			if lastEvent == nil {
-				result.AddFailure("did not found ui.render event in trace")
-			} else {
-				lastOutput, ok := lastEvent.GetString("text")
-				if !ok {
-					result.AddFailure("did not found 'text' key in event %+v", lastEvent)
-				}
-				for _, expect := range task.Expect {
-					if expect.Contains != "" {
-						if !strings.Contains(lastOutput, expect.Contains) {
-							result.AddFailure("expected value %q not found in output %q", expect.Contains, lastOutput)
-						}
-					}
-				}
-			}
-		}
-	}
-
 	// Run cleanup if specified
 	if task.Cleanup != "" {
 		cleanupPath := filepath.Join(taskDir, task.Cleanup)
@@ -259,6 +210,90 @@ func evaluateTask(ctx context.Context, config EvalConfig, taskID string, task Ta
 	}
 
 	return result
+}
+
+type TaskExecution struct {
+	config    EvalConfig
+	llmConfig model.LLMConfig
+	result    *model.TaskResult
+	log       io.Writer
+	task      *Task
+	taskID    string
+}
+
+func (x *TaskExecution) runAgent(ctx context.Context) error {
+	taskOutputDir := filepath.Join(x.config.OutputDir, x.taskID, x.llmConfig.ID)
+
+	tracePath := filepath.Join(taskOutputDir, "trace.yaml")
+
+	args := []string{
+		"--kubeconfig", x.config.KubeConfig,
+		"--llm-provider", x.llmConfig.ProviderID,
+		"--strategy", x.llmConfig.Strategy,
+		"--model", x.llmConfig.ModelID,
+		"--trace-path", tracePath,
+	}
+
+	stdinReader, stdinWriter := io.Pipe()
+
+	cmd := exec.CommandContext(ctx,
+		x.config.AgentBin,
+		args...,
+	)
+	cmd.Stdin = stdinReader
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if x.log != nil {
+		cmd.Stdout = io.MultiWriter(cmd.Stdout, x.log)
+		cmd.Stderr = io.MultiWriter(cmd.Stderr, x.log)
+	}
+
+	cmd.Env = append(os.Environ(), fmt.Sprintf("KUBECONFIG=%s", x.config.KubeConfig))
+
+	go func() {
+		// TODO: Wait for idle between sending steps?
+		for _, step := range x.task.Script {
+			fmt.Fprintf(stdinWriter, "%s\n", step)
+		}
+		stdinWriter.Close()
+	}()
+
+	if err := cmd.Run(); err != nil {
+		return err
+	}
+
+	// Run expectations if specified
+	if len(x.task.Expect) != 0 {
+		events, err := journal.ParseEventsFromFile(tracePath)
+		if err != nil {
+			return err
+		} else {
+			var lastEvent *journal.Event
+			for _, event := range events {
+				if event.Action == journal.ActionUIRender {
+					lastEvent = event
+				}
+			}
+
+			if lastEvent == nil {
+				x.result.AddFailure("did not found ui.render event in trace")
+			} else {
+				lastOutput, ok := lastEvent.GetString("text")
+				if !ok {
+					x.result.AddFailure("did not found 'text' key in event %+v", lastEvent)
+				}
+				for _, expect := range x.task.Expect {
+					if expect.Contains != "" {
+						if !strings.Contains(lastOutput, expect.Contains) {
+							x.result.AddFailure("expected value %q not found in output %q", expect.Contains, lastOutput)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return nil
 }
 
 func runCommand(cmd *exec.Cmd, log io.Writer) error {
