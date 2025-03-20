@@ -16,6 +16,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -25,6 +26,7 @@ import (
 
 	"github.com/GoogleCloudPlatform/kubectl-ai/k8s-bench/pkg/model"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/journal"
+	"k8s.io/klog/v2"
 	"sigs.k8s.io/yaml"
 )
 
@@ -133,19 +135,22 @@ func loadTasks(config EvalConfig) (map[string]Task, error) {
 }
 
 func evaluateTask(ctx context.Context, config EvalConfig, taskID string, task Task, llmConfig model.LLMConfig, log io.Writer) model.TaskResult {
-
 	result := model.TaskResult{
 		Task:      taskID,
 		LLMConfig: llmConfig,
 	}
 
+	taskOutputDir := filepath.Join(config.OutputDir, taskID, llmConfig.ID)
+
 	x := &TaskExecution{
-		result:    &result,
-		config:    config,
-		llmConfig: llmConfig,
-		log:       log,
-		task:      &task,
-		taskID:    taskID,
+		AgentBin:      config.AgentBin,
+		kubeConfig:    config.KubeConfig,
+		result:        &result,
+		llmConfig:     llmConfig,
+		log:           log,
+		task:          &task,
+		taskID:        taskID,
+		taskOutputDir: taskOutputDir,
 	}
 
 	taskDir := filepath.Join(config.TasksDir, taskID)
@@ -156,19 +161,18 @@ func evaluateTask(ctx context.Context, config EvalConfig, taskID string, task Ta
 		return result
 	}
 	taskDir = taskDirAbs
+	x.taskDir = taskDir
 
-	// Run setup if specified
-	if task.Setup != "" {
-		setupPath := filepath.Join(taskDir, task.Setup)
-		cmd := exec.CommandContext(ctx, setupPath)
-		cmd.Dir = taskDir
-		cmd.Env = append(os.Environ(), fmt.Sprintf("KUBECONFIG=%s", config.KubeConfig))
-
-		if err := runCommand(cmd, log); err != nil {
-			// Unexpected error
-			result.Error = err.Error()
-			return result
+	defer func() {
+		if err := x.runCleanup(ctx); err != nil {
+			fmt.Printf("Warning: cleanup failed for task %s: %v\n", taskID, err)
 		}
+	}()
+
+	if err := x.runSetup(ctx); err != nil {
+		// Unexpected error
+		result.Error = err.Error()
+		return result
 	}
 
 	// Run the agent
@@ -182,10 +186,10 @@ func evaluateTask(ctx context.Context, config EvalConfig, taskID string, task Ta
 	if task.Verifier != "" {
 		verifierPath := filepath.Join(taskDir, task.Verifier)
 		cmd := exec.CommandContext(ctx, verifierPath)
-		cmd.Env = append(os.Environ(), fmt.Sprintf("KUBECONFIG=%s", config.KubeConfig))
+		cmd.Env = append(os.Environ(), fmt.Sprintf("KUBECONFIG=%s", x.kubeConfig))
 		fmt.Printf("\nRunning verifier for task %s\n", taskID)
 
-		err := runCommand(cmd, log)
+		err := x.runCommand(cmd)
 		if err == nil {
 			result.Result = "success"
 		} else if _, ok := err.(*exec.ExitError); ok {
@@ -197,37 +201,113 @@ func evaluateTask(ctx context.Context, config EvalConfig, taskID string, task Ta
 		}
 	}
 
-	// Run cleanup if specified
-	if task.Cleanup != "" {
-		cleanupPath := filepath.Join(taskDir, task.Cleanup)
-		cmd := exec.CommandContext(ctx, cleanupPath)
-		cmd.Dir = taskDir
-		cmd.Env = append(os.Environ(), fmt.Sprintf("KUBECONFIG=%s", config.KubeConfig))
-
-		if err := runCommand(cmd, log); err != nil {
-			fmt.Printf("Warning: cleanup failed for task %s: %v\n", taskID, err)
-		}
-	}
-
 	return result
 }
 
 type TaskExecution struct {
-	config    EvalConfig
+	// kubeConfig is the path to the kubeconfig file we should use.
+	// It will be created in IsolationModeCluster
+	kubeConfig string
+
+	// AgentBin holds the path to the agent to execute
+	AgentBin string
+
 	llmConfig model.LLMConfig
 	result    *model.TaskResult
 	log       io.Writer
 	task      *Task
 	taskID    string
+	taskDir   string
+
+	// taskOutputDir is where we can create artifacts or write logs while executing the task
+	taskOutputDir string
+
+	// cleanupFunctions are a set of cleanupFunctions we run to undo anything we ran
+	cleanupFunctions []func() error
+}
+
+func (x *TaskExecution) runSetup(ctx context.Context) error {
+	log := klog.FromContext(ctx)
+
+	// Create cluster if requested
+	if x.task.Isolation == IsolationModeCluster {
+		kubeconfigPath := filepath.Join(x.taskDir, "kubeconfig.yaml")
+		x.kubeConfig = kubeconfigPath
+
+		clusterName := fmt.Sprintf("k8s-bench-%s", x.taskID)
+		log.Info("creating kind cluster", "name", clusterName)
+
+		args := []string{
+			"kind",
+			"create", "cluster",
+			"--name", clusterName,
+			"--wait", "5m",
+			"--kubeconfig", kubeconfigPath,
+		}
+		cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+		cmd.Dir = x.taskDir
+
+		x.cleanupFunctions = append(x.cleanupFunctions, func() error {
+			args := []string{
+				"kind",
+				"delete", "cluster",
+				"--name", clusterName,
+				"--kubeconfig", kubeconfigPath,
+			}
+			cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+			cmd.Dir = x.taskDir
+			return x.runCommand(cmd)
+		})
+
+		if err := x.runCommand(cmd); err != nil {
+			return err
+		}
+	}
+
+	// Run setup if specified
+	if x.task.Setup != "" {
+		setupPath := filepath.Join(x.taskDir, x.task.Setup)
+		cmd := exec.CommandContext(ctx, setupPath)
+		cmd.Dir = x.taskDir
+		cmd.Env = append(os.Environ(), fmt.Sprintf("KUBECONFIG=%s", x.kubeConfig))
+
+		if err := x.runCommand(cmd); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (x *TaskExecution) runCleanup(ctx context.Context) error {
+	var errs []error
+
+	// Run cleanup if specified
+	if x.task.Cleanup != "" {
+		cleanupPath := filepath.Join(x.taskDir, x.task.Cleanup)
+		cmd := exec.CommandContext(ctx, cleanupPath)
+		cmd.Dir = x.taskDir
+		cmd.Env = append(os.Environ(), fmt.Sprintf("KUBECONFIG=%s", x.kubeConfig))
+
+		if err := x.runCommand(cmd); err != nil {
+			fmt.Printf("Warning: cleanup failed for task %s: %v\n", x.taskID, err)
+		}
+	}
+
+	for _, cleanup := range x.cleanupFunctions {
+		if err := cleanup(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+
+	return errors.Join(errs...)
 }
 
 func (x *TaskExecution) runAgent(ctx context.Context) error {
-	taskOutputDir := filepath.Join(x.config.OutputDir, x.taskID, x.llmConfig.ID)
-
-	tracePath := filepath.Join(taskOutputDir, "trace.yaml")
+	tracePath := filepath.Join(x.taskOutputDir, "trace.yaml")
 
 	args := []string{
-		"--kubeconfig", x.config.KubeConfig,
+		"--kubeconfig", x.kubeConfig,
 		"--llm-provider", x.llmConfig.ProviderID,
 		"--strategy", x.llmConfig.Strategy,
 		"--model", x.llmConfig.ModelID,
@@ -237,7 +317,7 @@ func (x *TaskExecution) runAgent(ctx context.Context) error {
 	stdinReader, stdinWriter := io.Pipe()
 
 	cmd := exec.CommandContext(ctx,
-		x.config.AgentBin,
+		x.AgentBin,
 		args...,
 	)
 	cmd.Stdin = stdinReader
@@ -248,7 +328,7 @@ func (x *TaskExecution) runAgent(ctx context.Context) error {
 		cmd.Stderr = io.MultiWriter(cmd.Stderr, x.log)
 	}
 
-	cmd.Env = append(os.Environ(), fmt.Sprintf("KUBECONFIG=%s", x.config.KubeConfig))
+	cmd.Env = append(os.Environ(), fmt.Sprintf("KUBECONFIG=%s", x.kubeConfig))
 
 	go func() {
 		// TODO: Wait for idle between sending steps?
@@ -296,15 +376,18 @@ func (x *TaskExecution) runAgent(ctx context.Context) error {
 	return nil
 }
 
-func runCommand(cmd *exec.Cmd, log io.Writer) error {
+func (x *TaskExecution) runCommand(cmd *exec.Cmd) error {
 	fmt.Printf("\nRunning command: %s\n", strings.Join(cmd.Args, " "))
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	if log != nil {
-		cmd.Stdout = io.MultiWriter(cmd.Stdout, log)
-		cmd.Stderr = io.MultiWriter(cmd.Stderr, log)
+	if x.log != nil {
+		cmd.Stdout = io.MultiWriter(cmd.Stdout, x.log)
+		cmd.Stderr = io.MultiWriter(cmd.Stderr, x.log)
 	}
-	return cmd.Run()
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("running command %v: %w", strings.Join(cmd.Args, " "), err)
+	}
+	return nil
 }
 
 func printResults(allResults []model.TaskResult) {

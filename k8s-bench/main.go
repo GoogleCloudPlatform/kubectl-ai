@@ -39,7 +39,18 @@ type Task struct {
 	Expect []Expectation `json:"expect,omitempty"`
 
 	Script []ScriptStep `json:"script,omitempty"`
+
+	// Isolation can be set to automatically create an isolated cluster
+	// TODO: support namespaces also
+	Isolation IsolationMode `json:"isolation,omitempty"`
 }
+
+type IsolationMode string
+
+const (
+	// IsolationModeCluster will create a cluster for the task evaluation.
+	IsolationModeCluster IsolationMode = "cluster"
+)
 
 type ScriptStep struct {
 	Prompt string `json:"prompt"`
