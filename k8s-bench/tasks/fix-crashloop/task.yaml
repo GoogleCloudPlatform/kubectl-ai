@@ -1,4 +1,5 @@
-goal: "Please fix the error in the deployment named 'app' in namespace 'crashloop-test'"
+script:
+- prompt: "Please fix the error in the deployment named 'app' in namespace 'crashloop-test'"
 setup: "setup.sh"
 verifier: "verify.sh"
 cleanup: "cleanup.sh"

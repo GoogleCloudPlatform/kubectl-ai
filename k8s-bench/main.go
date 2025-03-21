@@ -30,7 +30,6 @@ import (
 )
 
 type Task struct {
-	Goal       string `json:"goal"`
 	Setup      string `json:"setup,omitempty"`
 	Verifier   string `json:"verifier,omitempty"`
 	Cleanup    string `json:"cleanup,omitempty"`
@@ -38,6 +37,23 @@ type Task struct {
 	Disabled   bool   `json:"disabled,omitempty"`
 
 	Expect []Expectation `json:"expect,omitempty"`
+
+	Script []ScriptStep `json:"script,omitempty"`
+
+	// Isolation can be set to automatically create an isolated cluster
+	// TODO: support namespaces also
+	Isolation IsolationMode `json:"isolation,omitempty"`
+}
+
+type IsolationMode string
+
+const (
+	// IsolationModeCluster will create a cluster for the task evaluation.
+	IsolationModeCluster IsolationMode = "cluster"
+)
+
+type ScriptStep struct {
+	Prompt string `json:"prompt"`
 }
 
 type Expectation struct {
