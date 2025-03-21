@@ -30,7 +30,6 @@ import (
 )
 
 type Task struct {
-	Goal       string `json:"goal"`
 	Setup      string `json:"setup,omitempty"`
 	Verifier   string `json:"verifier,omitempty"`
 	Cleanup    string `json:"cleanup,omitempty"`
@@ -38,6 +37,12 @@ type Task struct {
 	Disabled   bool   `json:"disabled,omitempty"`
 
 	Expect []Expectation `json:"expect,omitempty"`
+
+	Script []ScriptStep `json:"script,omitempty"`
+}
+
+type ScriptStep struct {
+	Prompt string `json:"prompt"`
 }
 
 type Expectation struct {
