@@ -69,10 +69,10 @@ Possible values:
 	}
 }
 
-func (t *Kubectl) Run(ctx context.Context, args map[string]any) (any, error) {
-	kubeconfig := ctx.Value("kubeconfig").(string)
-	workDir := ctx.Value("work_dir").(string)
-	command := args["command"].(string)
+func (t *Kubectl) Run(ctx context.Context, opts *ExecutionOptions) (any, error) {
+	kubeconfig := opts.Kubeconfig
+	workDir := opts.WorkDir
+	command := opts.FunctionArguments["command"].(string)
 
 	return runKubectlCommand(ctx, command, workDir, kubeconfig)
 }

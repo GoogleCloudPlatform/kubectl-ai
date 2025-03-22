@@ -133,10 +133,11 @@ func (t *ToolCall) InvokeTool(ctx context.Context, opt InvokeToolOptions) (any, 
 		},
 	})
 
-	ctx = context.WithValue(ctx, "kubeconfig", opt.Kubeconfig)
-	ctx = context.WithValue(ctx, "work_dir", opt.WorkDir)
-
-	response, err := t.tool.Run(ctx, t.arguments)
+	response, err := t.tool.Run(ctx, &ExecutionOptions{
+		WorkDir:           opt.WorkDir,
+		Kubeconfig:        opt.Kubeconfig,
+		FunctionArguments: t.arguments,
+	})
 
 	{
 		ev := ToolResponseEvent{

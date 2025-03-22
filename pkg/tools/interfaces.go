@@ -34,5 +34,16 @@ type Tool interface {
 	FunctionDefinition() *gollm.FunctionDefinition
 
 	// Run invokes the tool, the agent calls this when the LLM requests tool invocation.
-	Run(ctx context.Context, args map[string]any) (any, error)
+	Run(ctx context.Context, execution *ExecutionOptions) (any, error)
+}
+
+type ExecutionOptions struct {
+	// FunctionArguments are the arguments to be passed to the tool from the LLM.
+	FunctionArguments map[string]any
+
+	// WorkDir is the working directory for the tool.
+	WorkDir string
+
+	// Kubeconfig is the path to the kubeconfig file to be used by the tool.
+	Kubeconfig string
 }

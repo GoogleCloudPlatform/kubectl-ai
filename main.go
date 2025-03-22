@@ -98,18 +98,32 @@ func (o *Options) LoadConfiguration(b []byte) error {
 	return nil
 }
 
-func run(ctx context.Context) error {
-	// Command line flags
-	var opt Options
-	opt.InitDefaults()
+func (o *Options) LoadConfigurationFile() error {
+	configPaths := []string{
+		"{CONFIG}/kubectl-ai/config.yaml",
+		"{HOME}/.config/kubectl-ai/config.yaml",
+	}
 
-	{
+	for _, configPath := range configPaths {
 		// Try to load configuration
-		configDir, err := os.UserConfigDir()
-		if err != nil {
-			return fmt.Errorf("getting user config directory: %w", err)
+		tokens := strings.Split(configPath, "/")
+		for i, token := range tokens {
+			if token == "{CONFIG}" {
+				configDir, err := os.UserConfigDir()
+				if err != nil {
+					return fmt.Errorf("getting user config directory: %w", err)
+				}
+				tokens[i] = configDir
+			}
+			if token == "{HOME}" {
+				homeDir, err := os.UserHomeDir()
+				if err != nil {
+					return fmt.Errorf("getting user home directory: %w", err)
+				}
+				tokens[i] = homeDir
+			}
 		}
-		configPath := filepath.Join(configDir, "kubectl-ai", "config.yaml")
+		configPath = filepath.Join(tokens...)
 		configBytes, err := os.ReadFile(configPath)
 		if err != nil {
 			if os.IsNotExist(err) {
@@ -118,9 +132,23 @@ func run(ctx context.Context) error {
 				fmt.Fprintf(os.Stderr, "warning: could not load defaults from %q: %v\n", configPath, err)
 			}
 		}
-		if err := opt.LoadConfiguration(configBytes); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: error loading configuration from %q: %v\n", configPath, err)
+		if len(configBytes) > 0 {
+			if err := o.LoadConfiguration(configBytes); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: error loading configuration from %q: %v\n", configPath, err)
+			}
 		}
+	}
+
+	return nil
+}
+
+func run(ctx context.Context) error {
+	// Command line flags
+	var opt Options
+	opt.InitDefaults()
+
+	if err := opt.LoadConfigurationFile(); err != nil {
+		return fmt.Errorf("loading configuration file: %w", err)
 	}
 
 	maxIterations := flag.Int("max-iterations", 20, "maximum number of iterations agent will try before giving up")
@@ -418,9 +446,6 @@ func (s *kubectlMCPServer) handleToolCall(ctx context.Context, request mcp.CallT
 	modifiesResource := request.Params.Arguments["modifies_resource"].(string)
 	log.Info("Received tool call", "tool", name, "command", command, "modifies_resource", modifiesResource)
 
-	ctx = context.WithValue(ctx, "kubeconfig", s.kubectlConfig)
-	ctx = context.WithValue(ctx, "work_dir", s.workDir)
-
 	tool := tools.Lookup(name)
 	if tool == nil {
 		return &mcp.CallToolResult{
@@ -432,9 +457,15 @@ func (s *kubectlMCPServer) handleToolCall(ctx context.Context, request mcp.CallT
 			},
 		}, nil
 	}
-	output, err := tool.Run(ctx, map[string]any{
-		"command": command,
-	})
+
+	opt := &tools.ExecutionOptions{
+		FunctionArguments: map[string]any{
+			"command": command,
+		},
+		WorkDir:    s.workDir,
+		Kubeconfig: s.kubectlConfig,
+	}
+	output, err := tool.Run(ctx, opt)
 	if err != nil {
 		log.Error(err, "Error running tool call")
 		return &mcp.CallToolResult{
