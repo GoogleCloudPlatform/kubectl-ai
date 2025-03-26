@@ -259,7 +259,9 @@ func run(ctx context.Context) error {
 		defer recorder.Close()
 	}
 
-	u, err := ui.NewTerminalUI(recorder)
+	doc := ui.NewDocument()
+
+	u, err := ui.NewTerminalUI(doc, recorder)
 	if err != nil {
 		return err
 	}
@@ -277,7 +279,7 @@ func run(ctx context.Context) error {
 		EnableToolUseShim:   opt.EnableToolUseShim,
 	}
 
-	err = conversation.Init(ctx, u)
+	err = conversation.Init(ctx, doc)
 	if err != nil {
 		return fmt.Errorf("starting conversation: %w", err)
 	}
@@ -285,6 +287,7 @@ func run(ctx context.Context) error {
 
 	chatSession := session{
 		model:        opt.ModelID,
+		doc:          doc,
 		ui:           u,
 		conversation: conversation,
 		LLM:          llmClient,
@@ -302,7 +305,8 @@ func run(ctx context.Context) error {
 // session represents the user chat session (interactive/non-interactive both)
 type session struct {
 	model           string
-	ui              *ui.TerminalUI
+	ui              ui.UI
+	doc             *ui.Document
 	conversation    *agent.Conversation
 	availableModels []string
 	LLM             gollm.Client
@@ -310,11 +314,11 @@ type session struct {
 
 // repl is a read-eval-print loop for the chat session.
 func (s *session) repl(ctx context.Context) error {
-	s.ui.RenderOutput(ctx, "Hey there, what can I help you with today?\n", ui.Foreground(ui.ColorRed))
+	s.doc.AddAgentTextBlock().SetText("Hey there, what can I help you with today?")
+
 	for {
-		s.ui.RenderOutput(ctx, "\n>> ")
-		reader := bufio.NewReader(os.Stdin)
-		query, err := reader.ReadString('\n')
+		input := s.doc.AddInputTextBlock()
+		query, err := input.Observable().Wait()
 		if err != nil {
 			if err == io.EOF {
 				// Use hit control-D, or was piping and we reached the end of stdin.
@@ -329,18 +333,19 @@ func (s *session) repl(ctx context.Context) error {
 		case query == "":
 			continue
 		case query == "reset":
-			err = s.conversation.Init(ctx, s.ui)
+			err = s.conversation.Init(ctx, s.doc)
 			if err != nil {
 				return err
 			}
 		case query == "clear":
 			s.ui.ClearScreen()
 		case query == "exit" || query == "quit":
-			s.ui.RenderOutput(ctx, "Allright...bye.\n")
+			// s.ui.RenderOutput(ctx, "Allright...bye.\n")
 			return nil
 		default:
 			if err := s.answerQuery(ctx, query); err != nil {
-				s.ui.RenderOutput(ctx, fmt.Sprintf("Error: %v\n", err), ui.Foreground(ui.ColorRed))
+				errorBlock := s.doc.AddErrorBlock()
+				errorBlock.SetText(fmt.Sprintf("Error: %v\n", err))
 			}
 		}
 	}
@@ -360,16 +365,19 @@ func (s *session) listModels(ctx context.Context) ([]string, error) {
 func (s *session) answerQuery(ctx context.Context, query string) error {
 	switch {
 	case query == "model":
-		s.ui.RenderOutput(ctx, fmt.Sprintf("Current model is `%s`\n", s.model), ui.RenderMarkdown())
+		infoBlock := s.doc.AddAgentTextBlock()
+		infoBlock.AppendText(fmt.Sprintf("Current model is `%s`\n", s.model))
 	case query == "version":
-		s.ui.RenderOutput(ctx, fmt.Sprintf("Client version: `%s`\n", Version), ui.RenderMarkdown())
+		infoBlock := s.doc.AddAgentTextBlock()
+		infoBlock.AppendText(fmt.Sprintf("Client version: `%s`\n", Version))
 	case query == "models":
 		models, err := s.listModels(ctx)
 		if err != nil {
 			return fmt.Errorf("listing models: %w", err)
 		}
-		s.ui.RenderOutput(ctx, "\n  Available models:\n", ui.Foreground(ui.ColorGreen))
-		s.ui.RenderOutput(ctx, strings.Join(models, "\n"), ui.RenderMarkdown())
+		infoBlock := s.doc.AddAgentTextBlock()
+		infoBlock.AppendText("\n  Available models:\n")
+		infoBlock.AppendText(strings.Join(models, "\n"))
 	default:
 		return s.conversation.RunOneRound(ctx, query)
 	}
