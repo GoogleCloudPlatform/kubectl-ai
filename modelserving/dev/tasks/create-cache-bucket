@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+
+set -o errexit
+set -o nounset
+set -o pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+SRC_DIR=${REPO_ROOT}/modelserving
+cd "${SRC_DIR}"
+
+
+if [[ -z "${GCP_PROJECT_ID:-}" ]]; then
+  GCP_PROJECT_ID=$(gcloud config get project)
+fi
+echo "Using GCP_PROJECT_ID=${GCP_PROJECT_ID}"
+
+if [[ -z "${KUBE_NAMESPACE:-}" ]]; then
+  KUBE_NAMESPACE=llamacpp
+fi
+echo "Using KUBE_NAMESPACE=${KUBE_NAMESPACE}"
+
+KUBE_SERVICE_ACCOUNT=blobserver
+
+if [[ -z "${CACHE_BUCKET:-}" ]]; then
+  CACHE_BUCKET="gs://${GCP_PROJECT_ID}-blobs"
+fi
+echo "Using CACHE_BUCKET=${CACHE_BUCKET}"
+
+echo "Checking for bucket ${CACHE_BUCKET}"
+if ! gcloud storage buckets describe ${CACHE_BUCKET}; then
+  echo "Creating bucket ${CACHE_BUCKET}"
+  gcloud storage buckets create ${CACHE_BUCKET} --uniform-bucket-level-access
+else
+  echo "Bucket ${CACHE_BUCKET} exists"
+fi
+
+PROJECT_NUMBER=$(gcloud projects describe ${GCP_PROJECT_ID} --format 'value(projectNumber)')
+
+
+MEMBER="principal://iam.googleapis.com/projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${GCP_PROJECT_ID}.svc.id.goog/subject/ns/${KUBE_NAMESPACE}/sa/${KUBE_SERVICE_ACCOUNT}"
+
+echo "Granting roles/storage.objectAdmin to ${MEMBER} on ${CACHE_BUCKET}"
+gcloud storage buckets add-iam-policy-binding ${CACHE_BUCKET} \
+    --role=roles/storage.objectAdmin \
+    --member=${MEMBER}

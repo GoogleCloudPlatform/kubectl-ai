@@ -37,20 +37,26 @@ if [[ -z "${BUILDX_ARGS:-}" ]]; then
   BUILDX_ARGS="--load"
 fi
 
-dev/tasks/download-model
+# dev/tasks/download-model
+
+docker buildx build ${BUILDX_ARGS} \
+  -f images/blobserver/Dockerfile \
+  -t ${IMAGE_PREFIX}blobserver:${TAG} \
+  --progress=plain .
+
 
 # Note we do not push or load the "base" llama-server images (we do not pass BUILDX_ARGS)
 # This is because these are intermediate images
-if build_for_architecture cpu; then
-  docker buildx build \
-    -f images/llamacpp-server/Dockerfile \
-    --target llamacpp-server \
-    -t llamacpp-server-cpu:${TAG} \
-    --build-arg BASE_IMAGE=debian:latest \
-    --build-arg BUILDER_IMAGE=debian:latest \
-    --build-arg "CMAKE_ARGS=-DGGML_RPC=ON" \
-    --progress=plain .
-fi
+
+# We always build the base for cpu, because this can be used as the frontend.
+docker buildx build \
+  -f images/llamacpp-server/Dockerfile \
+  --target llamacpp-server \
+  -t llamacpp-server-cpu:${TAG} \
+  --build-arg BASE_IMAGE=debian:latest \
+  --build-arg BUILDER_IMAGE=debian:latest \
+  --build-arg "CMAKE_ARGS=-DGGML_RPC=ON" \
+  --progress=plain .
 
 # if build_for_architecture cuda; then
 #   # -DCMAKE_EXE_LINKER_FLAGS=-Wl,--allow-shlib-undefined allows us to build in a container without all the CUDA libraries present
@@ -66,13 +72,13 @@ fi
 #     --progress=plain .
 # fi
 
-if build_for_architecture cpu; then
-  docker buildx build ${BUILDX_ARGS} \
-    -f images/llamacpp-gemma3-12b-it/Dockerfile \
-    -t ${IMAGE_PREFIX}llamacpp-gemma3-12b-it-cpu:${TAG} \
-    --build-arg BASE_IMAGE=llamacpp-server-cpu:${TAG} \
-    --progress=plain .
-fi
+# if build_for_architecture cpu; then
+#   docker buildx build ${BUILDX_ARGS} \
+#     -f images/llamacpp-gemma3-12b-it/Dockerfile \
+#     -t ${IMAGE_PREFIX}llamacpp-gemma3-12b-it-cpu:${TAG} \
+#     --build-arg BASE_IMAGE=llamacpp-server-cpu:${TAG} \
+#     --progress=plain .
+# fi
 
 # if build_for_architecture cuda; then
 #   docker buildx build ${BUILDX_ARGS} \
@@ -106,3 +112,9 @@ if build_for_architecture cuda; then
     --build-arg "CMAKE_ARGS=-DGGML_RPC=ON -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=all -DCMAKE_EXE_LINKER_FLAGS=-Wl,--allow-shlib-undefined" \
     --progress=plain .
 fi
+
+docker buildx build ${BUILDX_ARGS} \
+  -f images/llamacpp-frontend/Dockerfile \
+  -t ${IMAGE_PREFIX}llamacpp-frontend:${TAG} \
+  --build-arg BASE_IMAGE=llamacpp-server-cpu:${TAG} \
+  --progress=plain .
