@@ -267,6 +267,10 @@ func (c *LlamaCppChat) Send(ctx context.Context, contents ...any) (ChatResponse,
 	return llmacppResponse, nil
 }
 
+func (c *LlamaCppChat) SendStreaming(ctx context.Context, contents ...any) (ChatResponseIterator, error) {
+	return nil, fmt.Errorf("LlamaCppChat::SendStreaming not yet implemented")
+}
+
 func ptrTo[T any](t T) *T {
 	return &t
 }

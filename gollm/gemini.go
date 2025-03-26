@@ -280,6 +280,10 @@ func (c *GeminiChat) Send(ctx context.Context, contents ...any) (ChatResponse, e
 	return &GeminiChatResponse{geminiResponse: geminiResponse}, nil
 }
 
+func (c *GeminiChat) SendStreaming(ctx context.Context, contents ...any) (ChatResponseIterator, error) {
+	return nil, fmt.Errorf("GeminiChat::SendStreaming not yet implemented")
+}
+
 // GeminiChatResponse is a response from the Gemini API.
 // It implements the ChatResponse interface.
 type GeminiChatResponse struct {

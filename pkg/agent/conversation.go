@@ -139,99 +139,110 @@ func (a *Conversation) RunOneRound(ctx context.Context, query string) error {
 			Payload:   []any{currChatContent},
 		})
 
-		response, err := a.llmChat.Send(ctx, currChatContent...)
+		stream, err := a.llmChat.SendStreaming(ctx, currChatContent...)
 		if err != nil {
 			log.Error(err, "Error sending initial message")
 			return err
 		}
 
-		a.Recorder.Write(ctx, &journal.Event{
-			Timestamp: time.Now(),
-			Action:    "llm-response",
-			Payload:   response,
-		})
-
 		currChatContent = nil
-
-		if len(response.Candidates()) == 0 {
-			log.Error(nil, "No candidates in response")
-			return fmt.Errorf("no candidates in LLM response")
-		}
-
-		candidate := response.Candidates()[0]
-
-		if a.EnableToolUseShim {
-			// convert the candidate response into a gollm.ChatResponse
-			candidate, err = candidateToShimCandidate(candidate)
-			if err != nil {
-				log.Error(err, "Failed to convert candidate to shim candidate")
-				return err
-			}
-		}
 
 		// Process each part of the response
 		// only applicable is not using tooluse shim
 		var functionCalls []gollm.FunctionCall
 
-		for _, part := range candidate.Parts() {
-			// Check if it's a text response
-			if text, ok := part.AsText(); ok {
-				log.Info("text response", "text", text)
-				textResponse := text
-				// If we have a text response, render it
-				if textResponse != "" {
-					a.UI.RenderOutput(ctx, textResponse, ui.RenderMarkdown())
+		for {
+			response, err := stream.Next()
+			if err != nil {
+				return fmt.Errorf("reading streaming LLM response: %w", err)
+			}
+			if response == nil {
+				// end of streaming response
+				break
+			}
+			klog.Infof("response: %+v", response)
+			a.Recorder.Write(ctx, &journal.Event{
+				Timestamp: time.Now(),
+				Action:    "llm-response",
+				Payload:   response,
+			})
+
+			if len(response.Candidates()) == 0 {
+				log.Error(nil, "No candidates in response")
+				return fmt.Errorf("no candidates in LLM response")
+			}
+
+			candidate := response.Candidates()[0]
+
+			if a.EnableToolUseShim {
+				// convert the candidate response into a gollm.ChatResponse
+				candidate, err = candidateToShimCandidate(candidate)
+				if err != nil {
+					log.Error(err, "Failed to convert candidate to shim candidate")
+					return err
 				}
 			}
 
-			// Check if it's a function call
-			if calls, ok := part.AsFunctionCalls(); ok && len(calls) > 0 {
-				log.Info("function calls", "calls", calls)
-				functionCalls = append(functionCalls, calls...)
-
-				// TODO(droot): Run all function calls in parallel
-				// (may have to specify in the prompt to make these function calls independent)
-				for _, call := range calls {
-					toolCall, err := a.Tools.ParseToolInvocation(ctx, call.Name, call.Arguments)
-					if err != nil {
-						return fmt.Errorf("building tool call: %w", err)
-					}
-
-					s := toolCall.PrettyPrint()
-					a.UI.RenderOutput(ctx, fmt.Sprintf("  Running: %s\n", s), ui.Foreground(ui.ColorGreen))
-					if a.AsksForConfirmation && call.Arguments["modifies_resource"] == "no" {
-						confirm := a.UI.AskForConfirmation(ctx, "  Are you sure you want to run this command (Y/n)? ")
-						if !confirm {
-							a.UI.RenderOutput(ctx, "Sure.\n", ui.RenderMarkdown())
-							return nil
-						}
-					}
-
-					ctx := journal.ContextWithRecorder(ctx, a.Recorder)
-					output, err := toolCall.InvokeTool(ctx, tools.InvokeToolOptions{
-						WorkDir: a.workDir,
-					})
-					if err != nil {
-						return fmt.Errorf("executing action: %w", err)
-					}
-
-					if a.EnableToolUseShim {
-						observation := fmt.Sprintf("Result of running %q:\n%s", call.Name, output)
-						currChatContent = append(currChatContent, observation)
-					} else {
-						result, err := toResult(output)
-						if err != nil {
-							return err
-						}
-
-						currChatContent = append(currChatContent, gollm.FunctionCallResult{
-							ID:     call.ID,
-							Name:   call.Name,
-							Result: result,
-						})
+			for _, part := range candidate.Parts() {
+				// Check if it's a text response
+				if text, ok := part.AsText(); ok {
+					log.Info("text response", "text", text)
+					textResponse := text
+					// If we have a text response, render it
+					if textResponse != "" {
+						a.UI.RenderOutput(ctx, textResponse, ui.RenderMarkdown())
 					}
 				}
 
+				// Check if it's a function call
+				if calls, ok := part.AsFunctionCalls(); ok && len(calls) > 0 {
+					log.Info("function calls", "calls", calls)
+					functionCalls = append(functionCalls, calls...)
+
+					// TODO(droot): Run all function calls in parallel
+					// (may have to specify in the prompt to make these function calls independent)
+					for _, call := range calls {
+						toolCall, err := a.Tools.ParseToolInvocation(ctx, call.Name, call.Arguments)
+						if err != nil {
+							return fmt.Errorf("building tool call: %w", err)
+						}
+
+						s := toolCall.PrettyPrint()
+						a.UI.RenderOutput(ctx, fmt.Sprintf("  Running: %s\n", s), ui.Foreground(ui.ColorGreen))
+						if a.AsksForConfirmation && call.Arguments["modifies_resource"] == "no" {
+							confirm := a.UI.AskForConfirmation(ctx, "  Are you sure you want to run this command (Y/n)? ")
+							if !confirm {
+								a.UI.RenderOutput(ctx, "Sure.\n", ui.RenderMarkdown())
+								return nil
+							}
+						}
+
+						ctx := journal.ContextWithRecorder(ctx, a.Recorder)
+						output, err := toolCall.InvokeTool(ctx, tools.InvokeToolOptions{
+							WorkDir: a.workDir,
+						})
+						if err != nil {
+							return fmt.Errorf("executing action: %w", err)
+						}
+
+						if a.EnableToolUseShim {
+							observation := fmt.Sprintf("Result of running %q:\n%s", call.Name, output)
+							currChatContent = append(currChatContent, observation)
+						} else {
+							result, err := toResult(output)
+							if err != nil {
+								return err
+							}
+
+							currChatContent = append(currChatContent, gollm.FunctionCallResult{
+								ID:     call.ID,
+								Name:   call.Name,
+								Result: result,
+							})
+						}
+					}
+
+				}
 			}
 		}
 

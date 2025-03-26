@@ -24,6 +24,7 @@ import (
 
 	"cloud.google.com/go/vertexai/genai"
 	"golang.org/x/oauth2/google"
+	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 	"k8s.io/klog/v2"
 )
@@ -284,6 +285,49 @@ func (c *VertexAIChat) Send(ctx context.Context, contents ...any) (ChatResponse,
 	vertexaiResponse, err := c.chat.SendMessage(ctx, vertexaiParts...)
 	if err != nil {
 		return nil, err
+	}
+	return &VertexAIChatResponse{vertexaiResponse: vertexaiResponse}, nil
+}
+
+func (c *VertexAIChat) SendStreaming(ctx context.Context, contents ...any) (ChatResponseIterator, error) {
+	log := klog.FromContext(ctx)
+	log.Info("sending LLM request", "user", contents)
+
+	var vertexaiParts []genai.Part
+	for _, content := range contents {
+		switch v := content.(type) {
+		case string:
+			vertexaiParts = append(vertexaiParts, genai.Text(v))
+		case FunctionCallResult:
+			vertexaiParts = append(vertexaiParts, genai.FunctionResponse{
+				Name:     v.Name,
+				Response: v.Result,
+			})
+		default:
+			return nil, fmt.Errorf("unexpected type of content: %T", content)
+		}
+	}
+	it := c.chat.SendMessageStream(ctx, vertexaiParts...)
+	return &VertexAIChatResponseIterator{iterator: it}, nil
+}
+
+// VertexAIChatResponseIterator is a streaming chat response from the vertex API.
+type VertexAIChatResponseIterator struct {
+	iterator *genai.GenerateContentResponseIterator
+}
+
+var _ ChatResponseIterator = &VertexAIChatResponseIterator{}
+
+func (r *VertexAIChatResponseIterator) Next() (ChatResponse, error) {
+	vertexaiResponse, err := r.iterator.Next()
+	if err == iterator.Done {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if vertexaiResponse == nil {
+		return nil, nil
 	}
 	return &VertexAIChatResponse{vertexaiResponse: vertexaiResponse}, nil
 }

@@ -186,6 +186,10 @@ func (c *OllamaChat) Send(ctx context.Context, contents ...any) (ChatResponse, e
 	return ollamaResponse, nil
 }
 
+func (c *OllamaChat) SendStreaming(ctx context.Context, contents ...any) (ChatResponseIterator, error) {
+	return nil, fmt.Errorf("OllamaChat::SendStreaming not yet implemented")
+}
+
 type OllamaChatResponse struct {
 	candidates     []*OllamaCandidate
 	ollamaResponse api.ChatResponse
