@@ -19,9 +19,9 @@ type UI interface {
 	ClearScreen()
 }
 
-type style struct {
-	foreground     ColorValue
-	renderMarkdown bool
+type ComputedStyle struct {
+	Foreground     ColorValue
+	RenderMarkdown bool
 }
 
 type ColorValue string
@@ -32,16 +32,16 @@ const (
 	ColorRed              = "red"
 )
 
-type StyleOption func(s *style)
+type StyleOption func(s *ComputedStyle)
 
 func Foreground(color ColorValue) StyleOption {
-	return func(s *style) {
-		s.foreground = color
+	return func(s *ComputedStyle) {
+		s.Foreground = color
 	}
 }
 
 func RenderMarkdown() StyleOption {
-	return func(s *style) {
-		s.renderMarkdown = true
+	return func(s *ComputedStyle) {
+		s.RenderMarkdown = true
 	}
 }

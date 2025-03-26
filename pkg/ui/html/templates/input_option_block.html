@@ -1,0 +1,5 @@
+<div>
+   {{ range $option := .Options}}
+       <button hx-post="/choose-option"  hx-trigger="click" name="option" value="{{ $option }}">{{ $option }}</button>
+   {{ end }}
+</div>

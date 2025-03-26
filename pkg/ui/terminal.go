@@ -16,7 +16,6 @@ package ui
 
 import (
 	"bufio"
-	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -143,12 +142,12 @@ func (u *TerminalUI) DocumentChanged(doc *Document, block Block) {
 		return
 	}
 
-	computedStyle := &style{}
+	computedStyle := &ComputedStyle{}
 	for _, opt := range styleOptions {
 		opt(computedStyle)
 	}
 
-	if streaming && computedStyle.renderMarkdown {
+	if streaming && computedStyle.RenderMarkdown {
 		// Because we can't render markdown incrementally,
 		// we "hold back" the text if we are streaming markdown until streaming is done
 		text = ""
@@ -156,7 +155,7 @@ func (u *TerminalUI) DocumentChanged(doc *Document, block Block) {
 
 	printText := text
 
-	if computedStyle.renderMarkdown && printText != "" {
+	if computedStyle.RenderMarkdown && printText != "" {
 		out, err := u.markdownRenderer.Render(printText)
 		if err != nil {
 			klog.Errorf("Error rendering markdown: %v", err)
@@ -175,7 +174,7 @@ func (u *TerminalUI) DocumentChanged(doc *Document, block Block) {
 	u.currentBlockText = text
 
 	reset := ""
-	switch computedStyle.foreground {
+	switch computedStyle.Foreground {
 	case ColorRed:
 		fmt.Printf("\033[31m")
 		reset += "\033[0m"
@@ -188,53 +187,10 @@ func (u *TerminalUI) DocumentChanged(doc *Document, block Block) {
 
 	case "":
 	default:
-		klog.Info("foreground color not supported by TerminalUI", "color", computedStyle.foreground)
+		klog.Info("foreground color not supported by TerminalUI", "color", computedStyle.Foreground)
 	}
 
 	fmt.Printf("%s%s", printText, reset)
-}
-
-func (u *TerminalUI) RenderOutput(ctx context.Context, s string, styleOptions ...StyleOption) {
-	log := klog.FromContext(ctx)
-
-	u.journal.Write(ctx, &journal.Event{
-		Action: journal.ActionUIRender,
-		Payload: map[string]any{
-			"text": s,
-		},
-	})
-
-	computedStyle := &style{}
-	for _, opt := range styleOptions {
-		opt(computedStyle)
-	}
-
-	if computedStyle.renderMarkdown {
-		out, err := u.markdownRenderer.Render(s)
-		if err != nil {
-			log.Error(err, "Error rendering markdown")
-		}
-		s = out
-	}
-
-	reset := ""
-	switch computedStyle.foreground {
-	case ColorRed:
-		fmt.Printf("\033[31m")
-		reset += "\033[0m"
-	case ColorGreen:
-		fmt.Printf("\033[32m")
-		reset += "\033[0m"
-	case ColorWhite:
-		fmt.Printf("\033[37m")
-		reset += "\033[0m"
-
-	case "":
-	default:
-		log.Info("foreground color not supported by TerminalUI", "color", computedStyle.foreground)
-	}
-
-	fmt.Printf("%s%s", s, reset)
 }
 
 func (u *TerminalUI) ClearScreen() {
