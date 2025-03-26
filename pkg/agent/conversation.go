@@ -55,13 +55,14 @@ type Conversation struct {
 	// Recorder captures events for diagnostics
 	Recorder journal.Recorder
 
-	UI      ui.UI
+	doc *ui.Document
+	// UI      ui.UI
 	llmChat gollm.Chat
 
 	workDir string
 }
 
-func (s *Conversation) Init(ctx context.Context, u ui.UI) error {
+func (s *Conversation) Init(ctx context.Context, doc *ui.Document) error {
 	log := klog.FromContext(ctx)
 
 	// Create a temporary working directory
@@ -99,7 +100,7 @@ func (s *Conversation) Init(ctx context.Context, u ui.UI) error {
 	}
 	s.llmChat = llmChat
 	s.workDir = workDir
-	s.UI = u
+	s.doc = doc
 
 	return nil
 }
@@ -147,9 +148,20 @@ func (a *Conversation) RunOneRound(ctx context.Context, query string) error {
 
 		currChatContent = nil
 
+		if a.EnableToolUseShim {
+			// convert the candidate response into a gollm.ChatResponse
+			stream, err = candidateToShimCandidate(stream)
+			if err != nil {
+				log.Error(err, "Failed to convert candidate to shim candidate")
+				return err
+			}
+		}
+
 		// Process each part of the response
 		// only applicable is not using tooluse shim
 		var functionCalls []gollm.FunctionCall
+
+		var agentTextBlock *ui.AgentTextBlock
 
 		for {
 			response, err := stream.Next()
@@ -174,23 +186,18 @@ func (a *Conversation) RunOneRound(ctx context.Context, query string) error {
 
 			candidate := response.Candidates()[0]
 
-			if a.EnableToolUseShim {
-				// convert the candidate response into a gollm.ChatResponse
-				candidate, err = candidateToShimCandidate(candidate)
-				if err != nil {
-					log.Error(err, "Failed to convert candidate to shim candidate")
-					return err
-				}
-			}
-
 			for _, part := range candidate.Parts() {
 				// Check if it's a text response
 				if text, ok := part.AsText(); ok {
+
 					log.Info("text response", "text", text)
 					textResponse := text
 					// If we have a text response, render it
 					if textResponse != "" {
-						a.UI.RenderOutput(ctx, textResponse, ui.RenderMarkdown())
+						if agentTextBlock == nil {
+							agentTextBlock = a.doc.AddAgentTextBlock()
+						}
+						agentTextBlock.AppendText(textResponse)
 					}
 				}
 
@@ -208,13 +215,16 @@ func (a *Conversation) RunOneRound(ctx context.Context, query string) error {
 						}
 
 						s := toolCall.PrettyPrint()
-						a.UI.RenderOutput(ctx, fmt.Sprintf("  Running: %s\n", s), ui.Foreground(ui.ColorGreen))
+						agentTextBlock = nil
+						functionCallRequest := a.doc.AddFunctionCallRequestBlock()
+						functionCallRequest.SetText(fmt.Sprintf("  Running: %s\n", s))
 						if a.AsksForConfirmation && call.Arguments["modifies_resource"] == "no" {
-							confirm := a.UI.AskForConfirmation(ctx, "  Are you sure you want to run this command (Y/n)? ")
-							if !confirm {
-								a.UI.RenderOutput(ctx, "Sure.\n", ui.RenderMarkdown())
-								return nil
-							}
+							// confirm := a.UI.AskForConfirmation(ctx, "  Are you sure you want to run this command (Y/n)? ")
+							// if !confirm {
+							// 	a.UI.RenderOutput(ctx, "Sure.\n", ui.RenderMarkdown())
+							// 	return nil
+							// }
+							klog.Fatalf("AsksForConfirmation not implemented")
 						}
 
 						ctx := journal.ContextWithRecorder(ctx, a.Recorder)
@@ -256,7 +266,8 @@ func (a *Conversation) RunOneRound(ctx context.Context, query string) error {
 
 	// If we've reached the maximum number of iterations
 	log.Info("Max iterations reached", "iterations", maxIterations)
-	a.UI.RenderOutput(ctx, fmt.Sprintf("\nSorry, couldn't complete the task after %d iterations.\n", maxIterations), ui.Foreground(ui.ColorRed))
+	errorBlock := a.doc.AddErrorBlock()
+	errorBlock.SetText("Sorry, couldn't complete the task after " + fmt.Sprint(maxIterations) + " iterations.")
 	return fmt.Errorf("max iterations reached")
 }
 
@@ -337,20 +348,28 @@ type Action struct {
 	ModifiesResource string `json:"modifies_resource"`
 }
 
+func extractJSON(s string) (string, bool) {
+	const jsonBlockMarker = "```json"
+
+	first := strings.Index(s, jsonBlockMarker)
+	last := strings.LastIndex(s, "```")
+	if first == -1 || last == -1 || first == last {
+		return "", false
+	}
+	data := s[first+len(jsonBlockMarker) : last]
+
+	return data, true
+}
+
 // parseReActResponse parses the LLM response into a ReActResponse struct
 // This function assumes the input contains exactly one JSON code block
 // formatted with ```json and ``` markers. The JSON block is expected to
 // contain a valid ReActResponse object.
 func parseReActResponse(input string) (*ReActResponse, error) {
-	cleaned := strings.TrimSpace(input)
-
-	const jsonBlockMarker = "```json"
-	first := strings.Index(cleaned, jsonBlockMarker)
-	last := strings.LastIndex(cleaned, "```")
-	if first == -1 || last == -1 {
+	cleaned, found := extractJSON(input)
+	if !found {
 		return nil, fmt.Errorf("no JSON code block found in %q", cleaned)
 	}
-	cleaned = cleaned[first+len(jsonBlockMarker) : last]
 
 	cleaned = strings.ReplaceAll(cleaned, "\n", "")
 	cleaned = strings.TrimSpace(cleaned)
@@ -375,17 +394,68 @@ func toMap(v any) (map[string]any, error) {
 	return m, nil
 }
 
-func candidateToShimCandidate(candidate gollm.Candidate) (*ShimCandidate, error) {
-	for _, part := range candidate.Parts() {
-		if text, ok := part.AsText(); ok {
-			parsedReActResp, err := parseReActResponse(text)
-			if err != nil {
-				return nil, fmt.Errorf("parsing ReAct response: %w", err)
+func candidateToShimCandidate(iterator gollm.ChatResponseIterator) (*ShimCandidateIterator, error) {
+	return &ShimCandidateIterator{
+		iterator: iterator,
+	}, nil
+}
+
+type ShimCandidateIterator struct {
+	iterator gollm.ChatResponseIterator
+	buffer   string
+}
+
+func (i *ShimCandidateIterator) Next() (gollm.ChatResponse, error) {
+	for {
+		if _, found := extractJSON(i.buffer); found {
+			break
+		}
+		response, err := i.iterator.Next()
+		if err != nil {
+			return nil, err
+		}
+		if response == nil {
+			break
+		}
+
+		if len(response.Candidates()) == 0 {
+			return nil, fmt.Errorf("no candidates in LLM response")
+		}
+
+		candidate := response.Candidates()[0]
+
+		for _, part := range candidate.Parts() {
+			if text, ok := part.AsText(); ok {
+				i.buffer += text
+				klog.Infof("text is %q", text)
+			} else {
+				return nil, fmt.Errorf("no text part found in candidate")
 			}
-			return &ShimCandidate{candidate: parsedReActResp}, nil
 		}
 	}
-	return nil, fmt.Errorf("no text part found in candidate")
+
+	if i.buffer == "" {
+		return nil, nil
+	}
+
+	parsedReActResp, err := parseReActResponse(i.buffer)
+	if err != nil {
+		return nil, fmt.Errorf("parsing ReAct response %q: %w", i.buffer, err)
+	}
+	i.buffer = "" // TODO: any trailing text?
+	return &ShimResponse{candidate: parsedReActResp}, nil
+}
+
+type ShimResponse struct {
+	candidate *ReActResponse
+}
+
+func (r *ShimResponse) UsageMetadata() any {
+	return nil
+}
+
+func (r *ShimResponse) Candidates() []gollm.Candidate {
+	return []gollm.Candidate{&ShimCandidate{candidate: r.candidate}}
 }
 
 type ShimCandidate struct {

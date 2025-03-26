@@ -283,7 +283,9 @@ func run(ctx context.Context) error {
 		defer recorder.Close()
 	}
 
-	u, err := ui.NewTerminalUI(recorder)
+	doc := ui.NewDocument()
+
+	u, err := ui.NewTerminalUI(doc, recorder)
 	if err != nil {
 		return err
 	}
@@ -300,7 +302,7 @@ func run(ctx context.Context) error {
 		EnableToolUseShim:   opt.EnableToolUseShim,
 	}
 
-	err = conversation.Init(ctx, u)
+	err = conversation.Init(ctx, doc)
 	if err != nil {
 		return fmt.Errorf("starting conversation: %w", err)
 	}
@@ -316,11 +318,11 @@ func run(ctx context.Context) error {
 		Model: opt.ModelID,
 	}
 
-	u.RenderOutput(ctx, "Hey there, what can I help you with today?\n", ui.Foreground(ui.ColorRed))
+	doc.AddAgentTextBlock().SetText("Hey there, what can I help you with today?")
+
 	for {
-		u.RenderOutput(ctx, "\n>> ")
-		reader := bufio.NewReader(os.Stdin)
-		query, err := reader.ReadString('\n')
+		input := doc.AddInputTextBlock()
+		query := input.Observable().Wait()
 		if err != nil {
 			if err == io.EOF {
 				// Use hit control-D, or was piping and we reached the end of stdin.
@@ -335,7 +337,7 @@ func run(ctx context.Context) error {
 		case query == "":
 			continue
 		case query == "reset":
-			err = conversation.Init(ctx, u)
+			err = conversation.Init(ctx, doc)
 			if err != nil {
 				return err
 			}
@@ -343,26 +345,32 @@ func run(ctx context.Context) error {
 		case query == "clear":
 			u.ClearScreen()
 		case query == "exit" || query == "quit":
-			u.RenderOutput(ctx, "Allright...bye.\n")
+			// u.RenderOutput(ctx, "Allright...bye.\n")
 			return nil
 		case query == "models":
-			u.RenderOutput(ctx, "\n  Available models:\n", ui.Foreground(ui.ColorGreen))
-			u.RenderOutput(ctx, strings.Join(availableModels, "\n"), ui.RenderMarkdown())
+			infoBlock := doc.AddAgentTextBlock()
+			infoBlock.AppendText("\n  Available models:\n")
+			infoBlock.AppendText(strings.Join(availableModels, "\n"))
 		case strings.HasPrefix(query, "model"):
+
 			parts := strings.Split(query, " ")
 			if len(parts) > 2 {
-				u.RenderOutput(ctx, "Invalid model command. expected format: model <model-name>", ui.Foreground(ui.ColorRed))
+				doc.AddErrorBlock().SetText("Invalid model command. expected format: model <model-name>")
 				continue
 			}
 			if len(parts) == 1 {
-				u.RenderOutput(ctx, fmt.Sprintf("Current model is `%s`\n", chatSession.Model), ui.RenderMarkdown())
+				infoBlock := doc.AddAgentTextBlock()
+				infoBlock.SetText(fmt.Sprintf("Current model is `%s`\n", chatSession.Model))
 				continue
+			} else {
+				chatSession.Model = parts[1]
+				_ = llmClient.SetModel(chatSession.Model)
+				infoBlock := doc.AddAgentTextBlock()
+				infoBlock.SetText(fmt.Sprintf("Model set to `%s`\n", chatSession.Model))
 			}
-			chatSession.Model = parts[1]
-			_ = llmClient.SetModel(chatSession.Model)
-			u.RenderOutput(ctx, fmt.Sprintf("Model set to `%s`\n", chatSession.Model), ui.RenderMarkdown())
 		case query == "version":
-			u.RenderOutput(ctx, fmt.Sprintf("Client version: `%s`\n", Version), ui.RenderMarkdown())
+			infoBlock := doc.AddAgentTextBlock()
+			infoBlock.SetText(fmt.Sprintf("kubectl-ai version: `%s`\n", Version))
 		default:
 			if err := conversation.RunOneRound(ctx, query); err != nil {
 				return err
