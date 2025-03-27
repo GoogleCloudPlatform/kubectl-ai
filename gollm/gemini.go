@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"iter"
 	"os"
 	"strings"
 
@@ -243,22 +244,15 @@ func toGeminiSchema(schema *Schema) (*genai.Schema, error) {
 	return ret, nil
 }
 
-// SendMessage sends a message to the model.
-// It returns a ChatResponse object containing the response from the model.
-func (c *GeminiChat) Send(ctx context.Context, contents ...any) (ChatResponse, error) {
-	log := klog.FromContext(ctx)
-	log.V(1).Info("sending LLM request", "user", contents)
+func (c *GeminiChat) partsToGemini(contents ...any) ([]*genai.Part, error) {
+	var parts []*genai.Part
 
-	genaiContent := &genai.Content{
-		Role:  "user",
-		Parts: []*genai.Part{},
-	}
 	for _, content := range contents {
 		switch v := content.(type) {
 		case string:
-			genaiContent.Parts = append(genaiContent.Parts, &genai.Part{Text: v})
+			parts = append(parts, &genai.Part{Text: v})
 		case FunctionCallResult:
-			genaiContent.Parts = append(genaiContent.Parts, &genai.Part{
+			parts = append(parts, &genai.Part{
 				FunctionResponse: &genai.FunctionResponse{
 					ID:       v.ID,
 					Name:     v.Name,
@@ -269,6 +263,31 @@ func (c *GeminiChat) Send(ctx context.Context, contents ...any) (ChatResponse, e
 			return nil, fmt.Errorf("unexpected type of content: %T", content)
 		}
 	}
+	return parts, nil
+}
+
+// SendMessage sends a message to the model.
+// It returns a ChatResponse object containing the response from the model.
+func (c *GeminiChat) Send(ctx context.Context, contents ...any) (ChatResponse, error) {
+	log := klog.FromContext(ctx)
+	log.V(1).Info("sending LLM request", "user", contents)
+
+	parts, err := c.partsToGemini(contents...)
+	if err != nil {
+		return nil, err
+	}
+
+	genaiContent := &genai.Content{
+		Role:  "user",
+		Parts: parts,
+	}
+
+	{
+		var s GeminiRenderer
+		s.RenderContent(genaiContent)
+		klog.Infof("gemini content is %v", s.String())
+	}
+
 	c.history = append(c.history, genaiContent)
 	result, err := c.client.Models.GenerateContent(ctx, c.model, c.history, c.genConfig)
 	if err != nil {
@@ -281,8 +300,77 @@ func (c *GeminiChat) Send(ctx context.Context, contents ...any) (ChatResponse, e
 }
 
 func (c *GeminiChat) SendStreaming(ctx context.Context, contents ...any) (ChatResponseIterator, error) {
-	return nil, fmt.Errorf("GeminiChat::SendStreaming not yet implemented")
+	log := klog.FromContext(ctx)
+	log.Info("sending LLM streaming request", "user", contents)
+
+	parts, err := c.partsToGemini(contents...)
+	if err != nil {
+		return nil, err
+	}
+
+	genaiContent := &genai.Content{
+		Role:  "user",
+		Parts: parts,
+	}
+
+	c.history = append(c.history, genaiContent)
+	stream := c.client.Models.GenerateContentStream(ctx, c.model, c.history, c.genConfig)
+
+	return func(yield func(ChatResponse, error) bool) {
+		next, stop := iter.Pull2(stream)
+		defer stop()
+		for {
+			geminiResponse, err, ok := next()
+			if !ok {
+				return
+			}
+
+			var response *GeminiChatResponse
+			if geminiResponse != nil {
+				response = &GeminiChatResponse{geminiResponse: geminiResponse}
+
+				if len(geminiResponse.Candidates) > 0 {
+					// TODO: Should we try to coalesce parts when we have a streaming response?
+					c.history = append(c.history, geminiResponse.Candidates[0].Content)
+				}
+			}
+
+			if !yield(response, err) {
+				return
+			}
+		}
+	}, nil
 }
+
+// // GeminiChatResponseIterator is a streaming chat response from the gemini API.
+// type GeminiChatResponseIterator struct {
+// 	iterator iter.Seq2[*genai.GenerateContentResponse, error]
+// }
+
+// var _ ChatResponseIterator = &GeminiChatResponseIterator{}
+
+// func (r *GeminiChatResponseIterator) Next() (ChatResponse, error) {
+// 	geminiResponse, err := r.iterator.
+// 	if err == iterator.Done {
+// 		return nil, nil
+// 	}
+// 	if err != nil {
+// 		return nil, err
+// 	}
+// 	if vertexaiResponse == nil {
+// 		return nil, nil
+// 	}
+
+// 	if err != nil {
+// 		return nil, fmt.Errorf("failed to generate content: %w", err)
+// 	}
+// 	c.history = append(c.history, result.Candidates[0].Content)
+// 	geminiResponse := result
+// 	log.V(1).Info("got LLM response", "response", geminiResponse)
+// 	return &GeminiChatResponse{geminiResponse: geminiResponse}, nil
+
+// 	return &VertexAIChatResponse{vertexaiResponse: vertexaiResponse}, nil
+// }
 
 // GeminiChatResponse is a response from the Gemini API.
 // It implements the ChatResponse interface.
@@ -301,7 +389,68 @@ func (r *GeminiChatResponse) MarshalJSON() ([]byte, error) {
 
 // String returns a string representation of the response.
 func (r *GeminiChatResponse) String() string {
-	return r.geminiResponse.Text()
+	var s GeminiRenderer
+	s.RenderResponse(r.geminiResponse)
+	return s.String()
+}
+
+type GeminiRenderer struct {
+	b strings.Builder
+}
+
+func (r *GeminiRenderer) String() string {
+	return r.b.String()
+}
+
+func (r *GeminiRenderer) RenderResponse(response *genai.GenerateContentResponse) {
+	fmt.Fprintf(&r.b, "candidates:{")
+	for i, candidate := range response.Candidates {
+		if i != 0 {
+			fmt.Fprintf(&r.b, ", ")
+		}
+		r.RenderCandidate(candidate)
+	}
+	fmt.Fprintf(&r.b, "{")
+}
+
+func (r *GeminiRenderer) RenderCandidate(candidate *genai.Candidate) {
+	fmt.Fprintf(&r.b, "content:{")
+	r.RenderContent(candidate.Content)
+	fmt.Fprintf(&r.b, "{")
+}
+
+func (r *GeminiRenderer) RenderContent(content *genai.Content) {
+	fmt.Fprintf(&r.b, "role:%q ", content.Role)
+	fmt.Fprintf(&r.b, "parts:{")
+	for i, part := range content.Parts {
+		if i != 0 {
+			fmt.Fprintf(&r.b, ", ")
+		}
+		r.RenderPart(part)
+	}
+	fmt.Fprintf(&r.b, "}")
+}
+
+func (r *GeminiRenderer) RenderPart(part *genai.Part) {
+	if part.Text != "" {
+		fmt.Fprintf(&r.b, "text=%q", part.Text)
+	}
+	if part.FunctionCall != nil {
+		fmt.Fprintf(&r.b, "functionCall=%v", part.FunctionCall)
+	}
+	if part.FunctionResponse != nil {
+		fmt.Fprintf(&r.b, "functionResponse=%v", part.FunctionResponse)
+	}
+
+	if part.ExecutableCode != nil {
+		fmt.Fprintf(&r.b, "executableCode=%v", part.ExecutableCode)
+	}
+	if part.VideoMetadata != nil {
+		fmt.Fprintf(&r.b, "videoMetadata=%v", part.VideoMetadata)
+	}
+	if part.InlineData != nil {
+		fmt.Fprintf(&r.b, "inlineData=%v", part.InlineData)
+	}
 }
 
 // UsageMetadata returns the usage metadata for the response.

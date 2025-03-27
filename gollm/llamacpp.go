@@ -15,14 +15,17 @@
 package gollm
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"iter"
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 
 	"k8s.io/klog/v2"
 )
@@ -88,22 +91,10 @@ func (c *LlamaCppClient) GenerateCompletion(ctx context.Context, request *Comple
 	return response, nil
 }
 
-func (c *LlamaCppClient) doRequest(ctx context.Context, httpMethod, relativePath string, req any, response any) error {
-	body, err := json.Marshal(req)
+func (c *LlamaCppClient) doJSONRequest(ctx context.Context, httpMethod, relativePath string, req any, response any) error {
+	httpResponse, err := c.doRequest(ctx, httpMethod, relativePath, req)
 	if err != nil {
-		return fmt.Errorf("building json body: %w", err)
-	}
-	u := c.baseURL.JoinPath(relativePath)
-	klog.V(2).Infof("sending %s request to %v: %v", httpMethod, u.String(), string(body))
-	httpRequest, err := http.NewRequestWithContext(ctx, httpMethod, u.String(), bytes.NewReader(body))
-	if err != nil {
-		return fmt.Errorf("building http request: %w", err)
-	}
-	httpRequest.Header.Set("Content-Type", "application/json")
-
-	httpResponse, err := c.httpClient.Do(httpRequest)
-	if err != nil {
-		return fmt.Errorf("performing http request: %w", err)
+		return err
 	}
 	defer httpResponse.Body.Close()
 
@@ -123,9 +114,30 @@ func (c *LlamaCppClient) doRequest(ctx context.Context, httpMethod, relativePath
 	return nil
 }
 
+func (c *LlamaCppClient) doRequest(ctx context.Context, httpMethod, relativePath string, req any) (*http.Response, error) {
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("building json body: %w", err)
+	}
+	u := c.baseURL.JoinPath(relativePath)
+	klog.V(2).Infof("sending %s request to %v: %v", httpMethod, u.String(), string(body))
+	httpRequest, err := http.NewRequestWithContext(ctx, httpMethod, u.String(), bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("building http request: %w", err)
+	}
+	httpRequest.Header.Set("Content-Type", "application/json")
+
+	httpResponse, err := c.httpClient.Do(httpRequest)
+	if err != nil {
+		return nil, fmt.Errorf("performing http request: %w", err)
+	}
+
+	return httpResponse, nil
+}
+
 func (c *LlamaCppClient) doCompletion(ctx context.Context, req *llamacppCompletionRequest) (*llamacppCompletionResponse, error) {
 	completionResponse := &llamacppCompletionResponse{}
-	if err := c.doRequest(ctx, "POST", "completion", req, completionResponse); err != nil {
+	if err := c.doJSONRequest(ctx, "POST", "completion", req, completionResponse); err != nil {
 		return nil, err
 	}
 	return completionResponse, nil
@@ -133,10 +145,52 @@ func (c *LlamaCppClient) doCompletion(ctx context.Context, req *llamacppCompleti
 
 func (c *LlamaCppClient) doChat(ctx context.Context, req *llamacppChatRequest) (*llamacppChatResponse, error) {
 	chatResponse := &llamacppChatResponse{}
-	if err := c.doRequest(ctx, "POST", "v1/chat/completions", req, chatResponse); err != nil {
+	if err := c.doJSONRequest(ctx, "POST", "v1/chat/completions", req, chatResponse); err != nil {
 		return nil, err
 	}
 	return chatResponse, nil
+}
+
+func (c *LlamaCppClient) doChatStreaming(ctx context.Context, req *llamacppChatRequest) (iter.Seq2[*llamacppChatResponse, error], error) {
+	log := klog.FromContext(ctx)
+
+	httpResponse, err := c.doRequest(ctx, "POST", "v1/chat/completions", req)
+	if err != nil {
+		return nil, err
+	}
+
+	if httpResponse.StatusCode != 200 {
+		return nil, fmt.Errorf("unexpected http status: %q", httpResponse.Status)
+	}
+
+	return func(yield func(*llamacppChatResponse, error) bool) {
+		defer httpResponse.Body.Close()
+
+		r := bufio.NewScanner(httpResponse.Body)
+		for r.Scan() {
+			line := r.Text()
+			log.Info("got streaming response line", "line", line)
+			if line == "" {
+				continue
+			} else if line == "[DONE]" {
+				return
+			} else if strings.HasPrefix(line, "data: ") {
+				data := strings.TrimPrefix(line, "data: ")
+				response := &llamacppChatResponse{}
+				if err := json.Unmarshal([]byte(data), response); err != nil {
+					yield(nil, fmt.Errorf("unmarshalling json response line %q: %w", line, err))
+					return
+				}
+				if !yield(response, nil) {
+					return
+				}
+			} else {
+				if !yield(nil, fmt.Errorf("unhandled line format %q", line)) {
+					return
+				}
+			}
+		}
+	}, nil
 }
 
 func (c *LlamaCppClient) ListModels(ctx context.Context) ([]string, error) {
@@ -207,68 +261,150 @@ func (c *LlamaCppChat) Send(ctx context.Context, contents ...any) (ChatResponse,
 		Tools: c.tools,
 	}
 
-	var llmacppResponse *LlamaCppChatResponse
-
 	resp, err := c.client.doChat(ctx, req)
 	if err != nil {
 		return nil, err
 	}
 
 	log.V(2).Info("recieved response from llama.cpp", "resp", resp)
-	llmacppResponse = &LlamaCppChatResponse{
+	llamacppResponse, err := c.buildResponse(resp)
+	if err != nil {
+		return nil, err
+	}
+	return llamacppResponse, nil
+}
+
+func (c *LlamaCppChat) buildResponse(resp *llamacppChatResponse) (*LlamaCppChatResponse, error) {
+	llamacppResponse := &LlamaCppChatResponse{
 		LlamaCppResponse: *resp,
 	}
 	for i, choice := range resp.Choices {
 		candidate := &LlamaCppCandidate{}
 
-		if choice.Message != nil && choice.Message.Content != nil {
-			parts := &LlamaCppPart{
-				text: *choice.Message.Content,
-			}
-			candidate.parts = append(candidate.parts, parts)
+		message := choice.Message
+		if message == nil {
+			message = choice.Delta
 		}
-		if choice.Message != nil && len(choice.Message.ToolCalls) != 0 {
-			var functionCalls []FunctionCall
-			for _, toolCall := range choice.Message.ToolCalls {
-				functionCall := FunctionCall{
-					Name: toolCall.Function.Name,
+		if message != nil {
+			if message.Content != nil {
+				parts := &LlamaCppPart{
+					text: *message.Content,
 				}
-
-				if toolCall.Function.Arguments != "" {
-					arguments := make(map[string]any)
-					if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &arguments); err != nil {
-						return nil, fmt.Errorf("parsing function call arguments: %w", err)
+				candidate.parts = append(candidate.parts, parts)
+			}
+			if len(message.ToolCalls) != 0 {
+				var functionCalls []FunctionCall
+				for _, toolCall := range message.ToolCalls {
+					functionCall := FunctionCall{
+						Name: toolCall.Function.Name,
 					}
-					functionCall.Arguments = arguments
-				}
-				functionCalls = append(functionCalls, functionCall)
-			}
 
-			parts := &LlamaCppPart{
-				functionCalls: functionCalls,
+					if toolCall.Function.Arguments != "" {
+						arguments := make(map[string]any)
+						if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &arguments); err != nil {
+							return nil, fmt.Errorf("parsing function call arguments: %w", err)
+						}
+						functionCall.Arguments = arguments
+					}
+					functionCalls = append(functionCalls, functionCall)
+				}
+
+				parts := &LlamaCppPart{
+					functionCalls: functionCalls,
+				}
+				candidate.parts = append(candidate.parts, parts)
 			}
-			candidate.parts = append(candidate.parts, parts)
 		}
-		llmacppResponse.candidates = append(llmacppResponse.candidates, candidate)
+		llamacppResponse.candidates = append(llamacppResponse.candidates, candidate)
 
 		if i == 0 {
-			if choice.Message != nil {
+			if message != nil {
 				msg := llamacppChatMessage{
 					Role:       "assistant",
-					Content:    choice.Message.Content,
-					ToolCalls:  choice.Message.ToolCalls,
-					ToolCallID: choice.Message.ToolCallID,
+					Content:    message.Content,
+					ToolCalls:  message.ToolCalls,
+					ToolCallID: message.ToolCallID,
 				}
 				c.history = append(c.history, msg)
 			}
 		}
 	}
 
-	return llmacppResponse, nil
+	return llamacppResponse, nil
 }
 
 func (c *LlamaCppChat) SendStreaming(ctx context.Context, contents ...any) (ChatResponseIterator, error) {
-	return nil, fmt.Errorf("LlamaCppChat::SendStreaming not yet implemented")
+	log := klog.FromContext(ctx)
+
+	if true {
+		// tools and streaming not yet implemented: https://github.com/ggml-org/llama.cpp/pull/12379
+		response, err := c.Send(ctx, contents...)
+		if err != nil {
+			return nil, err
+		}
+		return singletonChatResponseIterator(response), nil
+	}
+
+	for _, content := range contents {
+		switch v := content.(type) {
+		case string:
+			message := llamacppChatMessage{
+				Role:    "user",
+				Content: ptrTo(v),
+			}
+			c.history = append(c.history, message)
+		case FunctionCallResult:
+			resultJSON, err := json.Marshal(v.Result)
+			if err != nil {
+				return nil, fmt.Errorf("marshalling function call result: %w", err)
+			}
+
+			message := llamacppChatMessage{
+				Role: "tool",
+				// TODO: Do we need ToolCallID?  ToolCallID: toolCallId,
+				Content: ptrTo(string(resultJSON)),
+			}
+			c.history = append(c.history, message)
+		default:
+			return nil, fmt.Errorf("unsupported content type: %T", v)
+		}
+	}
+
+	req := &llamacppChatRequest{
+		Model:    c.model,
+		Messages: c.history,
+		Stream:   ptrTo(true),
+		Tools:    c.tools,
+	}
+
+	stream, err := c.client.doChatStreaming(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+
+	return func(yield func(ChatResponse, error) bool) {
+		for response, err := range stream {
+			if err != nil {
+				yield(nil, err)
+				return
+			}
+			if response == nil {
+				yield(nil, nil)
+				return
+			}
+
+			llamacppResponse, err := c.buildResponse(response)
+			if err != nil {
+				yield(nil, err)
+				return
+			}
+			log.Info("got response", "response", llamacppResponse)
+			if !yield(llamacppResponse, nil) {
+				return
+			}
+		}
+	}, nil
+
 }
 
 func ptrTo[T any](t T) *T {
@@ -321,6 +457,9 @@ type LlamaCppCandidate struct {
 }
 
 func (r *LlamaCppCandidate) String() string {
+	if len(r.parts) == 0 {
+		return "<no parts>"
+	}
 	return r.parts[0].text
 }
 
@@ -456,6 +595,7 @@ type llamacppChatRequest struct {
 	Model    string                `json:"model,omitempty"`
 	Messages []llamacppChatMessage `json:"messages,omitempty"`
 	Tools    []llamacppTool        `json:"tools,omitempty"`
+	Stream   *bool                 `json:"stream,omitempty"`
 }
 
 type llamacppChatResponse struct {
@@ -473,6 +613,7 @@ type llamacppChoice struct {
 	FinishReason string               `json:"finish_reason,omitempty"`
 	Index        int32                `json:"index,omitempty"`
 	Message      *llamacppChatMessage `json:"message,omitempty"`
+	Delta        *llamacppChatMessage `json:"delta,omitempty"`
 }
 
 type llamacppUsage struct {

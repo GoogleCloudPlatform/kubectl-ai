@@ -163,8 +163,7 @@ func (a *Conversation) RunOneRound(ctx context.Context, query string) error {
 
 		var agentTextBlock *ui.AgentTextBlock
 
-		for {
-			response, err := stream.Next()
+		for response, err := range stream {
 			if err != nil {
 				return fmt.Errorf("reading streaming LLM response: %w", err)
 			}
@@ -394,57 +393,103 @@ func toMap(v any) (map[string]any, error) {
 	return m, nil
 }
 
-func candidateToShimCandidate(iterator gollm.ChatResponseIterator) (*ShimCandidateIterator, error) {
-	return &ShimCandidateIterator{
-		iterator: iterator,
+func candidateToShimCandidate(iterator gollm.ChatResponseIterator) (gollm.ChatResponseIterator, error) {
+	return func(yield func(gollm.ChatResponse, error) bool) {
+		buffer := ""
+		for response, err := range iterator {
+			if err != nil {
+				yield(nil, err)
+				return
+			}
+
+			if len(response.Candidates()) == 0 {
+				yield(nil, fmt.Errorf("no candidates in LLM response"))
+				return
+			}
+
+			candidate := response.Candidates()[0]
+
+			for _, part := range candidate.Parts() {
+				if text, ok := part.AsText(); ok {
+					buffer += text
+					klog.Infof("text is %q", text)
+				} else {
+					yield(nil, fmt.Errorf("no text part found in candidate"))
+					return
+				}
+			}
+
+			if _, found := extractJSON(buffer); found {
+				break
+			}
+		}
+
+		if buffer == "" {
+			yield(nil, nil)
+			return
+		}
+
+		parsedReActResp, err := parseReActResponse(buffer)
+		if err != nil {
+			yield(nil, fmt.Errorf("parsing ReAct response %q: %w", buffer, err))
+			return
+		}
+		buffer = "" // TODO: any trailing text?
+		yield(&ShimResponse{candidate: parsedReActResp}, nil)
 	}, nil
 }
 
-type ShimCandidateIterator struct {
-	iterator gollm.ChatResponseIterator
-	buffer   string
-}
+// func candidateToShimCandidate(iterator gollm.ChatResponseIterator) (*ShimCandidateIterator, error) {
+// 	return &ShimCandidateIterator{
+// 		iterator: iterator,
+// 	}, nil
+// }
 
-func (i *ShimCandidateIterator) Next() (gollm.ChatResponse, error) {
-	for {
-		if _, found := extractJSON(i.buffer); found {
-			break
-		}
-		response, err := i.iterator.Next()
-		if err != nil {
-			return nil, err
-		}
-		if response == nil {
-			break
-		}
+// type ShimCandidateIterator struct {
+// 	iterator gollm.ChatResponseIterator
+// 	buffer   string
+// }
 
-		if len(response.Candidates()) == 0 {
-			return nil, fmt.Errorf("no candidates in LLM response")
-		}
+// func (i *ShimCandidateIterator) Next() (gollm.ChatResponse, error) {
+// 	for {
+// 		if _, found := extractJSON(i.buffer); found {
+// 			break
+// 		}
+// 		response, err := i.iterator.Next()
+// 		if err != nil {
+// 			return nil, err
+// 		}
+// 		if response == nil {
+// 			break
+// 		}
 
-		candidate := response.Candidates()[0]
+// 		if len(response.Candidates()) == 0 {
+// 			return nil, fmt.Errorf("no candidates in LLM response")
+// 		}
 
-		for _, part := range candidate.Parts() {
-			if text, ok := part.AsText(); ok {
-				i.buffer += text
-				klog.Infof("text is %q", text)
-			} else {
-				return nil, fmt.Errorf("no text part found in candidate")
-			}
-		}
-	}
+// 		candidate := response.Candidates()[0]
 
-	if i.buffer == "" {
-		return nil, nil
-	}
+// 		for _, part := range candidate.Parts() {
+// 			if text, ok := part.AsText(); ok {
+// 				i.buffer += text
+// 				klog.Infof("text is %q", text)
+// 			} else {
+// 				return nil, fmt.Errorf("no text part found in candidate")
+// 			}
+// 		}
+// 	}
 
-	parsedReActResp, err := parseReActResponse(i.buffer)
-	if err != nil {
-		return nil, fmt.Errorf("parsing ReAct response %q: %w", i.buffer, err)
-	}
-	i.buffer = "" // TODO: any trailing text?
-	return &ShimResponse{candidate: parsedReActResp}, nil
-}
+// 	if i.buffer == "" {
+// 		return nil, nil
+// 	}
+
+// 	parsedReActResp, err := parseReActResponse(i.buffer)
+// 	if err != nil {
+// 		return nil, fmt.Errorf("parsing ReAct response %q: %w", i.buffer, err)
+// 	}
+// 	i.buffer = "" // TODO: any trailing text?
+// 	return &ShimResponse{candidate: parsedReActResp}, nil
+// }
 
 type ShimResponse struct {
 	candidate *ReActResponse

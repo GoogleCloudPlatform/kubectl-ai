@@ -187,7 +187,12 @@ func (c *OllamaChat) Send(ctx context.Context, contents ...any) (ChatResponse, e
 }
 
 func (c *OllamaChat) SendStreaming(ctx context.Context, contents ...any) (ChatResponseIterator, error) {
-	return nil, fmt.Errorf("OllamaChat::SendStreaming not yet implemented")
+	// TODO: Implement streaming
+	response, err := c.Send(ctx, contents...)
+	if err != nil {
+		return nil, err
+	}
+	return singletonChatResponseIterator(response), nil
 }
 
 type OllamaChatResponse struct {

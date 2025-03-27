@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"iter"
 )
 
 // Client is a client for a language model.
@@ -121,10 +122,7 @@ type ChatResponse interface {
 }
 
 // ChatResponseIterator is a streaming chat response from the LLM.
-type ChatResponseIterator interface {
-	// Next returns the next response
-	Next() (ChatResponse, error)
-}
+type ChatResponseIterator iter.Seq2[ChatResponse, error]
 
 // Candidate is one of a set of candidate response from the LLM.
 type Candidate interface {
