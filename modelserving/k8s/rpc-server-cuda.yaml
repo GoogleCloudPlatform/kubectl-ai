@@ -1,0 +1,50 @@
+kind: ServiceAccount
+apiVersion: v1
+metadata:
+  name: rpc-server
+
+---
+
+kind: Service
+apiVersion: v1
+metadata:
+  name: rpc-server
+  labels:
+    app: rpc-server
+spec:
+  clusterIP: None
+  selector:
+    app: rpc-server
+
+---
+
+kind: StatefulSet
+apiVersion: apps/v1
+metadata:
+  name: rpc-server
+spec:
+  podManagementPolicy: "Parallel"
+  replicas: 4
+  selector:
+    matchLabels:
+      app: rpc-server
+  serviceName: rpc-server
+  template:
+    metadata:
+      labels:
+        app: rpc-server
+    spec:
+      serviceAccountName: rpc-server
+      containers:
+      - name: rpc-server
+        image: rpc-server-cuda:latest # placeholder value, replaced by deployment scripts
+        args:
+        - --host
+        - 0.0.0.0
+        resources:
+          limits:
+            nvidia.com/gpu: "1"
+          requests:
+            nvidia.com/gpu: "1"
+      nodeSelector:
+        cloud.google.com/gke-accelerator: nvidia-l4
