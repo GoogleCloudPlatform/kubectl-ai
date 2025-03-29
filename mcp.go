@@ -44,11 +44,14 @@ func newKubectlMCPServer(ctx context.Context, kubectlConfig string, tools tools.
 	}
 	for _, tool := range s.tools.AllTools() {
 		toolDefn := tool.FunctionDefinition()
-		s.server.AddTool(mcp.NewTool(
+		toolInputSchema, err := toolDefn.Parameters.ToRawSchema()
+		if err != nil {
+			return nil, fmt.Errorf("converting tool schema to json.RawMessage: %w", err)
+		}
+		s.server.AddTool(mcp.NewToolWithRawSchema(
 			toolDefn.Name,
-			mcp.WithDescription(toolDefn.Description),
-			mcp.WithString("command", mcp.Description(toolDefn.Parameters.Properties["command"].Description)),
-			mcp.WithString("modifies_resource", mcp.Description(toolDefn.Parameters.Properties["modifies_resource"].Description)),
+			toolDefn.Description,
+			toolInputSchema,
 		), s.handleToolCall)
 	}
 	return s, nil
@@ -96,13 +99,27 @@ func (s *kubectlMCPServer) handleToolCall(ctx context.Context, request mcp.CallT
 		}, nil
 	}
 
-	log.Info("Tool call output", "tool", name, "output", output)
+	result, err := tools.ToolResultToMap(output)
+	if err != nil {
+		log.Error(err, "Error converting tool call output to result")
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				mcp.TextContent{
+					Type: "text",
+					Text: fmt.Sprintf("Error: %v", err),
+				},
+			},
+			IsError: true,
+		}, nil
+	}
+
+	log.Info("Tool call output", "tool", name, "result", result)
 
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{
 			mcp.TextContent{
 				Type: "text",
-				Text: output.(string),
+				Text: fmt.Sprintf("%v", result),
 			},
 		},
 	}, nil
