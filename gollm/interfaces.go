@@ -16,6 +16,7 @@ package gollm
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 )
@@ -90,6 +91,19 @@ type Schema struct {
 	Items       *Schema            `json:"items,omitempty"`
 	Description string             `json:"description,omitempty"`
 	Required    []string           `json:"required,omitempty"`
+}
+
+// ToRawSchema converts a Schema to a json.RawMessage.
+func (s *Schema) ToRawSchema() (json.RawMessage, error) {
+	jsonSchema, err := json.Marshal(s)
+	if err != nil {
+		return nil, fmt.Errorf("converting tool schema to json: %w", err)
+	}
+	var rawSchema json.RawMessage
+	if err := json.Unmarshal(jsonSchema, &rawSchema); err != nil {
+		return nil, fmt.Errorf("converting tool schema to json.RawMessage: %w", err)
+	}
+	return rawSchema, nil
 }
 
 // SchemaType is the type of a field in a Schema.

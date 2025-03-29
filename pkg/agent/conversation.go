@@ -225,7 +225,7 @@ func (a *Conversation) RunOneRound(ctx context.Context, query string) error {
 						observation := fmt.Sprintf("Result of running %q:\n%s", call.Name, output)
 						currChatContent = append(currChatContent, observation)
 					} else {
-						result, err := toResult(output)
+						result, err := tools.ToolResultToMap(output)
 						if err != nil {
 							return err
 						}

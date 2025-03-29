@@ -16,6 +16,7 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"maps"
 	"slices"
@@ -157,4 +158,18 @@ func (t *ToolCall) InvokeTool(ctx context.Context, opt InvokeToolOptions) (any, 
 	}
 
 	return response, nil
+}
+
+// ToolResultToMap converts an arbitrary result to a map[string]any
+func ToolResultToMap(result any) (map[string]any, error) {
+	b, err := json.Marshal(result)
+	if err != nil {
+		return nil, fmt.Errorf("converting result to json: %w", err)
+	}
+
+	m := make(map[string]any)
+	if err := json.Unmarshal(b, &m); err != nil {
+		return nil, fmt.Errorf("converting json result to map: %w", err)
+	}
+	return m, nil
 }
