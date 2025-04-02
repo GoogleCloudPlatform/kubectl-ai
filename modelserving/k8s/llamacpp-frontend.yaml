@@ -1,0 +1,45 @@
+kind: ServiceAccount
+apiVersion: v1
+metadata:
+  name: llamacpp-frontend
+
+---
+
+kind: Service
+apiVersion: v1
+metadata:
+  name: llamacpp-frontend
+  labels:
+    app: llamacpp-frontend
+spec:
+  selector:
+    app: llamacpp-frontend
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080
+    protocol: TCP
+
+---
+
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: llamacpp-frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: llamacpp-frontend
+  template:
+    metadata:
+      labels:
+        app: llamacpp-frontend
+    spec:
+      serviceAccountName: llamacpp-frontend
+      containers:
+      - name: llamacpp-frontend
+        image: llamacpp-frontend:latest # placeholder value, replaced by deployment scripts
+        env:
+        - name: LLM_CHUNKS
+          value: 77ebb031649ac7a16b89b4078feb197d56a61941b703a980233069a2670c811b,f50428a8c9912e949f5273174e66c9febdc7cd21617595de2dc0e5c9df536434
