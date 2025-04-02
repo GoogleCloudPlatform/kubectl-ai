@@ -52,19 +52,19 @@ if build_for_architecture cpu; then
     --progress=plain .
 fi
 
-if build_for_architecture cuda; then
-  # -DCMAKE_EXE_LINKER_FLAGS=-Wl,--allow-shlib-undefined allows us to build in a container without all the CUDA libraries present
-  # These flags mirror the flags in the llama.cpp github-action: https://github.com/ggml-org/llama.cpp/blob/master/.github/workflows/build.yml
+# if build_for_architecture cuda; then
+#   # -DCMAKE_EXE_LINKER_FLAGS=-Wl,--allow-shlib-undefined allows us to build in a container without all the CUDA libraries present
+#   # These flags mirror the flags in the llama.cpp github-action: https://github.com/ggml-org/llama.cpp/blob/master/.github/workflows/build.yml
 
-  docker buildx build \
-    -f images/llamacpp-server/Dockerfile \
-    --target llamacpp-server \
-    -t llamacpp-server-cuda:${TAG} \
-    --build-arg BASE_IMAGE=nvidia/cuda:12.6.2-runtime-ubuntu24.04 \
-    --build-arg BUILDER_IMAGE=nvidia/cuda:12.6.2-devel-ubuntu24.04 \
-    --build-arg "CMAKE_ARGS=-DGGML_RPC=ON -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=all -DCMAKE_EXE_LINKER_FLAGS=-Wl,--allow-shlib-undefined" \
-    --progress=plain .
-fi
+#   docker buildx build \
+#     -f images/llamacpp-server/Dockerfile \
+#     --target llamacpp-server \
+#     -t llamacpp-server-cuda:${TAG} \
+#     --build-arg BASE_IMAGE=nvidia/cuda:12.6.2-runtime-ubuntu24.04 \
+#     --build-arg BUILDER_IMAGE=nvidia/cuda:12.6.2-devel-ubuntu24.04 \
+#     --build-arg "CMAKE_ARGS=-DGGML_RPC=ON -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=all -DCMAKE_EXE_LINKER_FLAGS=-Wl,--allow-shlib-undefined" \
+#     --progress=plain .
+# fi
 
 if build_for_architecture cpu; then
   docker buildx build ${BUILDX_ARGS} \
@@ -74,13 +74,13 @@ if build_for_architecture cpu; then
     --progress=plain .
 fi
 
-if build_for_architecture cuda; then
-  docker buildx build ${BUILDX_ARGS} \
-    -f images/llamacpp-gemma3-12b-it/Dockerfile \
-    -t ${IMAGE_PREFIX}llamacpp-gemma3-12b-it-cuda:${TAG} \
-    --build-arg BASE_IMAGE=llamacpp-server-cuda:${TAG} \
-    --progress=plain .
-fi
+# if build_for_architecture cuda; then
+#   docker buildx build ${BUILDX_ARGS} \
+#     -f images/llamacpp-gemma3-12b-it/Dockerfile \
+#     -t ${IMAGE_PREFIX}llamacpp-gemma3-12b-it-cuda:${TAG} \
+#     --build-arg BASE_IMAGE=llamacpp-server-cuda:${TAG} \
+#     --progress=plain .
+# fi
 
 if build_for_architecture cpu; then
   docker buildx build ${BUILDX_ARGS} \

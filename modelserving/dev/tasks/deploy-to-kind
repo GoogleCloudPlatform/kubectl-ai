@@ -31,7 +31,7 @@ MODEL_IMAGE="${IMAGE_PREFIX:-}llamacpp-gemma3-12b-it-cpu:${TAG}"
 RPCSERVER_IMAGE="${IMAGE_PREFIX:-}rpc-server-cpu:${TAG}"
 
 # Load the image into kind
-echo "Loading image ${MODEL_IMAGE} and ${RPCSERVER_IMAGE} into kind"
+echo "Loading images into kind: ${MODEL_IMAGE}, ${RPCSERVER_IMAGE}"
 kind load docker-image ${MODEL_IMAGE} ${RPCSERVER_IMAGE}
 
 # Deploy manifests
@@ -40,4 +40,7 @@ cat k8s/llm-server-cpu.yaml | sed s@llamacpp-gemma3-12b-it-cpu:latest@${MODEL_IM
   kubectl apply --context=${KUBE_CONTEXT} --server-side -f -
 
 cat k8s/rpc-server-cpu.yaml | sed s@rpc-server-cpu:latest@${RPCSERVER_IMAGE}@g | \
+  kubectl apply --context=${KUBE_CONTEXT} --server-side -f -
+
+cat k8s/llm-server-rpc.yaml | sed s@llamacpp-gemma3-12b-it-cpu:latest@${MODEL_IMAGE}@g | \
   kubectl apply --context=${KUBE_CONTEXT} --server-side -f -
