@@ -44,9 +44,9 @@ func NewClient(ctx context.Context, providerID string) (Client, error) {
 
 	switch providerID {
 	case "gemini":
-		return NewGeminiClient(ctx)
+		return NewGeminiClient(ctx, geminiBackend)
 	case "vertexai":
-		return NewVertexAIClient(ctx)
+		return NewGeminiClient(ctx, vertexaiBackend)
 	case "ollama":
 		return NewOllamaClient(ctx)
 	case "llamacpp":

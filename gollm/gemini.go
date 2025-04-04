@@ -31,20 +31,33 @@ import (
 
 const (
 	geminiDefaultModel = "gemini-2.0-pro-exp-02-05"
+	geminiBackend      = "gemini"
+	vertexaiBackend    = "vertexai"
 )
 
 // NewGeminiClient builds a client for the Gemini API.
-func NewGeminiClient(ctx context.Context) (*GeminiClient, error) {
-	apiKey := os.Getenv("GEMINI_API_KEY")
-	if apiKey == "" {
-		return nil, fmt.Errorf("GEMINI_API_KEY environment variable not set")
+func NewGeminiClient(ctx context.Context, backend string) (*GeminiClient, error) {
+	var cc *genai.ClientConfig
+
+	switch backend {
+	case geminiBackend:
+		apiKey := os.Getenv("GEMINI_API_KEY")
+		if apiKey == "" {
+			return nil, fmt.Errorf("GEMINI_API_KEY environment variable not set")
+		}
+		cc = &genai.ClientConfig{
+			APIKey:  apiKey,
+			Backend: genai.BackendGeminiAPI,
+		}
+	case vertexaiBackend:
+		cc = &genai.ClientConfig{
+			Backend: genai.BackendVertexAI,
+		}
+	default:
+		return nil, fmt.Errorf("unknown backend %q", backend)
 	}
 
-	client, err := genai.NewClient(ctx, &genai.ClientConfig{
-		APIKey:  apiKey,
-		Backend: genai.BackendGeminiAPI,
-	})
-
+	client, err := genai.NewClient(ctx, cc)
 	if err != nil {
 		return nil, fmt.Errorf("building gemini client: %w", err)
 	}
