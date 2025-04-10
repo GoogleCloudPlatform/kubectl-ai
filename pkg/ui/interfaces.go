@@ -17,7 +17,8 @@ package ui
 import "context"
 
 type UI interface {
-	RenderOutput(ctx context.Context, s string, style ...StyleOption)
+	// RenderOutput(ctx context.Context, s string, style ...StyleOption)
+
 	AskForConfirmation(ctx context.Context, s string) bool
 
 	// ClearScreen clears any output rendered to the screen
