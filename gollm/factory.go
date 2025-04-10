@@ -23,10 +23,53 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sync"
 	"time"
 
 	"k8s.io/klog/v2"
 )
+
+var globalRegistry registry
+
+type registry struct {
+	mutex     sync.Mutex
+	providers map[string]FactoryFunc
+}
+
+type FactoryFunc func(ctx context.Context, uri *url.URL) (Client, error)
+
+func RegisterProvider(id string, factoryFunc FactoryFunc) error {
+	return globalRegistry.RegisterProvider(id, factoryFunc)
+}
+
+func (r *registry) RegisterProvider(id string, factoryFunc FactoryFunc) error {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+
+	if r.providers == nil {
+		r.providers = make(map[string]FactoryFunc)
+	}
+	_, exists := r.providers[id]
+	if exists {
+		return fmt.Errorf("provider %q is already registered", id)
+	}
+	r.providers[id] = factoryFunc
+	return nil
+}
+
+func (r *registry) NewClient(ctx context.Context, providerID string) (Client, error) {
+	u, err := url.Parse(providerID)
+	if err != nil {
+		return nil, fmt.Errorf("parsing provider id %q: %w", providerID, err)
+	}
+
+	factoryFunc := r.providers[u.Scheme]
+	if factoryFunc == nil {
+		return nil, fmt.Errorf("provider %q not registered", u.Scheme)
+	}
+
+	return factoryFunc(ctx, u)
+}
 
 // NewClient builds an Client based on the LLM_CLIENT env var or the provided providerID. ProviderID (if not empty) overrides the provider from LLM_CLIENT env var.
 func NewClient(ctx context.Context, providerID string) (Client, error) {
@@ -35,25 +78,10 @@ func NewClient(ctx context.Context, providerID string) (Client, error) {
 		if s == "" {
 			return nil, fmt.Errorf("LLM_CLIENT is not set")
 		}
-		u, err := url.Parse(s)
-		if err != nil {
-			return nil, fmt.Errorf("parsing LLM_CLIENT URL: %w", err)
-		}
-		providerID = u.Scheme
+		providerID = s
 	}
 
-	switch providerID {
-	case "gemini":
-		return NewGeminiClient(ctx, geminiBackend)
-	case "vertexai":
-		return NewGeminiClient(ctx, vertexaiBackend)
-	case "ollama":
-		return NewOllamaClient(ctx)
-	case "llamacpp":
-		return NewLlamaCppClient(ctx)
-	default:
-		return nil, fmt.Errorf("unknown LLM_CLIENT scheme %q", providerID)
-	}
+	return globalRegistry.NewClient(ctx, providerID)
 }
 
 // APIError represents an error returned by the LLM client.

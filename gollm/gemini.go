@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 
@@ -29,19 +30,47 @@ import (
 	"k8s.io/klog/v2"
 )
 
-const (
-	geminiDefaultModel = "gemini-2.0-pro-exp-02-05"
-	geminiBackend      = "gemini"
-	vertexaiBackend    = "vertexai"
-)
+func init() {
+	RegisterProvider("gemini", geminiFactory)
+	RegisterProvider("vertexai", vertexaiViaGeminiFactory)
+}
+
+func geminiFactory(ctx context.Context, u *url.URL) (Client, error) {
+	opt := GeminiClientOptions{}
+	opt.Backend = genai.BackendGeminiAPI
+
+	return NewGeminiClient(ctx, opt)
+}
+
+func vertexaiViaGeminiFactory(ctx context.Context, u *url.URL) (Client, error) {
+	opt := GeminiClientOptions{}
+	opt.Backend = genai.BackendVertexAI
+
+	return NewGeminiClient(ctx, opt)
+}
+
+// GeminiClientOptions are the options for the Gemini API client.
+type GeminiClientOptions struct {
+	// API Key for GenAI. Required for BackendGeminiAPI.
+	APIKey string
+	// Backend for GenAI. See Backend constants. Defaults to BackendGeminiAPI unless explicitly set to BackendVertexAI, or the environment variable GOOGLE_GENAI_USE_VERTEXAI is set to "1" or "true".
+	Backend genai.Backend
+	// GCP Project ID for Vertex AI. Required for BackendVertexAI.
+	Project string
+	// GCP Location/Region for Vertex AI. Required for BackendVertexAI. See https://cloud.google.com/vertex-ai/docs/general/locations
+	Location string
+}
 
 // NewGeminiClient builds a client for the Gemini API.
-func NewGeminiClient(ctx context.Context, backend string) (*GeminiClient, error) {
+func NewGeminiClient(ctx context.Context, opt GeminiClientOptions) (*GeminiClient, error) {
 	var cc *genai.ClientConfig
 
-	switch backend {
-	case geminiBackend:
-		apiKey := os.Getenv("GEMINI_API_KEY")
+	switch opt.Backend {
+	case genai.BackendGeminiAPI:
+		apiKey := opt.APIKey
+		if apiKey == "" {
+			apiKey = os.Getenv("GEMINI_API_KEY")
+		}
 		if apiKey == "" {
 			return nil, fmt.Errorf("GEMINI_API_KEY environment variable not set")
 		}
@@ -49,14 +78,16 @@ func NewGeminiClient(ctx context.Context, backend string) (*GeminiClient, error)
 			APIKey:  apiKey,
 			Backend: genai.BackendGeminiAPI,
 		}
-	case vertexaiBackend:
+	case genai.BackendVertexAI:
 		cc = &genai.ClientConfig{
 			// Project ID is loaded from the GOOGLE_CLOUD_PROJECT environment variable
 			// Location/Region is loaded from either GOOGLE_CLOUD_LOCATION or GOOGLE_CLOUD_REGION environment variable
-			Backend: genai.BackendVertexAI,
+			Backend:  genai.BackendVertexAI,
+			Project:  opt.Project,
+			Location: opt.Location,
 		}
 	default:
-		return nil, fmt.Errorf("unknown backend %q", backend)
+		return nil, fmt.Errorf("unknown backend %q", opt.Backend)
 	}
 
 	client, err := genai.NewClient(ctx, cc)

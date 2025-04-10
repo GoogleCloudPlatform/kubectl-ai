@@ -27,6 +27,14 @@ import (
 	"k8s.io/klog/v2"
 )
 
+func init() {
+	RegisterProvider("llamacpp", llamacppFactory)
+}
+
+func llamacppFactory(ctx context.Context, u *url.URL) (Client, error) {
+	return NewLlamaCppClient(ctx)
+}
+
 type LlamaCppClient struct {
 	baseURL        *url.URL
 	httpClient     *http.Client

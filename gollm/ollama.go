@@ -18,10 +18,19 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 
 	"github.com/ollama/ollama/api"
 	"k8s.io/klog/v2"
 )
+
+func init() {
+	RegisterProvider("ollama", ollamaFactory)
+}
+
+func ollamaFactory(ctx context.Context, u *url.URL) (Client, error) {
+	return NewOllamaClient(ctx)
+}
 
 const (
 	defaultOllamaModel = "gemma2:latest"
