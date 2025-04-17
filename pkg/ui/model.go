@@ -66,6 +66,20 @@ type Subscriber interface {
 	DocumentChanged(doc *Document, block Block)
 }
 
+type SubscriberFunc func(doc *Document, block Block)
+
+type funcSubscriber struct {
+	fn SubscriberFunc
+}
+
+func (s *funcSubscriber) DocumentChanged(doc *Document, block Block) {
+	s.fn(doc, block)
+}
+
+func SubscriberFromFunc(fn SubscriberFunc) Subscriber {
+	return &funcSubscriber{fn: fn}
+}
+
 type subscription struct {
 	doc        *Document
 	id         uint64
@@ -92,6 +106,7 @@ func (d *Document) AddSubscription(subscriber Subscriber) io.Closer {
 		subscriber: subscriber,
 	}
 
+	// Copy on write so we don't need to lock the subscriber list
 	newSubscriptions := make([]*subscription, 0, len(d.subscriptions)+1)
 	for _, s := range d.subscriptions {
 		if s == nil || s.subscriber == nil {
@@ -127,7 +142,6 @@ func (d *Document) AddBlock(block Block) {
 	d.blocks = newBlocks
 
 	block.attached(d)
-
 	d.mutex.Unlock()
 
 	d.sendDocumentChanged(block)

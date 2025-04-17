@@ -31,6 +31,7 @@ import (
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/journal"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/tools"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/ui"
+	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/ui/html"
 
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/yaml"
@@ -48,7 +49,7 @@ var geminiModels = []string{
 
 func main() {
 	ctx := context.Background()
-
+	ctx, cancelContext := context.WithCancel(ctx)
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
@@ -56,6 +57,7 @@ func main() {
 		sig := <-sigCh
 		fmt.Fprintf(os.Stderr, "Received signal, shutting down... %s\n", sig)
 		klog.Flush()
+		cancelContext()
 		os.Exit(0)
 	}()
 
@@ -78,8 +80,17 @@ type Options struct {
 	// and set this automatically.
 	EnableToolUseShim bool `json:"enableToolUseShim,omitempty"`
 
+	UserInterface UserInterface `json:"userInterface,omitempty"`
+
 	MCPServer bool
 }
+
+type UserInterface string
+
+const (
+	UserInterfaceTerminal UserInterface = "terminal"
+	UserInterfaceHTML     UserInterface = "html"
+)
 
 func (o *Options) InitDefaults() {
 	// default to react because default model doesn't support function calling.
@@ -92,6 +103,8 @@ func (o *Options) InitDefaults() {
 	// We now default to our strongest model (gemini-2.5-pro-exp-03-25) which supports tool use natively.
 	// so we don't need shim.
 	o.EnableToolUseShim = false
+
+	o.UserInterface = UserInterfaceTerminal
 }
 
 func (o *Options) LoadConfiguration(b []byte) error {
@@ -165,6 +178,8 @@ func run(ctx context.Context) error {
 	flag.BoolVar(&opt.SkipPermissions, "skip-permissions", opt.SkipPermissions, "(dangerous) skip asking for confirmation before executing kubectl commands that modify resources")
 	flag.BoolVar(&opt.MCPServer, "mcp-server", opt.MCPServer, "run in MCP server mode")
 	flag.BoolVar(&opt.EnableToolUseShim, "enable-tool-use-shim", opt.EnableToolUseShim, "enable tool use shim")
+	var userInterfaceString string
+	flag.StringVar(&userInterfaceString, "user-interface", string(opt.UserInterface), "user interface mode to use")
 	// add commandline flags for logging
 	klog.InitFlags(nil)
 
@@ -172,6 +187,9 @@ func run(ctx context.Context) error {
 	flag.Set("log_file", "/tmp/kubectl-ai.log")
 
 	flag.Parse()
+
+	// TODO: validation / normalization of enum (or add support for flag.EnumVar)
+	opt.UserInterface = UserInterface(userInterfaceString)
 
 	defer klog.Flush()
 
@@ -265,9 +283,29 @@ func run(ctx context.Context) error {
 
 	doc := ui.NewDocument()
 
-	u, err := ui.NewTerminalUI(doc, recorder)
-	if err != nil {
-		return err
+	var userInterface ui.UI
+	switch opt.UserInterface {
+	case UserInterfaceTerminal:
+		u, err := ui.NewTerminalUI(doc, recorder)
+		if err != nil {
+			return err
+		}
+		userInterface = u
+
+	case UserInterfaceHTML:
+		u, err := html.NewHTMLUserInterface(doc, recorder)
+		if err != nil {
+			return err
+		}
+		go func() {
+			if err := u.RunServer(ctx); err != nil {
+				klog.Fatalf("error running http server: %v", err)
+			}
+		}()
+		userInterface = u
+
+	default:
+		return fmt.Errorf("user-interface mode %q is not known", opt.UserInterface)
 	}
 
 	conversation := &agent.Conversation{
@@ -292,7 +330,7 @@ func run(ctx context.Context) error {
 	chatSession := session{
 		model:        opt.ModelID,
 		doc:          doc,
-		ui:           u,
+		ui:           userInterface,
 		conversation: conversation,
 		LLM:          llmClient,
 	}

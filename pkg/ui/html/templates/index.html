@@ -1,0 +1,13 @@
+<html>
+    <head>
+        <script src="https://unpkg.com/htmx.org@2.0.4" crossorigin="anonymous"></script>
+        <script src="https://unpkg.com/htmx-ext-sse@2.2.2" crossorigin="anonymous"></script>
+    </head>
+<body hx-ext="sse">
+
+    <div hx-ext="sse" sse-connect="/doc-stream" sse-swap="ReplaceAll">
+       
+    </div>
+</body>
+
+</html>
