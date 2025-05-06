@@ -54,6 +54,15 @@ kubectl-ai --llm-provider ollama --model gemma3:12b-it-qat --enable-tool-use-shi
 >> models
 ```
 
+#### Using Grok
+
+You can use X.AI's Grok model by setting your X.AI API key:
+
+```bash
+export GROK_API_KEY=your_xai_api_key_here
+kubectl-ai --llm-provider=grok --model=grok-3-beta
+```
+
 #### Using Azure OpenAI
 
 You can also use Azure OpenAI deployment by setting your OpenAI API key and specifying the provider:
@@ -76,7 +85,7 @@ export OPENAI_API_KEY=your_openai_api_key_here
 kubectl-ai --llm-provider=openai --model=gpt-4.1
 ```
 
-* Note: `kubectl-ai` supports AI models from `gemini`, `vertexai`, `azopenai`, `openai` and local LLM providers such as `ollama` and `llamacpp`.
+* Note: `kubectl-ai` supports AI models from `gemini`, `vertexai`, `azopenai`, `openai`, `grok` and local LLM providers such as `ollama` and `llamacpp`.
 
 Run interactively:
 
