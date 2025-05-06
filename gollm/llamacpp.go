@@ -218,7 +218,7 @@ func (c *LlamaCppChat) Send(ctx context.Context, contents ...any) (ChatResponse,
 		return nil, err
 	}
 
-	log.V(2).Info("recieved response from llama.cpp", "resp", resp)
+	log.V(2).Info("received response from llama.cpp", "resp", resp)
 	llmacppResponse = &LlamaCppChatResponse{
 		LlamaCppResponse: *resp,
 	}

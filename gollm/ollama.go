@@ -161,7 +161,7 @@ func (c *OllamaChat) Send(ctx context.Context, contents ...any) (ChatResponse, e
 	var ollamaResponse *OllamaChatResponse
 
 	respFunc := func(resp api.ChatResponse) error {
-		log.Info("recieved response from ollama", "resp", resp)
+		log.Info("received response from ollama", "resp", resp)
 		ollamaResponse = &OllamaChatResponse{
 			ollamaResponse: resp,
 			candidates: []*OllamaCandidate{
