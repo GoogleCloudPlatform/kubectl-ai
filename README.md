@@ -85,6 +85,14 @@ export OPENAI_API_KEY=your_openai_api_key_here
 kubectl-ai --llm-provider=openai --model=gpt-4.1
 ```
 
+#### Using OpenAI Compatible API
+For example, you can use aliyun qwen-xxx module as follows
+```bash
+export OPENAI_API_KEY=your_openai_api_key_here
+export OPENAI_ENDPOINT=https://dashscope.aliyuncs.com/compatible-mode/v1
+kubectl-ai --llm-provider=openai --model=qwen-plus
+```
+
 * Note: `kubectl-ai` supports AI models from `gemini`, `vertexai`, `azopenai`, `openai`, `grok` and local LLM providers such as `ollama` and `llamacpp`.
 
 Run interactively:
