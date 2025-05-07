@@ -46,7 +46,6 @@ func expandShellVar(value string) (string, error) {
 		}
 	}
 	return os.ExpandEnv(value), nil
-
 }
 
 type BashTool struct{}
