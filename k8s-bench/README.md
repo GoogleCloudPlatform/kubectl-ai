@@ -10,16 +10,19 @@
 go build
 
 # Run evaluation for scale related tasks
-./k8s-bench run --agent-bin <path/to/kubectl-ai/binary> --task-pattern scale --kubeconfig <path/to/kubeconfig>
+./k8s-bench run --agent-bin <path/to/kubectl-ai/binary> --task-pattern scale --output-dir <output_directory> --kubeconfig <path/to/kubeconfig>
+
+# Run evaluation for all available tasks
+./k8s-bench run --agent-bin <path/to/kubectl-ai/binary> --task-pattern all --output-dir <output_directory> --kubeconfig <path/to/kubeconfig>
 
 # Analyze previous evaluation results and output in markdown format (default)
-./k8s-bench analyze --input-dir .build/k8sbench
+./k8s-bench analyze --input-dir <output_directory>
 
 # Analyze previous evaluation results and output in JSON format
-./k8s-bench analyze --input-dir .build/k8sbench --output-format json
+./k8s-bench analyze --input-dir <output_directory> --output-format json
 
 # Save analysis results to a file
-./k8s-bench analyze --input-dir .build/k8sbench --results-filepath ./results.md
+./k8s-bench analyze --input-dir <output_directory> --results-filepath ./results.md
 ```
 
 Running the benchmark with the `run` subcommand will produce results as below:
@@ -37,4 +40,4 @@ Task: scale-down-deployment
     gemini-2.0-flash-thinking-exp-01-21: true
 ```
 
-The `analyze` subcommand will gather the results from previous runs and display them in a tabular format with emoji indicators for success (✅) and failure (❌). 
+The `analyze` subcommand will gather the results from previous runs and display them in a tabular format with emoji indicators for success (✅) and failure (❌).
