@@ -152,11 +152,34 @@ func (c *OpenAIClient) SetResponseSchema(schema *Schema) error {
 	return nil
 }
 
-// ListModels is not implemented yet.
+// ListModels returns slice of strings with model IDs, may not work for openAI compatible providers
 func (c *OpenAIClient) ListModels(ctx context.Context) ([]string, error) {
-	// TODO: Implement listing OpenAI models using c.client
-	klog.Warning("OpenAIClient.ListModels is not implemented yet")
-	return []string{}, nil
+
+	var opt option.RequestOption = nil
+
+	endpoint := os.Getenv("OPENAI_ENDPOINT") // if another endpoint is used
+	if endpoint != "" {
+		opt = option.WithBaseURL(endpoint)
+	}
+
+	res, err := c.client.Models.List(ctx, opt)
+	if err != nil {
+
+		if endpoint != "" {
+			return nil, fmt.Errorf(`
+			There was an error in listing models from %s. 
+			Please verify if the endpoint used is fully OpenAI compatible`,
+				endpoint)
+		}
+		return nil, fmt.Errorf("There was an error in listing models from OpenAI")
+	}
+
+	modelsId := make([]string, 0, len(res.Data))
+	for _, model := range res.Data {
+		modelsId = append(modelsId, model.ID)
+	}
+
+	return modelsId, nil
 }
 
 // --- Chat Session Implementation ---
