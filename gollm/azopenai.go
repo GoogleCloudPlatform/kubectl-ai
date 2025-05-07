@@ -20,11 +20,15 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/ai/azopenai"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/cognitiveservices/armcognitiveservices"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources"
+	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/subscription/armsubscription"
 )
 
 func init() {
@@ -58,17 +62,17 @@ func NewAzureOpenAIClient(ctx context.Context, u url.URL) (*AzureOpenAIClient, e
 		keyCredential := azcore.NewKeyCredential(azureOpenAIKey)
 		client, err := azopenai.NewClientWithKeyCredential(azureOpenAIEndpoint, keyCredential, nil)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to create azure openai client: %w", err)
 		}
 		azureOpenAIClient.client = client
 	} else {
 		credential, err := azidentity.NewDefaultAzureCredential(nil)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to get credential: %w", err)
 		}
 		client, err := azopenai.NewClient(azureOpenAIEndpoint, credential, nil)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to create azure openai client: %w", err)
 		}
 		azureOpenAIClient.client = client
 	}
@@ -102,7 +106,86 @@ func (c *AzureOpenAIClient) GenerateCompletion(ctx context.Context, request *Com
 }
 
 func (c *AzureOpenAIClient) ListModels(ctx context.Context) ([]string, error) {
-	return nil, fmt.Errorf("listing models not supported yet for Azure OpenAI")
+	azureOpenAIEndpoint := os.Getenv("AZURE_OPENAI_ENDPOINT")
+
+	cred, err := azidentity.NewDefaultAzureCredential(nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get credential: %w", err)
+	}
+
+	subClient, err := armsubscription.NewSubscriptionsClient(cred, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create subscriptions client: %w", err)
+	}
+
+	subPager := subClient.NewListPager(nil)
+
+	var modelNames []string
+	for subPager.More() {
+		subResp, err := subPager.NextPage(context.Background())
+		if err != nil {
+			return nil, fmt.Errorf("failed to get subscriptions page: %w", err)
+		}
+
+		for _, sub := range subResp.Value {
+			rgClient, err := armresources.NewResourceGroupsClient(*sub.SubscriptionID, cred, nil)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create resource group client: %w", err)
+			}
+
+			rgPager := rgClient.NewListPager(nil)
+			for rgPager.More() {
+				rgResp, err := rgPager.NextPage(context.Background())
+				if err != nil {
+					return nil, fmt.Errorf("failed to get resource group page: %w", err)
+				}
+
+				for _, rg := range rgResp.Value {
+					accountClient, err := armcognitiveservices.NewAccountsClient(*sub.SubscriptionID, cred, nil)
+					if err != nil {
+						return nil, fmt.Errorf("failed to create accounts client: %w", err)
+					}
+
+					accountPager := accountClient.NewListByResourceGroupPager(*rg.Name, nil)
+					for accountPager.More() {
+						accountResp, err := accountPager.NextPage(context.Background())
+						if err != nil {
+							return nil, fmt.Errorf("failed to to get accounts page: %w", err)
+						}
+
+						for _, account := range accountResp.Value {
+							if account.Kind != nil && (*account.Kind == "OpenAI" || *account.Kind == "CognitiveServices" || *account.Kind == "AIServices") {
+								if azureOpenAIEndpoint != "" && account.Properties != nil && account.Properties.Endpoint != nil && *account.Properties.Endpoint != azureOpenAIEndpoint {
+									continue
+								}
+
+								deploymentClient, err := armcognitiveservices.NewDeploymentsClient(*sub.SubscriptionID, cred, nil)
+								if err != nil {
+									return nil, fmt.Errorf("failed to create deployments client: %w", err)
+								}
+
+								deploymentPager := deploymentClient.NewListPager(*rg.Name, *account.Name, nil)
+								for deploymentPager.More() {
+									deploymentResp, err := deploymentPager.NextPage(context.Background())
+									if err != nil {
+										return nil, fmt.Errorf("failed to get deployments page: %w", err)
+									}
+
+									for _, deployment := range deploymentResp.Value {
+										endpoint := strings.TrimSuffix(strings.TrimPrefix(*account.Properties.Endpoint, "https://"), "/")
+										modelNames = append(modelNames, endpoint+" / "+*deployment.Name)
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	slices.Sort(modelNames)
+	return modelNames, nil
 }
 
 func (c *AzureOpenAIClient) SetResponseSchema(schema *Schema) error {
