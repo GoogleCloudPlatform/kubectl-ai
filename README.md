@@ -15,9 +15,9 @@ First, ensure that kubectl is installed and configured.
 2. Untar the release, make the binary executable and move it to a directory in your $PATH (as shown below).
 
 ```shell
-$ tar -zxvf kubectl-ai_Darwin_arm64.tar.gz
-$ chmod a+x kubectl-ai
-$ sudo mv kubectl-ai /usr/local/bin/
+tar -zxvf kubectl-ai_Darwin_arm64.tar.gz
+chmod a+x kubectl-ai
+sudo mv kubectl-ai /usr/local/bin/
 ```
 
 ### Usage
