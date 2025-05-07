@@ -106,8 +106,11 @@ func loadTasks(config EvalConfig) (map[string]Task, error) {
 		}
 
 		taskID := entry.Name()
-		if config.TaskPattern != "" && !strings.Contains(taskID, config.TaskPattern) {
-			continue
+		// Filter tasks by pattern if specified and not "all"
+		if pattern := config.TaskPattern; pattern != "" && pattern != "all" {
+			if !strings.Contains(taskID, pattern) {
+				continue
+			}
 		}
 
 		taskFile := filepath.Join(config.TasksDir, taskID, "task.yaml")
