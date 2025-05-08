@@ -31,7 +31,7 @@ if kubectl wait --for=condition=Ready pod -l app=webapp -n health-check --timeou
       
       # Check if pod is stable with no recent restarts
       RESTARTS=$(kubectl get pods -n health-check -l app=webapp -o jsonpath='{.items[0].status.containerStatuses[0].restartCount}')
-      if [ "$RESTARTS" -lt 3 ]; then
+      if [ "$RESTARTS" -lt 1 ]; then
         echo "Success: Pod is stable with acceptable number of restarts"
         exit 0
       else
