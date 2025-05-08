@@ -152,17 +152,19 @@ func (c *OpenAIClient) SetResponseSchema(schema *Schema) error {
 	return nil
 }
 
-// ListModels returns slice of strings with model IDs, may not work for openAI compatible providers
+// ListModels returns a slice of strings with model IDs.
+// Note: This may not work with all OpenAI-compatible providers if they don't fully implement
+// the Models.List endpoint or return data in a different format.
 func (c *OpenAIClient) ListModels(ctx context.Context) ([]string, error) {
 
-	var opt option.RequestOption = nil
+	var opts []option.RequestOption
 
 	endpoint := os.Getenv("OPENAI_ENDPOINT") // if another endpoint is used
 	if endpoint != "" {
-		opt = option.WithBaseURL(endpoint)
+		opts = append(opts, option.WithBaseURL(endpoint))
 	}
 
-	res, err := c.client.Models.List(ctx, opt)
+	res, err := c.client.Models.List(ctx, opts...)
 	if err != nil {
 
 		if endpoint != "" {
@@ -174,12 +176,12 @@ func (c *OpenAIClient) ListModels(ctx context.Context) ([]string, error) {
 		return nil, fmt.Errorf("There was an error in listing models from OpenAI")
 	}
 
-	modelsId := make([]string, 0, len(res.Data))
+	modelsIDs := make([]string, 0, len(res.Data))
 	for _, model := range res.Data {
-		modelsId = append(modelsId, model.ID)
+		modelsIDs = append(modelsIDs, model.ID)
 	}
 
-	return modelsId, nil
+	return modelsIDs, nil
 }
 
 // --- Chat Session Implementation ---
