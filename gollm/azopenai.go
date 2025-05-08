@@ -94,7 +94,7 @@ func (c *AzureOpenAIClient) GenerateCompletion(ctx context.Context, request *Com
 		return nil, err
 	}
 
-	if len(resp.Choices) > 0 || resp.Choices[0].Message == nil || resp.Choices[0].Message.Content == nil {
+	if len(resp.Choices) == 0 || resp.Choices[0].Message == nil || resp.Choices[0].Message.Content == nil {
 		return nil, fmt.Errorf("invalid completion response: %v", resp)
 	}
 
