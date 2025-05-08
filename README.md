@@ -28,6 +28,39 @@ chmod a+x kubectl-ai
 sudo mv kubectl-ai /usr/local/bin/
 ```
 
+#### Installation on Windows (PowerShell)
+
+```powershell
+# Download precompiled Windows binary:
+Invoke-WebRequest -Uri https://github.com/GoogleCloudPlatform/kubectl-ai/releases/latest/download/kubectl-ai_windows_amd64.exe -OutFile kubectl-ai.exe
+# Or build locally with the script:
+.\install.ps1 -OutputPath .\kubectl-ai.exe
+# (Optional) Move the executable to a directory in your PATH:
+Move-Item .\kubectl-ai.exe -Destination $Env:ProgramFiles\kubectl-ai\kubectl-ai.exe
+```
+
+### Environment Variable Configuration
+
+#### Environment Variable Configuration (PowerShell)
+
+```powershell
+# Gemini (Google AI Studio) – persistent & global:
+setx GEMINI_API_KEY "your_api_key_here" -m
+echo $Env:GEMINI_API_KEY
+
+# OpenAI (or Azure OpenAI) – persistent & global:
+setx OPENAI_API_KEY "your_openai_api_key_here" -m
+echo $Env:OPENAI_API_KEY
+
+# (Optional) For Azure OpenAI – persistent:
+setx OPENAI_ENDPOINT "https://your_azure_openai_endpoint/" -m
+echo $Env:OPENAI_ENDPOINT
+
+# Grok (X.AI) – persistent & global:
+setx GROK_API_KEY "your_xai_api_key_here" -m
+echo $Env:GROK_API_KEY
+```
+
 ### Usage
 
 #### Using Gemini (Default)
