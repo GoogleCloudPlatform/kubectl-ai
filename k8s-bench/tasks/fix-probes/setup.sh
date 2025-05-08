@@ -29,13 +29,13 @@ spec:
         # The problem: incorrect health probes causing restarts
         livenessProbe:
           httpGet:
-            path: /nonexistent-path  # Path doesn't exist
+            path: /get_status  # Path doesn't exist
             port: 80
           initialDelaySeconds: 5
           periodSeconds: 5
         readinessProbe:
           httpGet:
-            path: /nonexistent-path  # Path doesn't exist
+            path: /is_ready  # Path doesn't exist
             port: 80
           initialDelaySeconds: 5
           periodSeconds: 5
@@ -46,7 +46,4 @@ kubectl create service clusterip webapp -n health-check --tcp=80:80
 
 # Wait for the pod to start and begin restarting due to failed probes
 echo "Waiting for pod to start and begin failing health checks..."
-sleep 10
-
-# Show the pod status to confirm it's having health check issues
-kubectl get pods -n health-check
+kubectl wait --for=condition=Available=False --timeout=30s deployment/webapp -n health-check || true
