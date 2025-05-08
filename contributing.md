@@ -30,3 +30,9 @@ Guidelines](https://opensource.google/conduct/).
 All submissions, including submissions by project members, require review. We
 use [GitHub pull requests](https://docs.github.com/articles/about-pull-requests)
 for this purpose.
+
+## Understand the repo
+
+An AI-generated overview of the system architecture for this repository is
+available [here](https://deepwiki.com/GoogleCloudPlatform/kubectl-ai/). This can
+provide an interactive way to explore the codebase.
