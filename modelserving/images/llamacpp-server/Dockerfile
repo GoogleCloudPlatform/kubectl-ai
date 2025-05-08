@@ -31,7 +31,7 @@ ENTRYPOINT [ "/rpc-server" ]
 
 FROM ${BASE_IMAGE} AS llamacpp-server
 
-RUN apt-get update && apt-get install --yes libgomp1
+RUN apt-get update && apt-get install --yes libgomp1 libcurl4
 
 COPY --from=builder /src/llama.cpp/bin/llama-server /llama-server
 COPY --from=builder /src/llama.cpp/bin/lib*.so /lib/

@@ -22,19 +22,40 @@ if [[ -z "${KUBE_CONTEXT:-}" ]]; then
   exit 1
 fi
 
+if [[ -z "${CACHE_BUCKET:-}" ]]; then
+  CACHE_BUCKET="gs://${GCP_PROJECT_ID}-blobs"
+fi
+echo "Using CACHE_BUCKET=${CACHE_BUCKET}"
+
 # Pick a probably-unique tag
 export TAG=`date +%Y%m%d%H%M%S`
 
 # Build the image
 echo "Building images"
 export IMAGE_PREFIX=gcr.io/${GCP_PROJECT_ID}/
-BUILDX_ARGS=--push dev/tasks/build-images
+ARCHITECTURES=cpu,cuda BUILDX_ARGS=--push dev/tasks/build-images
 
 # TODO: support cpu on GKE?
 #MODEL_IMAGE="${IMAGE_PREFIX}llamacpp-gemma3-12b-it-cpu:${TAG}"
-MODEL_IMAGE="${IMAGE_PREFIX}llamacpp-gemma3-12b-it-cuda:${TAG}"
+RPCSERVER_IMAGE="${IMAGE_PREFIX:-}rpc-server-cuda:${TAG}"
+FRONTEND_IMAGE="${IMAGE_PREFIX:-}llamacpp-frontend:${TAG}"
+BLOBSERVER_IMAGE="${IMAGE_PREFIX:-}blobserver:${TAG}"
 
 # Deploy manifests
 echo "Deploying manifests"
-cat k8s/llm-server.yaml | sed s@llamacpp-gemma3-12b-it-cuda:latest@${MODEL_IMAGE}@g | \
+cat k8s/namespace.yaml | \
   kubectl apply --context=${KUBE_CONTEXT} --server-side -f -
+
+# cat k8s/llm-server-rpc.yaml | sed s@llamacpp-gemma3-12b-it-cpu:latest@${MODEL_IMAGE}@g | \
+#   kubectl apply --context=${KUBE_CONTEXT} -n llamacpp --server-side -f -
+
+cat k8s/blobserver.yaml | \
+  sed s@placeholder-cache-bucket@${CACHE_BUCKET}@g | \
+  sed s@blobserver:latest@${BLOBSERVER_IMAGE}@g | \
+  kubectl apply --context=${KUBE_CONTEXT} -n llamacpp --server-side -f -
+
+cat k8s/llamacpp-frontend.yaml | sed s@llamacpp-frontend:latest@${FRONTEND_IMAGE}@g | \
+  kubectl apply --context=${KUBE_CONTEXT} -n llamacpp --server-side -f -
+
+cat k8s/rpc-server-cuda.yaml | sed s@rpc-server-cuda:latest@${RPCSERVER_IMAGE}@g | \
+  kubectl apply --context=${KUBE_CONTEXT} -n llamacpp --server-side -f -

@@ -1,0 +1,61 @@
+kind: ServiceAccount
+apiVersion: v1
+metadata:
+  name: blobserver
+
+---
+
+kind: Service
+apiVersion: v1
+metadata:
+  name: blobserver
+  labels:
+    app: blobserver
+spec:
+  selector:
+    app: blobserver
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+
+---
+
+kind: StatefulSet
+apiVersion: apps/v1
+metadata:
+  name: blobserver
+spec:
+  podManagementPolicy: "Parallel"
+  replicas: 1
+  selector:
+    matchLabels:
+      app: blobserver
+  #serviceName: blobserver
+  template:
+    metadata:
+      labels:
+        app: blobserver
+    spec:
+      nodeSelector:
+        cloud.google.com/gke-ephemeral-storage-local-ssd: "true"
+      serviceAccountName: blobserver
+      containers:
+      - name: blobserver
+        image: blobserver:latest # placeholder value, replaced by deployment scripts
+        resources:
+          requests:
+            ephemeral-storage: "500Gi"
+        env:
+        - name: CACHE_DIR
+          value: /cache
+        - name: CACHE_BUCKET
+          value: placeholder-cache-bucket # placeholder value
+        volumeMounts:
+          - mountPath: /cache
+            name: cache
+      volumes:
+        - name: cache
+          emptyDir:
+            medium: "" # use node default, hopefully not memory!
+            sizeLimit: 500Gi
