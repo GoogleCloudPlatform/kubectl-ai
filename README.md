@@ -181,6 +181,11 @@ kubectl-ai project includes [k8s-bench](./k8s-bench/README.md) - a benchmark to 
 
 See [full report](./k8s-bench.md) for more details.
 
+## Start Contributing
+
+We welcome contributions to `kubectl-ai` from the community. Take a look at our
+[contribution guide](contributing.md) to get started.
+
 ---
 
 *Note: This is not an officially supported Google product. This project is not
