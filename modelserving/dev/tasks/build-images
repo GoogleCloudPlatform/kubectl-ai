@@ -40,7 +40,7 @@ fi
 dev/tasks/download-model
 
 # Note we do not push or load the "base" llama-server images (we do not pass BUILDX_ARGS)
-# This is because these are intermediate images
+# This is because this is only an intermediate image (e.g. used for the gemma3-12b-it image)
 if build_for_architecture cpu; then
   docker buildx build \
     -f images/llamacpp-server/Dockerfile \
@@ -52,20 +52,21 @@ if build_for_architecture cpu; then
     --progress=plain .
 fi
 
-if build_for_architecture cuda; then
-  # -DCMAKE_EXE_LINKER_FLAGS=-Wl,--allow-shlib-undefined allows us to build in a container without all the CUDA libraries present
-  # These flags mirror the flags in the llama.cpp github-action: https://github.com/ggml-org/llama.cpp/blob/master/.github/workflows/build.yml
+# We're running distributed now, so the "worker" nodes need CUDA (rpc-server image), the "head" nodes do not (llamacpp-server image).
+#   # -DCMAKE_EXE_LINKER_FLAGS=-Wl,--allow-shlib-undefined allows us to build in a container without all the CUDA libraries present
+#   # These flags mirror the flags in the llama.cpp github-action: https://github.com/ggml-org/llama.cpp/blob/master/.github/workflows/build.yml
 
-  docker buildx build \
-    -f images/llamacpp-server/Dockerfile \
-    --target llamacpp-server \
-    -t llamacpp-server-cuda:${TAG} \
-    --build-arg BASE_IMAGE=nvidia/cuda:12.6.2-runtime-ubuntu24.04 \
-    --build-arg BUILDER_IMAGE=nvidia/cuda:12.6.2-devel-ubuntu24.04 \
-    --build-arg "CMAKE_ARGS=-DGGML_RPC=ON -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=all -DCMAKE_EXE_LINKER_FLAGS=-Wl,--allow-shlib-undefined" \
-    --progress=plain .
-fi
+#   docker buildx build \
+#     -f images/llamacpp-server/Dockerfile \
+#     --target llamacpp-server \
+#     -t llamacpp-server-cuda:${TAG} \
+#     --build-arg BASE_IMAGE=nvidia/cuda:12.6.2-runtime-ubuntu24.04 \
+#     --build-arg BUILDER_IMAGE=nvidia/cuda:12.6.2-devel-ubuntu24.04 \
+#     --build-arg "CMAKE_ARGS=-DGGML_RPC=ON -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=all -DCMAKE_EXE_LINKER_FLAGS=-Wl,--allow-shlib-undefined" \
+#     --progress=plain .
+# fi
 
+# Build a head node that embeds gemma3
 if build_for_architecture cpu; then
   docker buildx build ${BUILDX_ARGS} \
     -f images/llamacpp-gemma3-12b-it/Dockerfile \
@@ -74,14 +75,8 @@ if build_for_architecture cpu; then
     --progress=plain .
 fi
 
-if build_for_architecture cuda; then
-  docker buildx build ${BUILDX_ARGS} \
-    -f images/llamacpp-gemma3-12b-it/Dockerfile \
-    -t ${IMAGE_PREFIX}llamacpp-gemma3-12b-it-cuda:${TAG} \
-    --build-arg BASE_IMAGE=llamacpp-server-cuda:${TAG} \
-    --progress=plain .
-fi
 
+# Build a worker node that runs rpc-server with CPU support
 if build_for_architecture cpu; then
   docker buildx build ${BUILDX_ARGS} \
     -f images/llamacpp-server/Dockerfile \
@@ -93,6 +88,7 @@ if build_for_architecture cpu; then
     --progress=plain .
 fi
 
+# Build a worker node that runs rpc-server with CUDA support
 if build_for_architecture cuda; then
   # -DCMAKE_EXE_LINKER_FLAGS=-Wl,--allow-shlib-undefined allows us to build in a container without all the CUDA libraries present
   # These flags mirror the flags in the llama.cpp github-action: https://github.com/ggml-org/llama.cpp/blob/master/.github/workflows/build.yml

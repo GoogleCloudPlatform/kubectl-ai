@@ -1,0 +1,53 @@
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: llm-server-rpc
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: llm-server-rpc
+  template:
+    metadata:
+      labels:
+        app: llm-server-rpc
+    spec:
+      serviceAccountName: llm-server-rpc
+      containers:
+      - name: llm-server-rpc
+        image: llamacpp-gemma3-12b-it-cpu:latest # placeholder value, replaced by deployment scripts
+        env:
+        - name: LLAMA_ARG_N_GPU_LAYERS
+          value: "99"
+        - name: LLAMA_ARG_FLASH_ATTN
+          value: "yes"
+        # - name: SERVERS
+        #   value: rpc-server-0,rpc-server-1,rpc-server-2,rpc-server-3
+        args:
+        - --jinja # Needed for tool use, no env var
+        - --rpc
+        - rpc-server-0.rpc-server:50052,rpc-server-1.rpc-server:50052,rpc-server-2.rpc-server:50052,rpc-server-3.rpc-server:50052
+
+---
+
+kind: ServiceAccount
+apiVersion: v1
+metadata:
+  name: llm-server-rpc
+
+---
+
+kind: Service
+apiVersion: v1
+metadata:
+  name: llm-server-rpc
+  labels:
+    app: llm-server-rpc
+spec:
+  selector:
+    app: llm-server-rpc
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080
+    protocol: TCP

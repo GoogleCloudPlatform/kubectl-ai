@@ -18,6 +18,7 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 
 	"github.com/GoogleCloudPlatform/kubectl-ai/gollm"
@@ -85,7 +86,12 @@ func runKubectlCommand(ctx context.Context, command, workDir, kubeconfig string)
 		return &ExecResult{Error: "port-forwarding is not allowed because assistant is running in an unattended mode, please try some other alternative"}, nil
 	}
 
-	cmd := exec.CommandContext(ctx, bashBin, "-c", command)
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.CommandContext(ctx, os.Getenv("COMSPEC"), "/c", command)
+	} else {
+		cmd = exec.CommandContext(ctx, bashBin, "-c", command)
+	}
 	cmd.Env = os.Environ()
 	cmd.Dir = workDir
 	if kubeconfig != "" {

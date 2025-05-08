@@ -37,9 +37,14 @@ spec:
       serviceAccountName: rpc-server
       containers:
       - name: rpc-server
-        image: rpc-server-cpu:latest # placeholder value, replaced by deployment scripts
+        image: rpc-server-cuda:latest # placeholder value, replaced by deployment scripts
         args:
         - --host
         - 0.0.0.0
-        - --mem
-        - "4192"
+        resources:
+          limits:
+            nvidia.com/gpu: "1"
+          requests:
+            nvidia.com/gpu: "1"
+      nodeSelector:
+        cloud.google.com/gke-accelerator: nvidia-l4
