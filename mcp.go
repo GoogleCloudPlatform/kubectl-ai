@@ -17,7 +17,6 @@ package main
 import (
 	"context"
 	"fmt"
-	
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/tools"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -71,7 +70,7 @@ func (s *kubectlMCPServer) handleToolCall(ctx context.Context, request mcp.CallT
 
 	ctx = context.WithValue(ctx, tools.KubeconfigKey, s.kubectlConfig)
 	ctx = context.WithValue(ctx, tools.WorkDirKey, s.workDir)
-	
+
 	tool := tools.Lookup(name)
 	if tool == nil {
 		return &mcp.CallToolResult{
