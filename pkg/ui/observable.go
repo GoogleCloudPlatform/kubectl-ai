@@ -49,12 +49,8 @@ func (o *Observable[T]) AddSubscription(subscriber ObservableSubscriber[T]) io.C
 		subscriber: subscriber,
 	}
 
-	for i, s := range o.subscriptions {
-		if s == nil {
-			o.subscriptions[i] = s
-			return s
-		}
-		if s.subscriber == nil {
+	for i, e := range o.subscriptions {
+		if e == nil || e.subscriber == nil {
 			o.subscriptions[i] = s
 			return s
 		}
