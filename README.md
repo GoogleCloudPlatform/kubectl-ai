@@ -59,6 +59,8 @@ kubectl-ai --quiet --model gemini-2.5-flash-preview-04-17 "check logs for nginx 
 
 You can use `kubectl-ai` with AI models running locally. `kubectl-ai` supports [ollama](https://ollama.com/) and [llama.cpp](https://github.com/ggml-org/llama.cpp) to use the AI models running locally.
 
+Additionally, the [`modelserving`](modelserving/) directory provides tools and instructions for deploying your own `llama.cpp`-based LLM serving endpoints locally or on a Kubernetes cluster. This allows you to host models like Gemma directly in your environment.
+
 An example of using Google's `gemma3` model with `ollama`:
 
 ```shell
