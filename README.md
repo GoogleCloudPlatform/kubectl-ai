@@ -55,6 +55,9 @@ An example of using Google's `gemma3` model with `ollama`:
 # assuming ollama is already running and you have pulled one of the gemma models
 # ollama pull gemma3:12b-it-qat
 
+# if your ollama server is at remote, use OLLAMA_HOST variable to specify the host
+# export OLLAMA_HOST=http://192.168.1.3:11434/
+
 # enable-tool-use-shim because models require special prompting to enable tool calling
 kubectl-ai --llm-provider ollama --model gemma3:12b-it-qat --enable-tool-use-shim
 
