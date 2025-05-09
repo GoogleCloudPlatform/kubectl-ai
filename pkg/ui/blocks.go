@@ -48,28 +48,29 @@ func (b *AgentTextBlock) Streaming() bool {
 	return b.streaming
 }
 
-func (b *AgentTextBlock) SetStreaming(streaming bool) *AgentTextBlock {
+func (b *AgentTextBlock) SetStreaming(streaming bool) {
 	b.streaming = streaming
 	b.doc.blockChanged(b)
-	return b
 }
 
-func (b *AgentTextBlock) SetColor(color ColorValue) *AgentTextBlock {
+func (b *AgentTextBlock) SetColor(color ColorValue) {
 	b.Color = color
 	b.doc.blockChanged(b)
-	return b
 }
 
-func (b *AgentTextBlock) SetText(agentText string) *AgentTextBlock {
+func (b *AgentTextBlock) SetText(agentText string) {
 	b.text = agentText
 	b.doc.blockChanged(b)
+}
+
+func (b *AgentTextBlock) WithText(agentText string) *AgentTextBlock {
+	b.SetText(agentText)
 	return b
 }
 
-func (b *AgentTextBlock) AppendText(text string) *AgentTextBlock {
+func (b *AgentTextBlock) AppendText(text string) {
 	b.text = b.text + text
 	b.doc.blockChanged(b)
-	return b
 }
 
 // FunctionCallRequestBlock is used to render the LLM's request to invoke a function

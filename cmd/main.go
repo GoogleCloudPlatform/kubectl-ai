@@ -427,7 +427,7 @@ type session struct {
 func (s *session) repl(ctx context.Context, initialQuery string) error {
 	query := initialQuery
 	if query == "" {
-		s.doc.AddBlock(ui.NewAgentTextBlock().SetText("Hey there, what can I help you with today?"))
+		s.doc.AddBlock(ui.NewAgentTextBlock().WithText("Hey there, what can I help you with today?"))
 	}
 	for {
 		if query == "" {
