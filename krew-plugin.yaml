@@ -1,0 +1,33 @@
+apiVersion: krew.googlecontainertools.github.com/v1alpha2
+kind: Plugin
+metadata:
+  name: ai
+spec:
+  version: "{{.Version}}"
+  homepage: "https://github.com/GoogleCloudPlatform/kubectl-ai"
+  shortDescription: "AI powered kubernetes agent"
+  description: |
+    kubectl-ai is an AI powered kubernetes agent that runs in your terminal.
+    It allows you to interact with your Kubernetes cluster using natural language.
+  platforms:
+    - selector:
+        matchLabels:
+          os: darwin
+          arch: amd64
+      uri: https://github.com/GoogleCloudPlatform/kubectl-ai/releases/download/v{{.Version}}/kubectl-ai_Darwin_x86_64.tar.gz
+      sha256: "{{.DarwinAmd64SHA256}}"
+      bin: kubectl-ai
+    - selector:
+        matchLabels:
+          os: linux
+          arch: amd64
+      uri: https://github.com/GoogleCloudPlatform/kubectl-ai/releases/download/v{{.Version}}/kubectl-ai_Linux_x86_64.tar.gz
+      sha256: "{{.LinuxAmd64SHA256}}"
+      bin: kubectl-ai
+    - selector:
+        matchLabels:
+          os: windows
+          arch: amd64
+      uri: https://github.com/GoogleCloudPlatform/kubectl-ai/releases/download/v{{.Version}}/kubectl-ai_Windows_x86_64.zip
+      sha256: "{{.WindowsAmd64SHA256}}"
+      bin: kubectl-ai.exe 
