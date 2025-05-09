@@ -1,0 +1,5 @@
+{
+    "input": "Describe the nginx deployment in the default namespace",
+    "output": "kubectl describe deployment nginx -n default"
+  }
+  
