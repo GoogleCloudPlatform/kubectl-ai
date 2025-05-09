@@ -32,9 +32,9 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: 'go.mod'
-      - name: "Run dev/ci/presubmits/go-build"
+      - name: "Run dev/ci/presubmits/go-build.sh"
         run: |
-          ./dev/ci/presubmits/go-build
+          ./dev/ci/presubmits/go-build.sh
 
 
   go-vet:
@@ -45,9 +45,9 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: 'go.mod'
-      - name: "Run dev/ci/presubmits/go-vet"
+      - name: "Run dev/ci/presubmits/go-vet.sh"
         run: |
-          ./dev/ci/presubmits/go-vet
+          ./dev/ci/presubmits/go-vet.sh
 
 
   verify-autogen:
@@ -58,9 +58,9 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: 'go.mod'
-      - name: "Run dev/ci/presubmits/verify-autogen"
+      - name: "Run dev/ci/presubmits/verify-autogen.sh"
         run: |
-          ./dev/ci/presubmits/verify-autogen
+          ./dev/ci/presubmits/verify-autogen.sh
 
 
   verify-format:
@@ -71,9 +71,9 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: 'go.mod'
-      - name: "Run dev/ci/presubmits/verify-format"
+      - name: "Run dev/ci/presubmits/verify-format.sh"
         run: |
-          ./dev/ci/presubmits/verify-format
+          ./dev/ci/presubmits/verify-format.sh
 
 
   verify-gomod:
@@ -84,9 +84,9 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: 'go.mod'
-      - name: "Run dev/ci/presubmits/verify-gomod"
+      - name: "Run dev/ci/presubmits/verify-gomod.sh"
         run: |
-          ./dev/ci/presubmits/verify-gomod
+          ./dev/ci/presubmits/verify-gomod.sh
 
 
 concurrency:

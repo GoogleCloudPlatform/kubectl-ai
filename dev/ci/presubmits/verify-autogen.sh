@@ -21,7 +21,7 @@ set -o pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd ${REPO_ROOT}
 
-dev/tasks/generate-github-actions
+dev/tasks/generate-github-actions.sh
 
 changes=$(git status --porcelain)
 if [[ -n "${changes}" ]]; then
