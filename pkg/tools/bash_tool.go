@@ -84,8 +84,8 @@ Possible values:
 }
 
 func (t *BashTool) Run(ctx context.Context, args map[string]any) (any, error) {
-	kubeconfig := ctx.Value("kubeconfig").(string)
-	workDir := ctx.Value("work_dir").(string)
+	kubeconfig := ctx.Value(KubeconfigKey).(string)
+	workDir := ctx.Value(WorkDirKey).(string)
 	command := args["command"].(string)
 
 	if strings.Contains(command, "kubectl edit") {

@@ -59,7 +59,7 @@ func (t *ScanImageWithTrivy) FunctionDefinition() *gollm.FunctionDefinition {
 }
 
 func (t *ScanImageWithTrivy) Run(ctx context.Context, functionArgs map[string]any) (any, error) {
-	workDir := ctx.Value("work_dir").(string)
+	workDir := ctx.Value(WorkDirKey).(string)
 
 	if err := parseFunctionArgs(functionArgs, t); err != nil {
 		return nil, err
