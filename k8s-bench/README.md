@@ -24,6 +24,9 @@ The `run` subcommand executes the benchmark evaluations.
 # Run evaluation for a specific LLM provider and model with tool use shim disabled
 ./k8s-bench run --llm-provider=grok --models=grok-3-beta --agent-bin ../kubectl-ai --task-pattern=fix-probes --enable-tool-use-shim=false --output-dir .build/k8sbench
 
+# Run evaluation sequentially (one task at a time)
+./k8s-bench run --agent-bin <path/to/kubectl-ai/binary> --tasks-dir ./tasks --output-dir .build/k8sbench --concurrency 1
+
 # Run evaluation with all available options
 ./k8s-bench run \
   --agent-bin <path/to/kubectl-ai/binary> \
@@ -34,6 +37,7 @@ The `run` subcommand executes the benchmark evaluations.
   --models gemini-2.5-pro-preview-03-25,gemini-1.5-pro-latest \
   --enable-tool-use-shim true \
   --quiet true \
+  --concurrency 0 \
   --output-dir .build/k8sbench
 ```
 
@@ -50,6 +54,7 @@ The `run` subcommand executes the benchmark evaluations.
 | `--models` | Comma-separated list of models to evaluate | gemini-2.5-pro-preview-03-25 | No |
 | `--enable-tool-use-shim` | Enable tool use shim | true | No |
 | `--quiet` | Quiet mode (non-interactive mode) | true | No |
+| `--concurrency` | Number of tasks to run concurrently (0 = auto based on number of tasks, 1 = sequential, N = run N tasks at a time) | 0 | No |
 
 #### Analyze Subcommand
 
