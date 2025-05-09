@@ -28,13 +28,16 @@ export TAG=`date +%Y%m%d%H%M%S`
 # Build the image
 echo "Building images"
 export IMAGE_PREFIX=gcr.io/${GCP_PROJECT_ID}/
-BUILDX_ARGS=--push dev/tasks/build-images
+ARCHITECTURES=cpu,cuda BUILDX_ARGS=--push dev/tasks/build-images
 
 # TODO: support cpu on GKE?
-#MODEL_IMAGE="${IMAGE_PREFIX}llamacpp-gemma3-12b-it-cpu:${TAG}"
-MODEL_IMAGE="${IMAGE_PREFIX}llamacpp-gemma3-12b-it-cuda:${TAG}"
+MODEL_IMAGE="${IMAGE_PREFIX}llamacpp-gemma3-12b-it-cpu:${TAG}"
+RPCSERVER_IMAGE="${IMAGE_PREFIX:-}rpc-server-cuda:${TAG}"
 
 # Deploy manifests
 echo "Deploying manifests"
-cat k8s/llm-server.yaml | sed s@llamacpp-gemma3-12b-it-cuda:latest@${MODEL_IMAGE}@g | \
+cat k8s/llm-server-rpc.yaml | sed s@llamacpp-gemma3-12b-it-cpu:latest@${MODEL_IMAGE}@g | \
+  kubectl apply --context=${KUBE_CONTEXT} --server-side -f -
+
+cat k8s/rpc-server-cuda.yaml | sed s@rpc-server-cuda:latest@${RPCSERVER_IMAGE}@g | \
   kubectl apply --context=${KUBE_CONTEXT} --server-side -f -

@@ -88,14 +88,14 @@ func run(ctx context.Context) error {
 	// Compile the CEL expression
 	env, err := kel.NewEnv()
 	if err != nil {
-		return fmt.Errorf("initalizing CEL: %w", err)
+		return fmt.Errorf("initializing CEL: %w", err)
 	}
 	celExpression, err := kel.NewExpression(env, celExpressionText)
 	if err != nil {
 		return err
 	}
 
-	// build a pretty-printer for outputing status while polling
+	// build a pretty-printer for outputting status while polling
 	printer, err := celExpression.BuildStatusPrinter(ctx)
 	if err != nil {
 		return fmt.Errorf("building status printer: %w", err)

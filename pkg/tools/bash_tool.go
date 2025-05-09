@@ -17,9 +17,10 @@ package tools
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/GoogleCloudPlatform/kubectl-ai/gollm"
@@ -36,12 +37,13 @@ const (
 // expandShellVar expands shell variables and syntax using bash
 func expandShellVar(value string) (string, error) {
 	if strings.Contains(value, "~") {
-		cmd := exec.Command(bashBin, "-c", fmt.Sprintf("echo %s", value))
-		output, err := cmd.Output()
-		if err != nil {
-			return "", err
+		if len(value) >= 2 && value[0] == '~' && os.IsPathSeparator(value[1]) {
+			if runtime.GOOS == "windows" {
+				value = filepath.Join(os.Getenv("USERPROFILE"), value[2:])
+			} else {
+				value = filepath.Join(os.Getenv("HOME"), value[2:])
+			}
 		}
-		return strings.TrimSpace(string(output)), nil
 	}
 	return os.ExpandEnv(value), nil
 }
@@ -93,7 +95,12 @@ func (t *BashTool) Run(ctx context.Context, args map[string]any) (any, error) {
 		return &ExecResult{Error: "port-forwarding is not allowed because assistant is running in an unattended mode, please try some other alternative"}, nil
 	}
 
-	cmd := exec.CommandContext(ctx, bashBin, "-c", command)
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.CommandContext(ctx, os.Getenv("COMSPEC"), "/c", command)
+	} else {
+		cmd = exec.CommandContext(ctx, bashBin, "-c", command)
+	}
 	cmd.Dir = workDir
 	cmd.Env = os.Environ()
 	if kubeconfig != "" {
