@@ -23,6 +23,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/GoogleCloudPlatform/kubectl-ai/k8s-bench/pkg/model"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/journal"
@@ -40,40 +41,96 @@ func runEvaluation(ctx context.Context, config EvalConfig) error {
 		return fmt.Errorf("failed to load tasks: %w", err)
 	}
 
-	var allResults []model.TaskResult
+	// Fallback to sequential execution if concurrency is not set
+	if config.Concurrency <= 0 {
+		config.Concurrency = 1
+	}
 
+	// Create a channel for tasks to be processed
+	type taskJob struct {
+		taskID string
+		task   Task
+	}
+	taskCh := make(chan taskJob, len(tasks))
+
+	// Create a channel for collecting results
+	resultsCh := make(chan model.TaskResult, len(tasks)*len(config.LLMConfigs))
+
+	// Create a separate channel for errors
+	errorsCh := make(chan error, config.Concurrency)
+
+	// Load all tasks into the tasks channel
 	for taskID, task := range tasks {
-		fmt.Printf("Evaluating task: %s\n", taskID)
+		taskCh <- taskJob{taskID: taskID, task: task}
+	}
+	close(taskCh)
 
-		for _, llmConfig := range config.LLMConfigs {
-			taskOutputDir := ""
-			if config.OutputDir != "" {
-				taskOutputDir = filepath.Join(config.OutputDir, taskID, llmConfig.ID)
-				if err := os.MkdirAll(taskOutputDir, 0755); err != nil {
-					return fmt.Errorf("creating directory %q: %w", taskOutputDir, err)
+	// Create a wait group to track all workers
+	var wg sync.WaitGroup
+
+	fmt.Printf("Running tasks with concurrency: %d\n", config.Concurrency)
+
+	// Start workers based on concurrency setting
+	for i := 0; i < config.Concurrency; i++ {
+		wg.Add(1)
+		go func(workerID int) {
+			defer wg.Done()
+
+			for job := range taskCh {
+				fmt.Printf("Worker %d: Evaluating task: %s\n", workerID, job.taskID)
+
+				for _, llmConfig := range config.LLMConfigs {
+					taskOutputDir := ""
+					if config.OutputDir != "" {
+						taskOutputDir = filepath.Join(config.OutputDir, job.taskID, llmConfig.ID)
+						if err := os.MkdirAll(taskOutputDir, 0755); err != nil {
+							errorsCh <- fmt.Errorf("creating directory %q: %w", taskOutputDir, err)
+							return
+						}
+					}
+
+					var log io.Writer
+					if taskOutputDir != "" {
+						logPath := filepath.Join(taskOutputDir, "log.txt")
+						logFile, err := os.Create(logPath)
+						if err != nil {
+							errorsCh <- fmt.Errorf("creating log file %q: %w", logPath, err)
+							return
+						}
+						defer logFile.Close()
+						log = logFile
+					}
+
+					result := evaluateTask(ctx, config, job.taskID, job.task, llmConfig, log)
+
+					if taskOutputDir != "" {
+						if err := writeToYAMLFile(filepath.Join(taskOutputDir, "results.yaml"), result); err != nil {
+							errorsCh <- fmt.Errorf("writing results to file: %w", err)
+							return
+						}
+					}
+					resultsCh <- result
 				}
 			}
+		}(i)
+	}
 
-			var log io.Writer
-			if taskOutputDir != "" {
-				logPath := filepath.Join(taskOutputDir, "log.txt")
-				logFile, err := os.Create(logPath)
-				if err != nil {
-					return fmt.Errorf("creating log file %q: %w", logPath, err)
-				}
-				defer logFile.Close()
-				log = logFile
-			}
+	// Wait for all workers to complete
+	wg.Wait()
+	close(resultsCh)
+	close(errorsCh)
 
-			result := evaluateTask(ctx, config, taskID, task, llmConfig, log)
-
-			if taskOutputDir != "" {
-				if err := writeToYAMLFile(filepath.Join(taskOutputDir, "results.yaml"), result); err != nil {
-					return fmt.Errorf("writing results to file: %w", err)
-				}
-			}
-			allResults = append(allResults, result)
+	// Check if there were any errors
+	for err := range errorsCh {
+		if err != nil {
+			return err
 		}
+	}
+
+	// Collect and print results
+	var allResults []model.TaskResult
+	for result := range resultsCh {
+		allResults = append(allResults, result)
 	}
 
 	printResults(allResults)

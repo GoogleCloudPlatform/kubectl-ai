@@ -66,6 +66,7 @@ type EvalConfig struct {
 	TasksDir    string
 	TaskPattern string
 	AgentBin    string
+	Concurrency int
 
 	OutputDir string
 }
@@ -170,6 +171,7 @@ func runEvals(ctx context.Context) error {
 	flag.StringVar(&modelList, "models", modelList, "Comma-separated list of models to evaluate (e.g. 'gemini-1.0,gemini-2.0')")
 	flag.BoolVar(&enableToolUseShim, "enable-tool-use-shim", enableToolUseShim, "Enable tool use shim")
 	flag.BoolVar(&quiet, "quiet", quiet, "Quiet mode (non-interactive mode)")
+	flag.IntVar(&config.Concurrency, "concurrency", 0, "Number of tasks to run concurrently (0 = auto, 1 = sequential)")
 	flag.StringVar(&config.OutputDir, "output-dir", config.OutputDir, "Directory to write results to")
 	flag.Parse()
 
@@ -215,6 +217,17 @@ func runEvals(ctx context.Context) error {
 				Quiet:             quiet,
 			})
 		}
+	}
+
+	tasks, err := loadTasks(config)
+	if err != nil {
+		return fmt.Errorf("failed to load tasks: %w", err)
+	}
+
+	// If concurrency is set to auto (0), use the number of tasks
+	if config.Concurrency == 0 {
+		config.Concurrency = len(tasks)
+		fmt.Printf("Auto-configuring concurrency to %d (number of tasks)\n", config.Concurrency)
 	}
 
 	if err := runEvaluation(ctx, config); err != nil {
