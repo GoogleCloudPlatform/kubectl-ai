@@ -34,8 +34,12 @@ import (
 )
 
 func init() {
-	RegisterProvider("gemini", geminiFactory)
-	RegisterProvider("vertexai", vertexaiViaGeminiFactory)
+	if err := RegisterProvider("gemini", geminiFactory); err != nil {
+		klog.Fatalf("Failed to register gemini provider: %v", err)
+	}
+	if err := RegisterProvider("vertexai", vertexaiViaGeminiFactory); err != nil {
+		klog.Fatalf("Failed to register vertexai provider: %v", err)
+	}
 }
 
 func geminiFactory(ctx context.Context, u *url.URL) (Client, error) {
@@ -381,7 +385,7 @@ func (c *GeminiChat) partsToGemini(contents ...any) ([]*genai.Part, error) {
 	return parts, nil
 }
 
-// SendMessage sends a message to the model.
+// Send sends a message to the model.
 // It returns a ChatResponse object containing the response from the model.
 func (c *GeminiChat) Send(ctx context.Context, contents ...any) (ChatResponse, error) {
 	log := klog.FromContext(ctx)

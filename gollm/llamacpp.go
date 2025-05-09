@@ -28,7 +28,9 @@ import (
 )
 
 func init() {
-	RegisterProvider("llamacpp", llamacppFactory)
+	if err := RegisterProvider("llamacpp", llamacppFactory); err != nil {
+		klog.Fatalf("Failed to register llamacpp provider: %v", err)
+	}
 }
 
 func llamacppFactory(ctx context.Context, u *url.URL) (Client, error) {

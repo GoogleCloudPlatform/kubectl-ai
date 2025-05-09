@@ -25,7 +25,9 @@ import (
 )
 
 func init() {
-	RegisterProvider("ollama", ollamaFactory)
+	if err := RegisterProvider("ollama", ollamaFactory); err != nil {
+		klog.Fatalf("Failed to register ollama provider: %v", err)
+	}
 }
 
 func ollamaFactory(ctx context.Context, u *url.URL) (Client, error) {

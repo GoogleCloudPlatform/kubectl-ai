@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"k8s.io/klog/v2"
 	"net/url"
 	"os"
 	"strings"
@@ -28,7 +29,9 @@ import (
 )
 
 func init() {
-	RegisterProvider("azopenai", azureOpenAIFactory)
+	if err := RegisterProvider("azopenai", azureOpenAIFactory); err != nil {
+		klog.Fatalf("Failed to register azopenai provider: %v", err)
+	}
 }
 
 func azureOpenAIFactory(ctx context.Context, u *url.URL) (Client, error) {
