@@ -82,13 +82,14 @@ type Options struct {
 	EnableToolUseShim bool `json:"enableToolUseShim,omitempty"`
 	// Quiet flag indicates if the agent should run in non-interactive mode.
 	// It requires a query to be provided as a positional argument.
-	Quiet                  bool   `json:"quiet,omitempty"`
-	MCPServer              bool   `json:"mcpServer,omitempty"`
-	MaxIterations          int    `json:"maxIterations,omitempty"`
-	KubeConfigPath         string `json:"kubeConfigPath,omitempty"`
-	PromptTemplateFilePath string `json:"promptTemplateFilePath,omitempty"`
-	TracePath              string `json:"tracePath,omitempty"`
-	RemoveWorkDir          bool   `json:"removeWorkDir,omitempty"`
+	Quiet                             bool     `json:"quiet,omitempty"`
+	MCPServer                         bool     `json:"mcpServer,omitempty"`
+	MaxIterations                     int      `json:"maxIterations,omitempty"`
+	KubeConfigPath                    string   `json:"kubeConfigPath,omitempty"`
+	PromptTemplateFilePath            string   `json:"promptTemplateFilePath,omitempty"`
+	AdditionalPromptTemplateFilePaths []string `json:"additionalPromptTemplateFilePaths,omitempty"`
+	TracePath                         string   `json:"tracePath,omitempty"`
+	RemoveWorkDir                     bool     `json:"removeWorkDir,omitempty"`
 
 	// UserInterface is the type of user interface to use.
 	UserInterface UserInterface `json:"userInterface,omitempty"`
@@ -134,6 +135,7 @@ func (o *Options) InitDefaults() {
 	o.MaxIterations = 20
 	o.KubeConfigPath = ""
 	o.PromptTemplateFilePath = ""
+	o.AdditionalPromptTemplateFilePaths = []string{}
 	o.TracePath = filepath.Join(os.TempDir(), "kubectl-ai-trace.txt")
 	o.RemoveWorkDir = false
 
@@ -257,6 +259,7 @@ func (opt *Options) bindCLIFlagsToViper(f *pflag.FlagSet) error {
 	f.IntVar(&opt.MaxIterations, "max-iterations", opt.MaxIterations, "maximum number of iterations agent will try before giving up")
 	f.StringVar(&opt.KubeConfigPath, "kubeconfig", opt.KubeConfigPath, "path to kubeconfig file")
 	f.StringVar(&opt.PromptTemplateFilePath, "prompt-template-file-path", opt.PromptTemplateFilePath, "path to custom prompt template file")
+	f.StringArrayVar(&opt.AdditionalPromptTemplateFilePaths, "additional-prompt-template-file-paths", opt.AdditionalPromptTemplateFilePaths, "additional paths to custom prompt template files")
 	f.StringVar(&opt.TracePath, "trace-path", opt.TracePath, "path to the trace file")
 	f.BoolVar(&opt.RemoveWorkDir, "remove-workdir", opt.RemoveWorkDir, "remove the temporary working directory after execution")
 
@@ -377,16 +380,17 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 	}
 
 	conversation := &agent.Conversation{
-		Model:              opt.ModelID,
-		Kubeconfig:         opt.KubeConfigPath,
-		LLM:                llmClient,
-		MaxIterations:      opt.MaxIterations,
-		PromptTemplateFile: opt.PromptTemplateFilePath,
-		Tools:              tools.Default(),
-		Recorder:           recorder,
-		RemoveWorkDir:      opt.RemoveWorkDir,
-		SkipPermissions:    opt.SkipPermissions,
-		EnableToolUseShim:  opt.EnableToolUseShim,
+		Model:                     opt.ModelID,
+		Kubeconfig:                opt.KubeConfigPath,
+		LLM:                       llmClient,
+		MaxIterations:             opt.MaxIterations,
+		PromptTemplateFile:        opt.PromptTemplateFilePath,
+		AdditionalPromptTemplates: opt.AdditionalPromptTemplateFilePaths,
+		Tools:                     tools.Default(),
+		Recorder:                  recorder,
+		RemoveWorkDir:             opt.RemoveWorkDir,
+		SkipPermissions:           opt.SkipPermissions,
+		EnableToolUseShim:         opt.EnableToolUseShim,
 	}
 
 	err = conversation.Init(ctx, doc)
