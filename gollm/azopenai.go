@@ -18,11 +18,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"k8s.io/klog/v2"
-	"net/url"
 	"os"
 	"slices"
 	"strings"
+
+	"k8s.io/klog/v2"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/ai/azopenai"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
@@ -38,8 +38,12 @@ func init() {
 	}
 }
 
-func azureOpenAIFactory(ctx context.Context, u *url.URL) (Client, error) {
-	return NewAzureOpenAIClient(ctx, *u)
+/*
+azureOpenAIFactory is the provider factory function for Azure OpenAI.
+Supports ClientOptions for custom configuration.
+*/
+func azureOpenAIFactory(ctx context.Context, opts ClientOptions) (Client, error) {
+	return NewAzureOpenAIClient(ctx, opts)
 }
 
 type AzureOpenAIClient struct {
@@ -48,22 +52,31 @@ type AzureOpenAIClient struct {
 
 var _ Client = &AzureOpenAIClient{}
 
-func NewAzureOpenAIClient(ctx context.Context, u url.URL) (*AzureOpenAIClient, error) {
+// NewAzureOpenAIClient creates a new Azure OpenAI client.
+// Supports ClientOptions and SkipVerifySSL for custom HTTP transport.
+func NewAzureOpenAIClient(ctx context.Context, opts ClientOptions) (*AzureOpenAIClient, error) {
 	azureOpenAIEndpoint := os.Getenv("AZURE_OPENAI_ENDPOINT")
-	if u.Host != "" {
-		u.Scheme = "https"
-		azureOpenAIEndpoint = u.String()
-
+	if opts.URL != nil && opts.URL.Host != "" {
+		opts.URL.Scheme = "https"
+		azureOpenAIEndpoint = opts.URL.String()
 	}
 	if azureOpenAIEndpoint == "" {
 		return nil, fmt.Errorf("AZURE_OPENAI_ENDPOINT environment variable not set")
 	}
 
+	// Create a custom HTTP client (supports SkipVerifySSL)
+	httpClient := createCustomHTTPClient(opts.SkipVerifySSL)
+
 	azureOpenAIClient := AzureOpenAIClient{}
 	azureOpenAIKey := os.Getenv("AZURE_OPENAI_API_KEY")
+	clientOpts := &azopenai.ClientOptions{
+		ClientOptions: azcore.ClientOptions{
+			Transport: httpClient,
+		},
+	}
 	if azureOpenAIKey != "" {
 		keyCredential := azcore.NewKeyCredential(azureOpenAIKey)
-		client, err := azopenai.NewClientWithKeyCredential(azureOpenAIEndpoint, keyCredential, nil)
+		client, err := azopenai.NewClientWithKeyCredential(azureOpenAIEndpoint, keyCredential, clientOpts)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create azure openai client: %w", err)
 		}
@@ -73,7 +86,7 @@ func NewAzureOpenAIClient(ctx context.Context, u url.URL) (*AzureOpenAIClient, e
 		if err != nil {
 			return nil, fmt.Errorf("failed to get credential: %w", err)
 		}
-		client, err := azopenai.NewClient(azureOpenAIEndpoint, credential, nil)
+		client, err := azopenai.NewClient(azureOpenAIEndpoint, credential, clientOpts)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create azure openai client: %w", err)
 		}
@@ -81,7 +94,6 @@ func NewAzureOpenAIClient(ctx context.Context, u url.URL) (*AzureOpenAIClient, e
 	}
 
 	return &azureOpenAIClient, nil
-
 }
 
 func (c *AzureOpenAIClient) Close() error {

@@ -23,7 +23,6 @@ import (
 	"iter"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
 	"strings"
@@ -42,9 +41,10 @@ func init() {
 	}
 }
 
-func geminiFactory(ctx context.Context, u *url.URL) (Client, error) {
+// geminiFactory is the provider factory function for Gemini.
+// Supports ClientOptions for consistency, but skipVerifySSL is not used.
+func geminiFactory(ctx context.Context, opts ClientOptions) (Client, error) {
 	opt := GeminiAPIClientOptions{}
-
 	return NewGeminiAPIClient(ctx, opt)
 }
 
@@ -86,9 +86,10 @@ type VertexAIClientOptions struct {
 	Location string
 }
 
-func vertexaiViaGeminiFactory(ctx context.Context, u *url.URL) (Client, error) {
+// vertexaiViaGeminiFactory is the provider factory function for VertexAI via Gemini.
+// Supports ClientOptions for consistency, but skipVerifySSL is not used.
+func vertexaiViaGeminiFactory(ctx context.Context, opts ClientOptions) (Client, error) {
 	opt := VertexAIClientOptions{}
-
 	return NewVertexAIClient(ctx, opt)
 }
 

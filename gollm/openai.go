@@ -19,7 +19,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
 
 	openai "github.com/openai/openai-go"
@@ -28,16 +27,16 @@ import (
 )
 
 // Register the OpenAI provider factory on package initialization.
+// The new factory function supports ClientOptions.
 func init() {
 	if err := RegisterProvider("openai", newOpenAIClientFactory); err != nil {
 		klog.Fatalf("Failed to register openai provider: %v", err)
 	}
 }
 
-// newOpenAIClientFactory is the factory function for creating OpenAI clients.
-func newOpenAIClientFactory(ctx context.Context, _ *url.URL) (Client, error) {
-	// The URL is not currently used for OpenAI config, relies on env vars.
-	return NewOpenAIClient(ctx)
+// newOpenAIClientFactory is the factory function for creating OpenAI clients with options.
+func newOpenAIClientFactory(ctx context.Context, opts ClientOptions) (Client, error) {
+	return NewOpenAIClient(ctx, opts)
 }
 
 // OpenAIClient implements the gollm.Client interface for OpenAI models.
@@ -49,27 +48,37 @@ type OpenAIClient struct {
 var _ Client = &OpenAIClient{}
 
 // NewOpenAIClient creates a new client for interacting with OpenAI.
-// It reads the API key and optional endpoint from environment variables
-// OPENAI_API_KEY and OPENAI_ENDPOINT.
-func NewOpenAIClient(ctx context.Context) (*OpenAIClient, error) {
+// Supports custom HTTP client and SkipVerifySSL.
+func NewOpenAIClient(ctx context.Context, opts ClientOptions) (*OpenAIClient, error) {
 	apiKey := os.Getenv("OPENAI_API_KEY")
 	if apiKey == "" {
-		// The NewClient might handle this, but explicit check is safer
 		return nil, errors.New("OPENAI_API_KEY environment variable not set")
 	}
 
+	// Determine endpoint: use environment variable or override from opts.URL
 	endpoint := os.Getenv("OPENAI_ENDPOINT")
+	if opts.URL != nil && opts.URL.Host != "" {
+		endpoint = opts.URL.String()
+	}
+
+	// Create a custom HTTP client (supports SkipVerifySSL)
+	httpClient := createCustomHTTPClient(opts.SkipVerifySSL)
+
+	clientOpts := []option.RequestOption{
+		option.WithAPIKey(apiKey),
+		option.WithHTTPClient(httpClient),
+	}
 	if endpoint != "" {
 		klog.Infof("Using custom OpenAI endpoint: %s", endpoint)
-		return &OpenAIClient{
-			client: openai.NewClient(option.WithBaseURL(endpoint)),
-		}, nil
+		clientOpts = append(clientOpts, option.WithBaseURL(endpoint))
 	}
 
 	return &OpenAIClient{
-		client: openai.NewClient(),
+		client: openai.NewClient(clientOpts...),
 	}, nil
 }
+
+// (Moved to factory.go, just call gollm.createCustomHTTPClient)
 
 // Close cleans up any resources used by the client.
 func (c *OpenAIClient) Close() error {
@@ -156,7 +165,6 @@ func (c *OpenAIClient) SetResponseSchema(schema *Schema) error {
 // Note: This may not work with all OpenAI-compatible providers if they don't fully implement
 // the Models.List endpoint or return data in a different format.
 func (c *OpenAIClient) ListModels(ctx context.Context) ([]string, error) {
-
 	var opts []option.RequestOption
 
 	endpoint := os.Getenv("OPENAI_ENDPOINT") // if another endpoint is used

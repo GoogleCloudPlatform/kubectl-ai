@@ -33,8 +33,10 @@ func init() {
 	}
 }
 
-func llamacppFactory(ctx context.Context, u *url.URL) (Client, error) {
-	return NewLlamaCppClient(ctx)
+// llamacppFactory is the provider factory function for llama.cpp.
+// Supports ClientOptions for custom configuration, including skipVerifySSL.
+func llamacppFactory(ctx context.Context, opts ClientOptions) (Client, error) {
+	return NewLlamaCppClient(ctx, opts)
 }
 
 type LlamaCppClient struct {
@@ -52,7 +54,9 @@ type LlamaCppChat struct {
 
 var _ Client = &LlamaCppClient{}
 
-func NewLlamaCppClient(ctx context.Context) (*LlamaCppClient, error) {
+// NewLlamaCppClient creates a new client for llama.cpp.
+// Supports custom HTTP client and skipVerifySSL via ClientOptions.
+func NewLlamaCppClient(ctx context.Context, opts ClientOptions) (*LlamaCppClient, error) {
 	host := os.Getenv("LLAMACPP_HOST")
 	if host == "" {
 		host = "http://127.0.0.1:8080/"
@@ -64,9 +68,11 @@ func NewLlamaCppClient(ctx context.Context) (*LlamaCppClient, error) {
 	}
 	klog.Infof("using llama.cpp with base url %v", baseURL.String())
 
+	httpClient := createCustomHTTPClient(opts.SkipVerifySSL)
+
 	return &LlamaCppClient{
 		baseURL:    baseURL,
-		httpClient: http.DefaultClient,
+		httpClient: httpClient,
 	}, nil
 }
 

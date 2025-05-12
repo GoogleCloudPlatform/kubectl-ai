@@ -19,7 +19,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
 
 	openai "github.com/openai/openai-go"
@@ -28,16 +27,16 @@ import (
 )
 
 // Register the Grok provider factory on package initialization.
+// The new factory function supports ClientOptions, including skipVerifySSL.
 func init() {
 	if err := RegisterProvider("grok", newGrokClientFactory); err != nil {
 		klog.Fatalf("Failed to register Grok provider: %v", err)
 	}
 }
 
-// newGrokClientFactory is the factory function for creating Grok clients.
-func newGrokClientFactory(ctx context.Context, _ *url.URL) (Client, error) {
-	// The URL is not currently used for Grok config, relies on env vars.
-	return NewGrokClient(ctx)
+// newGrokClientFactory is the factory function for creating Grok clients with options.
+func newGrokClientFactory(ctx context.Context, opts ClientOptions) (Client, error) {
+	return NewGrokClient(ctx, opts)
 }
 
 // GrokClient implements the gollm.Client interface for X.AI's Grok model.
@@ -49,12 +48,10 @@ type GrokClient struct {
 var _ Client = &GrokClient{}
 
 // NewGrokClient creates a new client for interacting with X.AI's Grok model.
-// It reads the API key and optional endpoint from environment variables
-// GROK_API_KEY and GROK_ENDPOINT.
-func NewGrokClient(ctx context.Context) (*GrokClient, error) {
+// Supports custom HTTP client and skipVerifySSL via ClientOptions.
+func NewGrokClient(ctx context.Context, opts ClientOptions) (*GrokClient, error) {
 	apiKey := os.Getenv("GROK_API_KEY")
 	if apiKey == "" {
-		// The NewClient might handle this, but explicit check is safer
 		return nil, errors.New("GROK_API_KEY environment variable not set")
 	}
 
@@ -68,11 +65,13 @@ func NewGrokClient(ctx context.Context) (*GrokClient, error) {
 		klog.Infof("Using custom Grok endpoint: %s", endpoint)
 	}
 
-	// Use the OpenAI client with custom base URL
+	// Use the OpenAI client with custom base URL and custom HTTP client
+	httpClient := createCustomHTTPClient(opts.SkipVerifySSL)
 	return &GrokClient{
 		client: openai.NewClient(
 			option.WithAPIKey(apiKey),
 			option.WithBaseURL(endpoint),
+			option.WithHTTPClient(httpClient),
 		),
 	}, nil
 }

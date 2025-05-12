@@ -16,6 +16,7 @@ package gollm
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"math/rand/v2"
@@ -37,7 +38,23 @@ type registry struct {
 	providers map[string]FactoryFunc
 }
 
-type FactoryFunc func(ctx context.Context, uri *url.URL) (Client, error)
+type ClientOptions struct {
+	URL           *url.URL
+	SkipVerifySSL bool
+	// Extend with more options as needed
+}
+
+// Option is a functional option for configuring ClientOptions.
+type Option func(*ClientOptions)
+
+// WithSkipVerifySSL enables skipping SSL certificate verification for HTTP clients.
+func WithSkipVerifySSL() Option {
+	return func(o *ClientOptions) {
+		o.SkipVerifySSL = true
+	}
+}
+
+type FactoryFunc func(ctx context.Context, opts ClientOptions) (Client, error)
 
 func RegisterProvider(id string, factoryFunc FactoryFunc) error {
 	return globalRegistry.RegisterProvider(id, factoryFunc)
@@ -58,7 +75,7 @@ func (r *registry) RegisterProvider(id string, factoryFunc FactoryFunc) error {
 	return nil
 }
 
-func (r *registry) NewClient(ctx context.Context, providerID string) (Client, error) {
+func (r *registry) NewClient(ctx context.Context, providerID string, opts ...Option) (Client, error) {
 	// providerID can be just an ID, for example "gemini" instead of "gemini://"
 	if !strings.Contains(providerID, "/") && !strings.Contains(providerID, ":") {
 		providerID = providerID + "://"
@@ -74,11 +91,27 @@ func (r *registry) NewClient(ctx context.Context, providerID string) (Client, er
 		return nil, fmt.Errorf("provider %q not registered", u.Scheme)
 	}
 
-	return factoryFunc(ctx, u)
+	// Build ClientOptions
+	clientOpts := ClientOptions{
+		URL: u,
+	}
+	// Support environment variable override for SkipVerifySSL
+	if v := os.Getenv("LLM_SKIP_VERIFY_SSL"); v == "1" || strings.ToLower(v) == "true" {
+		clientOpts.SkipVerifySSL = true
+	}
+	for _, opt := range opts {
+		opt(&clientOpts)
+	}
+
+	return factoryFunc(ctx, clientOpts)
 }
 
-// NewClient builds an Client based on the LLM_CLIENT env var or the provided providerID. ProviderID (if not empty) overrides the provider from LLM_CLIENT env var.
-func NewClient(ctx context.Context, providerID string) (Client, error) {
+/*
+NewClient builds a Client based on the LLM_CLIENT environment variable or the provided providerID.
+If providerID is not empty, it overrides the value from LLM_CLIENT.
+Supports Option parameters and the LLM_SKIP_VERIFY_SSL environment variable.
+*/
+func NewClient(ctx context.Context, providerID string, opts ...Option) (Client, error) {
 	if providerID == "" {
 		s := os.Getenv("LLM_CLIENT")
 		if s == "" {
@@ -87,7 +120,7 @@ func NewClient(ctx context.Context, providerID string) (Client, error) {
 		providerID = s
 	}
 
-	return globalRegistry.NewClient(ctx, providerID)
+	return globalRegistry.NewClient(ctx, providerID, opts...)
 }
 
 // APIError represents an error returned by the LLM client.
@@ -140,6 +173,22 @@ func DefaultIsRetryableError(err error) bool {
 	// e.g., if errors.Is(err, specificLLMRateLimitError) { return true }
 
 	return false
+}
+
+// createCustomHTTPClient returns an *http.Client that optionally skips SSL certificate verification.
+// This is shared by all providers that need custom HTTP transport.
+func createCustomHTTPClient(skipVerify bool) *http.Client {
+	if !skipVerify {
+		return http.DefaultClient
+	}
+	return &http.Client{
+		Transport: &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: true,
+			},
+		},
+	}
 }
 
 // RetryConfig holds the configuration for the retry mechanism (same as before)
@@ -249,7 +298,6 @@ func NewRetryChat[C Chat](
 	underlying C,
 	config RetryConfig,
 ) Chat {
-
 	return &retryChat[C]{
 		underlying: underlying,
 		config:     config,
