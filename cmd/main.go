@@ -86,6 +86,7 @@ type Options struct {
 	ExtraPromptPaths       []string `json:"extraPromptPaths,omitempty"`
 	TracePath              string   `json:"tracePath,omitempty"`
 	RemoveWorkDir          bool     `json:"removeWorkDir,omitempty"`
+	ToolConfigPath         string   `json:"toolConfigPath,omitempty"`
 
 	// UserInterface is the type of user interface to use.
 	UserInterface UserInterface `json:"userInterface,omitempty"`
@@ -236,6 +237,12 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("failed to load config file: %w", err)
 	}
 
+	// Load and register custom tools from config file
+	if err := tools.LoadAndRegisterCustomTools(opt.ToolConfigPath); err != nil {
+		// Log the error but continue execution, as custom tools are optional
+		klog.Warningf("Failed to load or register custom tools (path: %q): %v", opt.ToolConfigPath, err)
+	}
+
 	rootCmd, err := BuildRootCommand(&opt)
 	if err != nil {
 		return err
@@ -267,6 +274,7 @@ func (opt *Options) bindCLIFlags(f *pflag.FlagSet) error {
 	f.StringVar(&opt.ModelID, "model", opt.ModelID, "language model e.g. gemini-2.0-flash-thinking-exp-01-21, gemini-2.0-flash")
 	f.BoolVar(&opt.SkipPermissions, "skip-permissions", opt.SkipPermissions, "(dangerous) skip asking for confirmation before executing kubectl commands that modify resources")
 	f.BoolVar(&opt.MCPServer, "mcp-server", opt.MCPServer, "run in MCP server mode")
+	f.StringVar(&opt.ToolConfigPath, "custom-tools-config", opt.ToolConfigPath, "path to custom tools config file")
 	f.BoolVar(&opt.EnableToolUseShim, "enable-tool-use-shim", opt.EnableToolUseShim, "enable tool use shim")
 	f.BoolVar(&opt.Quiet, "quiet", opt.Quiet, "run in non-interactive mode, requires a query to be provided as a positional argument")
 

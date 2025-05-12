@@ -19,6 +19,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"os"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -26,6 +28,7 @@ import (
 
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/journal"
 	"github.com/google/uuid"
+	"sigs.k8s.io/yaml"
 )
 
 type ContextKey string
@@ -179,4 +182,52 @@ func ToolResultToMap(result any) (map[string]any, error) {
 		return nil, fmt.Errorf("converting json result to map: %w", err)
 	}
 	return m, nil
+}
+
+// LoadAndRegisterCustomTools loads tool configurations from a YAML file
+// and registers them.
+func LoadAndRegisterCustomTools(configPath string) error {
+	if configPath == "" {
+		// Default config path: ~/.config/kubectl-ai/tools.yaml
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("failed to get user home directory for default custom tools config: %w", err)
+		}
+		configPath = filepath.Join(home, ".config", "kubectl-ai", "tools.yaml")
+	}
+
+	yamlFile, err := os.ReadFile(configPath)
+	if os.IsNotExist(err) {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("failed to read config file %s: %w", configPath, err)
+	}
+
+	var configs []CustomToolConfig
+	err = yaml.Unmarshal(yamlFile, &configs)
+	if err != nil {
+		return fmt.Errorf("failed to parse YAML config file %s: %w", configPath, err)
+	}
+
+	// Register each custom tool
+	var registrationErrors []string
+	for _, config := range configs {
+		tool, err := NewCustomTool(config)
+		if err != nil {
+			registrationErrors = append(registrationErrors, fmt.Sprintf("failed to create tool %q: %v", config.Name, err))
+			continue // Skip registration if creation failed
+		}
+		// Check for duplicate registration attempt
+		if _, exists := allTools.tools[tool.Name()]; exists {
+			registrationErrors = append(registrationErrors, fmt.Sprintf("tool %q already registered (possibly built-in), skipping custom definition", tool.Name()))
+			continue
+		}
+		RegisterTool(tool)
+	}
+
+	if len(registrationErrors) > 0 {
+		return fmt.Errorf("encountered errors during custom tool registration:\n - %s", strings.Join(registrationErrors, "\n - "))
+	}
+
+	return nil
 }
