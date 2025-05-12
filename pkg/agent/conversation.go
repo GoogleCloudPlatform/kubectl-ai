@@ -41,10 +41,10 @@ type Conversation struct {
 
 	// PromptTemplateFile allows specifying a custom template file
 	PromptTemplateFile string
-	// AdditionalPromptTemplates allows specifying additional prompt templates
+	// ExtraPromptPaths allows specifying additional prompt templates
 	// to be combined with PromptTemplateFile
-	AdditionalPromptTemplates []string
-	Model                     string
+	ExtraPromptPaths []string
+	Model            string
 
 	RemoveWorkDir bool
 
@@ -339,10 +339,10 @@ func (a *Conversation) generatePrompt(_ context.Context, defaultPromptTemplate s
 		promptTemplate = string(content)
 	}
 
-	for _, additionalPromptTemplate := range a.AdditionalPromptTemplates {
-		content, err := os.ReadFile(additionalPromptTemplate)
+	for _, extraPromptPath := range a.ExtraPromptPaths {
+		content, err := os.ReadFile(extraPromptPath)
 		if err != nil {
-			return "", fmt.Errorf("error reading additional template file: %v", err)
+			return "", fmt.Errorf("error reading extra prompt path: %v", err)
 		}
 		promptTemplate += "\n" + string(content)
 	}
