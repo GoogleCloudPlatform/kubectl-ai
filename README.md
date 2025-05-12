@@ -1,5 +1,7 @@
 # kubectl-ai
 
+English | [繁體中文](README.zh-TW.md) | [简体中文](README.zh-CN.md)
+
 `kubectl-ai` acts as an intelligent interface, translating user intent into
 precise Kubernetes operations, making Kubernetes management more accessible and
 efficient.
@@ -31,11 +33,14 @@ sudo mv kubectl-ai /usr/local/bin/
 ```
 
 #### Install with Krew (Linux/macOS/Windows)
+
 First of all, you need to have krew insatlled, refer to [krew document](https://krew.sigs.k8s.io/docs/user-guide/setup/install/) for more details
 Then you can install with krew
+
 ```shell
 kubectl krew install ai
 ```
+
 Now you can invoke `kubectl-ai` as a kubectl plugin like this: `kubectl ai`.
 
 ### Usage
@@ -107,14 +112,16 @@ kubectl-ai --llm-provider=openai --model=gpt-4.1
 ```
 
 #### Using OpenAI Compatible API
+
 For example, you can use aliyun qwen-xxx models as follows
+
 ```bash
 export OPENAI_API_KEY=your_openai_api_key_here
 export OPENAI_ENDPOINT=https://dashscope.aliyuncs.com/compatible-mode/v1
 kubectl-ai --llm-provider=openai --model=qwen-plus
 ```
 
-* Note: `kubectl-ai` supports AI models from `gemini`, `vertexai`, `azopenai`, `openai`, `grok` and local LLM providers such as `ollama` and `llama.cpp`.
+- Note: `kubectl-ai` supports AI models from `gemini`, `vertexai`, `azopenai`, `openai`, `grok` and local LLM providers such as `ollama` and `llama.cpp`.
 
 Run interactively:
 
@@ -148,17 +155,16 @@ cat error.log | kubectl-ai "explain the error"
 
 You can use the following special keywords for specific actions:
 
-* `model`: Display the currently selected model.
-* `models`: List all available models.
-* `version`: Display the `kubectl-ai` version.
-* `reset`: Clear the conversational context.
-* `clear`: Clear the terminal screen.
-* `exit` or `quit`: Terminate the interactive shell (Ctrl+C also works).
+- `model`: Display the currently selected model.
+- `models`: List all available models.
+- `version`: Display the `kubectl-ai` version.
+- `reset`: Clear the conversational context.
+- `clear`: Clear the terminal screen.
+- `exit` or `quit`: Terminate the interactive shell (Ctrl+C also works).
 
 ### Invoking as kubectl plugin
 
-Use it via the `kubectl` plug interface like this: `kubectl ai`.  kubectl will find `kubectl-ai` as long as it's in your PATH.  For more information about plugins please see: https://kubernetes.io/docs/tasks/extend-kubectl/kubectl-plugins/
-
+Use it via the `kubectl` plug interface like this: `kubectl ai`. kubectl will find `kubectl-ai` as long as it's in your PATH. For more information about plugins please see: [kubectl-plugins](https://kubernetes.io/docs/tasks/extend-kubectl/kubectl-plugins/)
 
 ### Examples
 
@@ -189,12 +195,12 @@ You can also use `kubectl-ai` as a MCP server that exposes `kubectl` as one of t
 
 kubectl-ai project includes [k8s-bench](./k8s-bench/README.md) - a benchmark to evaluate performance of different LLM models on kubernetes related tasks. Here is a summary from our last run:
 
-| Model | Success | Fail |
-|-------|---------|------|
-| gemini-2.5-flash-preview-04-17 | 10 | 0 |
-| gemini-2.5-pro-preview-03-25 | 10 | 0 |
-| gemma-3-27b-it | 8 | 2 |
-| **Total** | 28 | 2 |
+| Model                          | Success | Fail |
+| ------------------------------ | ------- | ---- |
+| gemini-2.5-flash-preview-04-17 | 10      | 0    |
+| gemini-2.5-pro-preview-03-25   | 10      | 0    |
+| gemma-3-27b-it                 | 8       | 2    |
+| **Total**                      | 28      | 2    |
 
 See [full report](./k8s-bench.md) for more details.
 
@@ -205,6 +211,6 @@ We welcome contributions to `kubectl-ai` from the community. Take a look at our
 
 ---
 
-*Note: This is not an officially supported Google product. This project is not
+_Note: This is not an officially supported Google product. This project is not
 eligible for the [Google Open Source Software Vulnerability Rewards
-Program](https://bughunters.google.com/open-source-security).*
+Program](https://bughunters.google.com/open-source-security)._
