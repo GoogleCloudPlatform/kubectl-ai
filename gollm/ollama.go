@@ -20,6 +20,7 @@ import (
 	"fmt"
 
 	"github.com/ollama/ollama/api"
+	"github.com/ollama/ollama/envconfig"
 	"k8s.io/klog/v2"
 )
 
@@ -55,13 +56,9 @@ var _ Client = &OllamaClient{}
 // NewOllamaClient creates a new client for Ollama.
 // Supports custom HTTP client and skipVerifySSL via ClientOptions if the SDK supports it.
 func NewOllamaClient(ctx context.Context, opts ClientOptions) (*OllamaClient, error) {
-	// If the Ollama SDK supports custom HTTP client, inject it here.
-	// Otherwise, fallback to default environment-based client.
-	client, err := api.ClientFromEnvironment()
-	if err != nil {
-		return nil, err
-	}
-	// NOTE: If api.ClientFromEnvironment ever supports custom HTTP client, inject createCustomHTTPClient(opts.SkipVerifySSL) here.
+	// Create custom HTTP client with SSL verification option from client options
+	httpClient := createCustomHTTPClient(opts.SkipVerifySSL)
+	client := api.NewClient(envconfig.Host(), httpClient)
 
 	return &OllamaClient{
 		client: client,
