@@ -64,11 +64,7 @@ Cursor also supports MCP servers. You can [configure `kubectl-ai` MCP Server](ht
                 // Find the right path by running `which kubectl-ai`
                 "command": "/usr/local/bin/kubectl-ai",
                 // The `--kubeconfig` argument can often be omitted if your `kubectl` is already configured to point to the desired cluster
-                "args": [
-                    "--kubeconfig",
-                    "~/.kube/config",
-                    "--mcp-server",
-                ],
+                "args": ["--kubeconfig", "~/.kube/config", "--mcp-server"],
                 "env": {
                   // Define specific environment variables needed
                 }
