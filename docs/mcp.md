@@ -57,7 +57,6 @@ Cursor also supports MCP servers. You can [configure `kubectl-ai` MCP Server](ht
 
 ```json
     "mcp": {
-        "inputs": [],
         "servers": {
             "kubectl-ai": {
                 "type": "stdio",
@@ -71,7 +70,6 @@ Cursor also supports MCP servers. You can [configure `kubectl-ai` MCP Server](ht
             }
         }
     }
-
 ```
 
 ## Demo
