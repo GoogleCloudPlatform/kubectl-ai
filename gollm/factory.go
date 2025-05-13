@@ -38,6 +38,16 @@ type registry struct {
 	providers map[string]FactoryFunc
 }
 
+func (r *registry) listProviders() []string {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+	providers := make([]string, 0, len(r.providers))
+	for k := range r.providers {
+		providers = append(providers, k)
+	}
+	return providers
+}
+
 type ClientOptions struct {
 	URL           *url.URL
 	SkipVerifySSL bool
@@ -81,6 +91,9 @@ func (r *registry) NewClient(ctx context.Context, providerID string, opts ...Opt
 		providerID = providerID + "://"
 	}
 
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+
 	u, err := url.Parse(providerID)
 	if err != nil {
 		return nil, fmt.Errorf("parsing provider id %q: %w", providerID, err)
@@ -88,7 +101,7 @@ func (r *registry) NewClient(ctx context.Context, providerID string, opts ...Opt
 
 	factoryFunc := r.providers[u.Scheme]
 	if factoryFunc == nil {
-		return nil, fmt.Errorf("provider %q not registered", u.Scheme)
+		return nil, fmt.Errorf("provider %q not registered. Available providers: %v", u.Scheme, r.listProviders())
 	}
 
 	// Build ClientOptions
@@ -115,7 +128,7 @@ func NewClient(ctx context.Context, providerID string, opts ...Option) (Client, 
 	if providerID == "" {
 		s := os.Getenv("LLM_CLIENT")
 		if s == "" {
-			return nil, fmt.Errorf("LLM_CLIENT is not set")
+			return nil, fmt.Errorf("LLM_CLIENT is not set. Available providers: %v", globalRegistry.listProviders())
 		}
 		providerID = s
 	}
@@ -225,11 +238,11 @@ func Retry[T any](
 	backoff := config.InitialBackoff
 
 	for attempt := 1; attempt <= config.MaxAttempts; attempt++ {
-		// log.Printf("Executing operation, attempt %d of %d", attempt, config.MaxAttempts) // Optional verbose log
+		log.V(2).Info("Retry attempt started", "attempt", attempt, "maxAttempts", config.MaxAttempts, "backoff", backoff)
 		result, err := operation(ctx)
 
 		if err == nil {
-			// Success
+			log.V(2).Info("Retry attempt succeeded", "attempt", attempt)
 			return result, nil
 		}
 		lastErr = err // Store the last error encountered
@@ -261,7 +274,7 @@ func Retry[T any](
 			waitTime += time.Duration(rand.Float64() * float64(backoff) / 2)
 		}
 
-		log.Info("Waiting before next attempt", "waitTime", waitTime, "attempt", attempt+1, "maxAttempts", config.MaxAttempts)
+		log.V(2).Info("Waiting before next retry attempt", "waitTime", waitTime, "nextAttempt", attempt+1, "maxAttempts", config.MaxAttempts)
 
 		// Wait or react to context cancellation
 		select {
