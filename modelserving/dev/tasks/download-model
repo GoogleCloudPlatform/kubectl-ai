@@ -10,8 +10,53 @@ cd "${SRC_DIR}"
 
 mkdir -p .cache
 
-# TODO Verify checksum
-if [[ ! -f .cache/gemma-3-12b-it-Q4_K_M.gguf ]]; then
-  echo "Downloading gemma-3-12b-it-Q4_K_M.gguf"
-  wget https://huggingface.co/unsloth/gemma-3-12b-it-GGUF/resolve/main/gemma-3-12b-it-Q4_K_M.gguf?download=true -O .cache/gemma-3-12b-it-Q4_K_M.gguf
+MODEL_NAME="gemma-3-12b-it-Q4_K_M.gguf"
+MODEL_PATH=".cache/${MODEL_NAME}"
+MODEL_REPO="unsloth/gemma-3-12b-it-GGUF"
+MODEL_URL="https://huggingface.co/${MODEL_REPO}/resolve/main/${MODEL_NAME}"
+
+# Fetch SHA-256 checksum from Hugging Face API
+fetch_expected_checksum() {
+  echo "Fetching expected checksum for ${MODEL_NAME} from Hugging Face..."
+  EXPECTED_SHA256=$(curl -s "https://huggingface.co/api/models/${MODEL_REPO}" | \
+    jq -r ".siblings[] | select(.rfilename == \"${MODEL_NAME}\") | .sha256")
+
+  if [[ -z "${EXPECTED_SHA256}" || "${EXPECTED_SHA256}" == "null" ]]; then
+    echo "Failed to retrieve expected SHA256 checksum from Hugging Face"
+    exit 1
+  fi
+
+  echo "Expected SHA256: ${EXPECTED_SHA256}"
+}
+
+download_model() {
+  echo "Downloading ${MODEL_NAME}..."
+  wget "${MODEL_URL}" -O "${MODEL_PATH}"
+}
+
+verify_checksum() {
+  echo "Verifying checksum for ${MODEL_NAME}..."
+  local actual_hash
+  actual_hash=$(sha256sum "${MODEL_PATH}" | awk '{print $1}')
+
+  if [[ "${actual_hash}" != "${EXPECTED_SHA256}" ]]; then
+    echo "Checksum mismatch"
+    echo "Expected: ${EXPECTED_SHA256}"
+    echo "Actual:   ${actual_hash}"
+    rm -f "${MODEL_PATH}"
+    exit 1
+  fi
+
+  echo "Checksum verified"
+}
+
+# Main logic
+fetch_expected_checksum
+
+if [[ ! -f "${MODEL_PATH}" ]]; then
+  download_model
+  verify_checksum
+else
+  echo "${MODEL_NAME} already exists. Verifying checksum..."
+  verify_checksum
 fi

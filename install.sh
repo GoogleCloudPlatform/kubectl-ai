@@ -19,7 +19,7 @@ case "$sysOS" in
   darwin)  OS="Darwin" ;;
   *)
     echo "If you are on Windows or another unsupported OS, please follow the manual installation instructions at:"
-    echo "https://github.com/GoogleCloudPlatform/kubectl-ai#manual-installation"
+    echo "https://github.com/GoogleCloudPlatform/kubectl-ai#manual-installation-linux-macos-and-windows"
     exit 1
     ;;
 esac
@@ -31,7 +31,7 @@ case "$ARCH" in
   arm64|aarch64) ARCH="arm64" ;;
   *)
     echo "If you are on an unsupported architecture, please follow the manual installation instructions at:"
-    echo "https://github.com/GoogleCloudPlatform/kubectl-ai#manual-installation"
+    echo "https://github.com/GoogleCloudPlatform/kubectl-ai#manual-installation-linux-macos-and-windows"
     exit 1
     ;;
 esac

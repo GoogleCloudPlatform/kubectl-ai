@@ -18,7 +18,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -37,7 +36,6 @@ import (
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/ui/html"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
-	"github.com/spf13/viper"
 
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/yaml"
@@ -50,8 +48,6 @@ var (
 	date    = "unknown"
 )
 
-const viperEnvPrefix = "KUBECTL_AI"
-
 func BuildRootCommand(opt *Options) (*cobra.Command, error) {
 	rootCmd := &cobra.Command{
 		Use:   "kubectl-ai",
@@ -63,7 +59,7 @@ func BuildRootCommand(opt *Options) (*cobra.Command, error) {
 		},
 	}
 
-	if err := opt.bindCLIFlagsToViper(rootCmd.Flags()); err != nil {
+	if err := opt.bindCLIFlags(rootCmd.Flags()); err != nil {
 		return nil, err
 	}
 
@@ -223,8 +219,6 @@ func run(ctx context.Context) error {
 
 	defer klog.Flush()
 
-	setupViperEnv()
-
 	var opt Options
 
 	opt.InitDefaults()
@@ -253,7 +247,7 @@ func run(ctx context.Context) error {
 	return nil
 }
 
-func (opt *Options) bindCLIFlagsToViper(f *pflag.FlagSet) error {
+func (opt *Options) bindCLIFlags(f *pflag.FlagSet) error {
 	f.IntVar(&opt.MaxIterations, "max-iterations", opt.MaxIterations, "maximum number of iterations agent will try before giving up")
 	f.StringVar(&opt.KubeConfigPath, "kubeconfig", opt.KubeConfigPath, "path to kubeconfig file")
 	f.StringVar(&opt.PromptTemplateFilePath, "prompt-template-file-path", opt.PromptTemplateFilePath, "path to custom prompt template file")
@@ -269,35 +263,7 @@ func (opt *Options) bindCLIFlagsToViper(f *pflag.FlagSet) error {
 
 	f.Var(&opt.UserInterface, "user-interface", "user interface mode to use")
 
-	// viper binds and env var prefixes
-	if err := loadViperFlags(f); err != nil {
-		return fmt.Errorf("failed to bind viper flags: %w", err)
-	}
-
 	return nil
-}
-
-// loadViperFlags sets flag values from viper configuration.
-func loadViperFlags(f *pflag.FlagSet) error {
-	// Note that viper.AllSettings does not work with automatic env vars
-	var errs []error
-	f.VisitAll(func(f *pflag.Flag) {
-		key := f.Name
-		if viper.IsSet(key) {
-			v := viper.Get(key)
-			s := fmt.Sprintf("%v", v)
-			if err := f.Value.Set(s); err != nil {
-				errs = append(errs, fmt.Errorf("configuration option %q=%q is not valid: %w", key, s, err))
-			}
-		}
-	})
-	return errors.Join(errs...)
-}
-
-func setupViperEnv() {
-	viper.SetEnvPrefix(viperEnvPrefix)
-	viper.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
-	viper.AutomaticEnv()
 }
 
 func RunRootCommand(ctx context.Context, opt Options, args []string) error {
@@ -427,7 +393,7 @@ type session struct {
 func (s *session) repl(ctx context.Context, initialQuery string) error {
 	query := initialQuery
 	if query == "" {
-		s.doc.AddBlock(ui.NewAgentTextBlock().SetText("Hey there, what can I help you with today?"))
+		s.doc.AddBlock(ui.NewAgentTextBlock().WithText("Hey there, what can I help you with today?"))
 	}
 	for {
 		if query == "" {
