@@ -27,20 +27,23 @@ import (
 	"k8s.io/klog/v2"
 )
 
-var bashBin string
-
 func init() {
-	// Find the bash executable path using exec.LookPath.
-	// On some systems (like NixOS), executables might not be in standard locations like /bin/bash.
-	var err error
-	bashBin, err = exec.LookPath("bash")
-	if err != nil {
-		log := klog.FromContext(context.Background())
-		log.Info("Warning: 'bash' not found in PATH, defaulting to /bin/bash", "error", err)
-		bashBin = "/bin/bash"
-	}
-
 	RegisterTool(&BashTool{})
+}
+
+const (
+	defaultBashBin = "/bin/bash"
+)
+
+// Find the bash executable path using exec.LookPath.
+// On some systems (like NixOS), executables might not be in standard locations like /bin/bash.
+func lookupBashBin() string {
+	actualBashPath, err := exec.LookPath("bash")
+	if err != nil {
+		klog.Warningf("'bash' not found in PATH, defaulting to %s: %v", defaultBashBin, err)
+		return defaultBashBin
+	}
+	return actualBashPath
 }
 
 // expandShellVar expands shell variables and syntax using bash
@@ -108,7 +111,7 @@ func (t *BashTool) Run(ctx context.Context, args map[string]any) (any, error) {
 	if runtime.GOOS == "windows" {
 		cmd = exec.CommandContext(ctx, os.Getenv("COMSPEC"), "/c", command)
 	} else {
-		cmd = exec.CommandContext(ctx, bashBin, "-c", command)
+		cmd = exec.CommandContext(ctx, lookupBashBin(), "-c", command)
 	}
 	cmd.Dir = workDir
 	cmd.Env = os.Environ()

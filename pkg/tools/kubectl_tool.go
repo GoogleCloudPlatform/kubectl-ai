@@ -90,7 +90,7 @@ func runKubectlCommand(ctx context.Context, command, workDir, kubeconfig string)
 	if runtime.GOOS == "windows" {
 		cmd = exec.CommandContext(ctx, os.Getenv("COMSPEC"), "/c", command)
 	} else {
-		cmd = exec.CommandContext(ctx, bashBin, "-c", command)
+		cmd = exec.CommandContext(ctx, lookupBashBin(), "-c", command)
 	}
 	cmd.Env = os.Environ()
 	cmd.Dir = workDir
