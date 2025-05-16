@@ -61,14 +61,14 @@ type Conversation struct {
 	Recorder journal.Recorder
 
 	// doc is the document which renders the conversation
-	doc *ui.Document
+	doc *ui.History
 
 	llmChat gollm.Chat
 
 	workDir string
 }
 
-func (s *Conversation) Init(ctx context.Context, doc *ui.Document) error {
+func (s *Conversation) Init(ctx context.Context, doc *ui.History) error {
 	log := klog.FromContext(ctx)
 
 	// Create a temporary working directory

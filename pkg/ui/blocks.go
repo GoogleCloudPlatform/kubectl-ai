@@ -4,19 +4,20 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 package ui
+
+// A collection of blocks that go into the history.
 
 // AgentTextBlock is used to render agent textual responses
 type AgentTextBlock struct {
-	doc *Document
+	history *History
 
 	// text is populated with the agent text output
 	text string
@@ -32,12 +33,12 @@ func NewAgentTextBlock() *AgentTextBlock {
 	return &AgentTextBlock{}
 }
 
-func (b *AgentTextBlock) attached(doc *Document) {
-	b.doc = doc
+func (b *AgentTextBlock) attached(history *History) {
+	b.history = history
 }
 
-func (b *AgentTextBlock) Document() *Document {
-	return b.doc
+func (b *AgentTextBlock) History() *History {
+	return b.history
 }
 
 func (b *AgentTextBlock) Text() string {
@@ -50,17 +51,17 @@ func (b *AgentTextBlock) Streaming() bool {
 
 func (b *AgentTextBlock) SetStreaming(streaming bool) {
 	b.streaming = streaming
-	b.doc.blockChanged(b)
+	b.history.blockChanged(b)
 }
 
 func (b *AgentTextBlock) SetColor(color ColorValue) {
 	b.Color = color
-	b.doc.blockChanged(b)
+	b.history.blockChanged(b)
 }
 
 func (b *AgentTextBlock) SetText(agentText string) {
 	b.text = agentText
-	b.doc.blockChanged(b)
+	b.history.blockChanged(b)
 }
 
 func (b *AgentTextBlock) WithText(agentText string) *AgentTextBlock {
@@ -70,12 +71,12 @@ func (b *AgentTextBlock) WithText(agentText string) *AgentTextBlock {
 
 func (b *AgentTextBlock) AppendText(text string) {
 	b.text = b.text + text
-	b.doc.blockChanged(b)
+	b.history.blockChanged(b)
 }
 
 // FunctionCallRequestBlock is used to render the LLM's request to invoke a function
 type FunctionCallRequestBlock struct {
-	doc *Document
+	history *History
 
 	// text is populated if this is agent text output
 	text string
@@ -85,12 +86,12 @@ func NewFunctionCallRequestBlock() *FunctionCallRequestBlock {
 	return &FunctionCallRequestBlock{}
 }
 
-func (b *FunctionCallRequestBlock) attached(doc *Document) {
-	b.doc = doc
+func (b *FunctionCallRequestBlock) attached(history *History) {
+	b.history = history
 }
 
-func (b *FunctionCallRequestBlock) Document() *Document {
-	return b.doc
+func (b *FunctionCallRequestBlock) History() *History {
+	return b.history
 }
 
 func (b *FunctionCallRequestBlock) Text() string {
@@ -99,13 +100,13 @@ func (b *FunctionCallRequestBlock) Text() string {
 
 func (b *FunctionCallRequestBlock) SetText(agentText string) *FunctionCallRequestBlock {
 	b.text = agentText
-	b.doc.blockChanged(b)
+	b.history.blockChanged(b)
 	return b
 }
 
 // ErrorBlock is used to render an error condition
 type ErrorBlock struct {
-	doc *Document
+	doc *History
 
 	// text is populated if this is agent text output
 	text string
@@ -115,11 +116,11 @@ func NewErrorBlock() *ErrorBlock {
 	return &ErrorBlock{}
 }
 
-func (b *ErrorBlock) attached(doc *Document) {
+func (b *ErrorBlock) attached(doc *History) {
 	b.doc = doc
 }
 
-func (b *ErrorBlock) Document() *Document {
+func (b *ErrorBlock) History() *History {
 	return b.doc
 }
 
@@ -135,7 +136,7 @@ func (b *ErrorBlock) SetText(agentText string) *ErrorBlock {
 
 // InputTextBlock is used to prompt for user input
 type InputTextBlock struct {
-	doc *Document
+	history *History
 
 	// text is populated when we have input from the user
 	text Observable[string]
@@ -145,12 +146,12 @@ func NewInputTextBlock() *InputTextBlock {
 	return &InputTextBlock{}
 }
 
-func (b *InputTextBlock) attached(doc *Document) {
-	b.doc = doc
+func (b *InputTextBlock) attached(history *History) {
+	b.history = history
 }
 
-func (b *InputTextBlock) Document() *Document {
-	return b.doc
+func (b *InputTextBlock) History() *History {
+	return b.history
 }
 
 func (b *InputTextBlock) Observable() *Observable[string] {
@@ -159,7 +160,7 @@ func (b *InputTextBlock) Observable() *Observable[string] {
 
 // InputOptionBlock is used to prompt for a selection from multiple choices
 type InputOptionBlock struct {
-	doc *Document
+	history *History
 
 	// Options are the valid options that can be chosen
 	Options []string
@@ -186,12 +187,12 @@ func (b *InputOptionBlock) SetPrompt(prompt string) *InputOptionBlock {
 	return b
 }
 
-func (b *InputOptionBlock) attached(doc *Document) {
-	b.doc = doc
+func (b *InputOptionBlock) attached(history *History) {
+	b.history = history
 }
 
-func (b *InputOptionBlock) Document() *Document {
-	return b.doc
+func (b *InputOptionBlock) History() *History {
+	return b.history
 }
 
 func (b *InputOptionBlock) Observable() *Observable[string] {

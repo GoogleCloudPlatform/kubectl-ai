@@ -36,14 +36,14 @@ type HTMLUserInterface struct {
 	httpServer         *http.Server
 	httpServerListener net.Listener
 
-	doc              *ui.Document
+	history          *ui.History
 	journal          journal.Recorder
 	markdownRenderer *glamour.TermRenderer
 }
 
 var _ ui.UI = &HTMLUserInterface{}
 
-func NewHTMLUserInterface(doc *ui.Document, journal journal.Recorder) (*HTMLUserInterface, error) {
+func NewHTMLUserInterface(history *ui.History, journal journal.Recorder) (*HTMLUserInterface, error) {
 	listen := "localhost:8888"
 
 	mux := http.NewServeMux()
@@ -53,7 +53,7 @@ func NewHTMLUserInterface(doc *ui.Document, journal journal.Recorder) (*HTMLUser
 	}
 
 	u := &HTMLUserInterface{
-		doc:     doc,
+		history: history,
 		journal: journal,
 	}
 
@@ -127,7 +127,7 @@ func (u *HTMLUserInterface) handlePOSTSendMessage(w http.ResponseWriter, req *ht
 
 	// TODO: Match by block id
 	var inputBlock *ui.InputTextBlock
-	for _, block := range u.doc.Blocks() {
+	for _, block := range u.history.Blocks() {
 		if block, ok := block.(*ui.InputTextBlock); ok {
 			inputBlock = block
 		}
@@ -166,7 +166,7 @@ func (u *HTMLUserInterface) handlePOSTChooseOption(w http.ResponseWriter, req *h
 
 	// TODO: Match by block id
 	var inputOptionBlock *ui.InputOptionBlock
-	for _, block := range u.doc.Blocks() {
+	for _, block := range u.history.Blocks() {
 		if block, ok := block.(*ui.InputOptionBlock); ok {
 			inputOptionBlock = block
 		}
@@ -200,7 +200,7 @@ func (u *HTMLUserInterface) serveDocStream(w http.ResponseWriter, req *http.Requ
 		var sse bytes.Buffer
 		sse.WriteString("event: ReplaceAll\ndata: ")
 
-		blocks := u.doc.Blocks()
+		blocks := u.history.Blocks()
 		var html bytes.Buffer
 		for _, block := range blocks {
 			if err := u.renderBlock(ctx, &html, block); err != nil {
@@ -223,11 +223,11 @@ func (u *HTMLUserInterface) serveDocStream(w http.ResponseWriter, req *http.Requ
 		rc.Flush()
 	}
 
-	onDocChange := func(doc *ui.Document, block ui.Block) {
+	onDocChange := func(doc *ui.History, block ui.Block) {
 		sendAllBlocks()
 	}
 
-	subscription := u.doc.AddSubscription(ui.SubscriberFromFunc(onDocChange))
+	subscription := u.history.AddSubscription(ui.SubscriberFromFunc(onDocChange))
 	defer subscription.Close()
 
 	// Send initial message

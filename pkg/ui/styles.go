@@ -28,8 +28,8 @@ type ColorValue string
 
 const (
 	ColorGreen ColorValue = "green"
-	ColorWhite            = "white"
-	ColorRed              = "red"
+	ColorWhite ColorValue = "white"
+	ColorRed   ColorValue = "red"
 )
 
 type StyleOption func(s *ComputedStyle)
