@@ -140,6 +140,22 @@ func (t *ToolCall) InvokeTool(ctx context.Context, opt InvokeToolOptions) (any, 
 	ctx = context.WithValue(ctx, "kubeconfig", opt.Kubeconfig)
 	ctx = context.WithValue(ctx, "work_dir", opt.WorkDir)
 
+	command := t.arguments["command"].(string)
+	blockingPatterns := []struct {
+		cmd  string
+		flag string
+		msg  string
+	}{
+		{"kubectl get", "-w", "watch mode (-w) is not supported in unattended mode. Please run without -w or use a different approach."},
+		{"kubectl logs", "-f", "log streaming (-f) is not supported in unattended mode. Please run without -f or use a different approach."},
+	}
+
+	for _, pattern := range blockingPatterns {
+		if strings.Contains(command, pattern.cmd) && strings.Contains(command, pattern.flag) {
+			return &ExecResult{Error: pattern.msg}, nil
+		}
+	}
+
 	response, err := t.tool.Run(ctx, t.arguments)
 
 	{
