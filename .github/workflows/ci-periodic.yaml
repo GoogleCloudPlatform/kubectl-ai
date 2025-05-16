@@ -37,14 +37,10 @@ jobs:
       id-token: "write"
     steps:
       - uses: actions/checkout@v4
-      - name: Create k8s Kind Cluster
-        uses: helm/kind-action@a1b0e391336a6ee6713a0583f8c6240d70863de3 # @v1.12.0
+      - name: Kind Cluster Setup
+        uses: ./.github/actions/kind-cluster-setup
         with:
           cluster_name: periodic-eval-cluster
-      - uses: "google-github-actions/auth@v2"
-        with:
-          project_id: "sunilarora-fp"
-          workload_identity_provider: "projects/512195022720/locations/global/workloadIdentityPools/github/providers/kubectl-ai"
       - name: Run an easy eval
         run: |
           TEST_ARGS="--llm-provider vertexai --models gemini-2.5-pro-preview-05-06 --enable-tool-use-shim=false --task-pattern=scale-" ./dev/ci/periodics/run-evals.sh

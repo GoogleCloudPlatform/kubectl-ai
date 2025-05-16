@@ -1,0 +1,62 @@
+# Copyright 2025 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# This workflow allows PR owners who add new eval tasks to manually run tests on their changes using the GitHub Actions UI.
+#It is intended for self-service validation of new or modified evals before merging.
+name: On-Demand k8s-bench Eval Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      task_pattern:
+        description: "Task name or glob pattern to test (must not be '*' or empty; e.g. scale-my-task, scale-foo)"
+        required: true
+
+jobs:
+  run-eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: "read"
+      id-token: "write"
+    steps:
+      - name: Validate task_pattern input
+        run: |
+          if [[ -z "${{ github.event.inputs.task_pattern }}" || "${{ github.event.inputs.task_pattern }}" == "*" || "${{ github.event.inputs.task_pattern }}" == "all" ]]; then
+            echo "Error: You must provide a specific task name or pattern. Wildcards or empty values are not allowed."
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+      - name: Kind Cluster Setup
+        uses: ./.github/actions/kind-cluster-setup
+        with:
+          cluster_name: ${{ github.head_ref || github.ref_name }}
+      - name: Run evals
+        # In the future, more options (provider/model/tool-use-shim) may be user-selectable.
+        # For now, these are fixed for CI safety and consistency.
+        env:
+          TEST_ARGS: >-
+            --llm-provider ${{ github.event.inputs.llm_provider || 'vertexai' }} \
+            --models ${{ github.event.inputs.model || 'gemini-2.5-pro-preview-05-06' }} \
+            --enable-tool-use-shim=${{ github.event.inputs.enable_tool_use_shim || 'false' }} \
+            --task-pattern=${{ github.event.inputs.task_pattern || 'scale-' }}
+        run: |
+          ./dev/ci/periodics/run-evals.sh
+      - name: Analyse results
+        run: |
+          ./dev/ci/periodics/analyze-evals.sh
+          cat ${{ github.workspace }}/.build/k8s-bench.md >> ${GITHUB_STEP_SUMMARY}
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: false

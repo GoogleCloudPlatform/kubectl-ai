@@ -1,0 +1,19 @@
+name: Kind Cluster Setup
+description: "Sets up a Kind Kubernetes cluster and authenticates with GCP"
+inputs:
+  cluster_name:
+    description: "The name of the Kind cluster"
+    required: false
+    default: "periodic-eval-cluster"
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/checkout@v4
+    - name: Create k8s Kind Cluster
+      uses: helm/kind-action@a1b0e391336a6ee6713a0583f8c6240d70863de3 # @v1.12.0
+      with:
+        cluster_name: ${{ inputs.cluster_name }}
+    - uses: "google-github-actions/auth@v2"
+      with:
+        project_id: "sunilarora-fp"
+        workload_identity_provider: "projects/512195022720/locations/global/workloadIdentityPools/github/providers/kubectl-ai"
