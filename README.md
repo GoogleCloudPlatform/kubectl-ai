@@ -160,6 +160,27 @@ You can even combine a positional argument with stdin input. The positional argu
 cat error.log | kubectl-ai "explain the error"
 ```
 
+## Tools
+
+`kubectl-ai` leverages LLMs to suggest and execute Kubernetes operations using a set of powerful tools. It comes with built-in tools like `kubectl`, `bash`, and `trivy`.
+
+You can also extend its capabilities by defining your own custom tools. By default, `kubectl-ai` looks for your tool configurations in `~/.config/kubectl-ai/tools.yaml`.
+
+To specify a different configuration file, use:
+
+```shell
+kubectl-ai --custom-tools-config=YOUR_CONFIG
+```
+
+Define your custom tools using the following schema. You can include multiple tools in a single configuration file:
+
+```yaml
+- name: tool_name
+  description: "A clear description that helps the LLM understand when to use this tool."
+  command: "your_command" # For example: 'gcloud' or 'gcloud container clusters'
+  command_desc: "Detailed information for the LLM, including command syntax and usage examples."
+```
+
 ## Extras
 
 You can use the following special keywords for specific actions:
