@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Cleanup existing namespaces if they exist
 kubectl delete namespace ns1 --ignore-not-found

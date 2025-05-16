@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Check if NetworkPolicy exists
 if ! kubectl get networkpolicy np -n ns1 &>/dev/null; then

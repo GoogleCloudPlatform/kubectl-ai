@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Initialize namespace and deployment with the old image
 kubectl delete namespace rollout-test --ignore-not-found
 kubectl create namespace rollout-test

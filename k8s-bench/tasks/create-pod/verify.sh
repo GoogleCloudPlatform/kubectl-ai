@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Wait for pod to be running with kubectl wait
 if kubectl wait --for=condition=Ready pod/web-server -n create-pod-test --timeout=30s; then
     exit 0

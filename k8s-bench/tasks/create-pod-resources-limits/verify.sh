@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Check if namespace exists
 if ! kubectl get namespace limits-test &>/dev/null; then

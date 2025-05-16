@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Verify only db-0 and db-1 remain
 for pod in db-0 db-1; do

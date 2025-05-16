@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Create namespace and a deployment with an invalid image that will cause ImagePullBackOff
 kubectl delete namespace debug --ignore-not-found
 kubectl create namespace debug

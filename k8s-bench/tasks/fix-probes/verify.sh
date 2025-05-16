@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Check if the pod is in Running state with Ready status
 echo "Checking if the pod is running and ready..."

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Wait for rollout to complete
 kubectl rollout status deployment/web-app -n rollout-test --timeout=120s || exit 1
 

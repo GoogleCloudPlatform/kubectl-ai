@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Wait for pod to be ready
 if kubectl wait --for=condition=Ready pod -l app=nginx -n crashloop-test --timeout=25s; then
     # Get current restart count

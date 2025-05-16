@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Delete namespace if exists and create a fresh one
 kubectl delete namespace health-check --ignore-not-found

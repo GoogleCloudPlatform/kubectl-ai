@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Check if service has endpoints
 endpoints=$(kubectl get endpoints nginx -n web -o jsonpath='{.subsets[0].addresses}')
 if [[ ! -z "$endpoints" ]]; then

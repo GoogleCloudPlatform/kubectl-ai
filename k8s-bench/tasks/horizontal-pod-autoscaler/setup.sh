@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Initialize namespace and deployment with CPU load generator
 kubectl delete namespace hpa-test --ignore-not-found
 kubectl create namespace hpa-test
