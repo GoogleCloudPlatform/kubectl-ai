@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"maps"
 	"os"
-	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -188,15 +187,6 @@ func ToolResultToMap(result any) (map[string]any, error) {
 // LoadAndRegisterCustomTools loads tool configurations from a YAML file
 // and registers them.
 func LoadAndRegisterCustomTools(configPath string) error {
-	if configPath == "" {
-		// Default config path: ~/.config/kubectl-ai/tools.yaml
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return fmt.Errorf("failed to get user home directory for default custom tools config: %w", err)
-		}
-		configPath = filepath.Join(home, ".config", "kubectl-ai", "tools.yaml")
-	}
-
 	yamlFile, err := os.ReadFile(configPath)
 	if os.IsNotExist(err) {
 		return nil
