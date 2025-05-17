@@ -86,6 +86,9 @@ func (t *CustomTool) Run(ctx context.Context, args map[string]any) (any, error) 
 	if len(command) > 1 {
 		cmdArgs = command[1:]
 	}
+	if cmdVal, ok := args["command"]; ok {
+		cmdArgs = append(cmdArgs, cmdVal.(string))
+	}
 	workDir := ctx.Value(WorkDirKey).(string)
 
 	cmd := exec.CommandContext(ctx, command[0], cmdArgs...)

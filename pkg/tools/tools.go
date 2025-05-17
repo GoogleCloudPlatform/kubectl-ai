@@ -72,6 +72,7 @@ func (t *Tools) Names() []string {
 	for name := range t.tools {
 		names = append(names, name)
 	}
+	sort.Strings(names)
 	return names
 }
 
@@ -187,13 +188,24 @@ func ToolResultToMap(result any) (map[string]any, error) {
 // LoadAndRegisterCustomTools loads tool configurations from a YAML file
 // and registers them.
 func LoadAndRegisterCustomTools(configPath string) error {
-	if configPath == "" {
-		// Default config path: ~/.config/kubectl-ai/tools.yaml
-		home, err := os.UserHomeDir()
+	pathInfo, err := os.Stat(configPath)
+	if err != nil {
+		return fmt.Errorf("failed to describe config file %s: %w", configPath, err)
+	}
+
+	if pathInfo.IsDir() {
+		configPaths, err := os.ReadDir(configPath)
 		if err != nil {
-			return fmt.Errorf("failed to get user home directory for default custom tools config: %w", err)
+			return fmt.Errorf("failed to read config dir %s: %w", configPath, err)
 		}
-		configPath = filepath.Join(home, ".config", "kubectl-ai", "tools.yaml")
+
+		for _, entry := range configPaths {
+			if err := LoadAndRegisterCustomTools(filepath.Join(configPath, entry.Name())); err != nil {
+				return err
+			}
+		}
+
+		return nil
 	}
 
 	yamlFile, err := os.ReadFile(configPath)
