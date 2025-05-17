@@ -504,6 +504,15 @@ func (s *session) answerQuery(ctx context.Context, query string) error {
 		infoBlock.AppendText(strings.Join(models, "\n"))
 		s.doc.AddBlock(infoBlock)
 
+	case query == "tools":
+		if s.conversation == nil {
+			return fmt.Errorf("listing tols: conversation is not initialized")
+		}
+		infoBlock := &ui.AgentTextBlock{}
+		infoBlock.AppendText("\n  Available tools:\n")
+		infoBlock.AppendText(strings.Join(s.conversation.Tools.Names(), "\n"))
+		s.doc.AddBlock(infoBlock)
+
 	default:
 		return s.conversation.RunOneRound(ctx, query)
 	}
