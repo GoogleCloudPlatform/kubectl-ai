@@ -62,8 +62,8 @@ func init() {
 }
 
 // newOpenAIClientFactory is the factory function for creating OpenAI clients.
-func newOpenAIClientFactory(ctx context.Context, _ ClientOptions) (Client, error) {
-	return NewOpenAIClient(ctx)
+func newOpenAIClientFactory(ctx context.Context, opts ClientOptions) (Client, error) {
+	return NewOpenAIClient(ctx, opts)
 }
 
 // OpenAIClient implements the gollm.Client interface for OpenAI models.
@@ -94,8 +94,11 @@ func getOpenAIModel(model string) string {
 	return "gpt-4.1"
 }
 
-// NewOpenAIClient creates a new client for interacting with OpenAI.
-func NewOpenAIClient(ctx context.Context) (*OpenAIClient, error) {
+/*
+NewOpenAIClient creates a new client for interacting with OpenAI.
+Supports custom HTTP client (e.g., for skipping SSL verification).
+*/
+func NewOpenAIClient(ctx context.Context, opts ClientOptions) (*OpenAIClient, error) {
 	// Get API key from loaded env var
 	apiKey := openAIAPIKey
 	if apiKey == "" {
@@ -115,6 +118,10 @@ func NewOpenAIClient(ctx context.Context) (*OpenAIClient, error) {
 		klog.Infof("Using custom OpenAI base URL: %s", baseURL)
 		options = append(options, option.WithBaseURL(baseURL))
 	}
+
+	// Support custom HTTP client (e.g., skip SSL verification)
+	httpClient := createCustomHTTPClient(opts.SkipVerifySSL)
+	options = append(options, option.WithHTTPClient(httpClient))
 
 	return &OpenAIClient{
 		client: openai.NewClient(options...),
