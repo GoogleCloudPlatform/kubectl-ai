@@ -187,6 +187,7 @@ You can use the following special keywords for specific actions:
 
 * `model`: Display the currently selected model.
 * `models`: List all available models.
+* `tools`: List all available tools.
 * `version`: Display the `kubectl-ai` version.
 * `reset`: Clear the conversational context.
 * `clear`: Clear the terminal screen.

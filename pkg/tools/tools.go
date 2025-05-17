@@ -72,6 +72,7 @@ func (t *Tools) Names() []string {
 	for name := range t.tools {
 		names = append(names, name)
 	}
+	sort.Strings(names)
 	return names
 }
 
