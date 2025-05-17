@@ -166,13 +166,14 @@ cat error.log | kubectl-ai "explain the error"
 
 You can also extend its capabilities by defining your own custom tools. By default, `kubectl-ai` looks for your tool configurations in `~/.config/kubectl-ai/tools.yaml`.
 
-To specify a different configuration file, use:
+To specify tools configuration files or directories containing tools configuration files, use:
 
 ```shell
 kubectl-ai --custom-tools-config=YOUR_CONFIG
 ```
 
-Define your custom tools using the following schema. You can include multiple tools in a single configuration file:
+You can include multiple tools in a single configuration file, or a single tool in multiple configuration files.
+Define your custom tools using the following schema:
 
 ```yaml
 - name: tool_name
