@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -187,6 +188,26 @@ func ToolResultToMap(result any) (map[string]any, error) {
 // LoadAndRegisterCustomTools loads tool configurations from a YAML file
 // and registers them.
 func LoadAndRegisterCustomTools(configPath string) error {
+	pathInfo, err := os.Stat(configPath)
+	if err != nil {
+		return fmt.Errorf("failed to describe config file %s: %w", configPath, err)
+	}
+
+	if pathInfo.IsDir() {
+		configPaths, err := os.ReadDir(configPath)
+		if err != nil {
+			return fmt.Errorf("failed to read config dir %s: %w", configPath, err)
+		}
+
+		for _, entry := range configPaths {
+			if err := LoadAndRegisterCustomTools(filepath.Join(configPath, entry.Name())); err != nil {
+				return err
+			}
+		}
+
+		return nil
+	}
+
 	yamlFile, err := os.ReadFile(configPath)
 	if os.IsNotExist(err) {
 		return nil
