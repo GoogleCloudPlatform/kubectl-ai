@@ -63,7 +63,7 @@ func BuildRootCommand(opt *Options) (*cobra.Command, error) {
 		Use:   "version",
 		Short: "Print the version number of kubectl-ai",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Printf("kubectl-ai version: %s\ncommit: %s\ndate: %s\n", version, commit, date)
+			fmt.Printf("version: %s\ncommit: %s\ndate: %s\n", version, commit, date)
 			os.Exit(0)
 		},
 	})
