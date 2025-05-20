@@ -1,40 +1,67 @@
-age tools
+package tools
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+
+	"github.com/GoogleCloudPlatform/kubectl-ai/gollm"
 	"google.golang.org/api/drive/v3"
 	"google.golang.org/api/option"
+
+	"k8s.io/klog/v2"
 )
 
-// GoogleDriveTool is a tool for interacting with Google Drive
-type GoogleDriveTool struct {
-	credentialsFile string
+func init() {
+	RegisterTool(&GDriveTool{})
 }
 
-// NewGoogleDriveTool creates a new Google Drive tool
-func NewGoogleDriveTool(credentialsFile string) *GoogleDriveTool {
-	return &GoogleDriveTool{
-		credentialsFile: credentialsFile,
+type GDriveTool struct {
+	CredentialsFilePath string
+}
+
+type GDriveUploadResult struct {
+	FileName string `json:"fileName"`
+	FileID   string `json:"fileID"`
+	Status   string `json:"status"`
+}
+
+func (t *GDriveTool) Name() string {
+	return "gdrive"
+}
+
+func (t *GDriveTool) Description() string {
+	return "Uploads logs or yaml outputs to Google Drive. Use this tool only when you need to upload logs or yaml outputs of particular Kubernetes deployment."
+}
+
+func (t *GDriveTool) FunctionDefinition() *gollm.FunctionDefinition {
+
+	return &gollm.FunctionDefinition{
+		Name:        t.Name(),
+		Description: t.Description(),
+		Parameters: &gollm.Schema{
+			Type: gollm.TypeObject,
+			Properties: map[string]*gollm.Schema{
+				"operation": {
+					Type:        gollm.TypeString,
+					Description: `The operation while interacting with Google Drive.`,
+				},
+				"fileName": {
+					Type:        gollm.TypeString,
+					Description: "The name to give the file in Drive.",
+				},
+				"content": {
+					Type:        gollm.TypeString,
+					Description: "The contents of the file to upload.",
+				},
+			},
+			Required: []string{"operation", "fileName", "content"},
+		},
 	}
 }
 
-// Name returns the name of the tool
-func (g *GoogleDriveTool) Name() string {
-	return "google-drive"
-}
-
-// Description returns the description of the tool
-func (g *GoogleDriveTool) Description() string {
-	return "A tool for interacting with Google Drive"
-}
-
-// Run executes the tool with the given arguments
-func (g *GoogleDriveTool) Run(ctx context.Context, args map[string]any) (any, error) {
-	operation, ok := args["operation"].(string)
-	if !ok {
-		return nil, fmt.Errorf("operation not specified")
-	}
+func (t *GDriveTool) Run(ctx context.Context, args map[string]any) (any, error) {
+	operation := args["operation"].(string)
 
 	switch operation {
 	case "upload":
@@ -46,28 +73,46 @@ func (g *GoogleDriveTool) Run(ctx context.Context, args map[string]any) (any, er
 		if !ok {
 			return nil, fmt.Errorf("content not specified")
 		}
-		return g.uploadFile(ctx, fileName, content)
+
+		return t.upload(ctx, fileName, content)
 	default:
 		return nil, fmt.Errorf("unknown operation: %s", operation)
+
 	}
 }
 
-// uploadFile uploads a file to Google Drive
-func (g *GoogleDriveTool) uploadFile(ctx context.Context, fileName, content string) (string, error) {
-	driveService, err := drive.NewService(ctx, option.WithCredentialsFile(g.credentialsFile))
-	if err != nil {
-		return "", fmt.Errorf("failed to create Google Drive client: %w", err)
+func (t *GDriveTool) upload(ctx context.Context, fileName, content string) (any, error) {
+	// Build client options:
+	// 1) If the user passed --gdrive-credentials-path, use it.
+	// 2) Scope it to drive and enable ENV or ADC.
+	opts := []option.ClientOption{
+		option.WithScopes(drive.DriveFileScope),
+	}
+	if t.CredentialsFilePath != "" {
+		opts = append(opts, option.WithCredentialsFile(t.CredentialsFilePath))
+	} else {
+		klog.Warning("no --gdrive-credentials-path provided; falling back to Application Default Credentials (ADC). ADC is set with command`gcloud auth application-default login`")
 	}
 
-	// Create a new file on Google Drive
-	file := &drive.File{
-		Name: fileName,
-	}
-	fileContent := []byte(content)
-	_, err = driveService.Files.Create(file).Media(fileContent).Do()
+	srv, err := drive.NewService(ctx, opts...)
 	if err != nil {
-		return "", fmt.Errorf("failed to upload file: %w", err)
+		return nil, fmt.Errorf("unable to create Drive client: %w", err)
 	}
 
-	return "File uploaded successfully", nil
+	// Upload
+	reader := bytes.NewReader([]byte(content))
+	uploaded, err := srv.Files.
+		Create(&drive.File{Name: fileName}).
+		Media(reader).
+		Do()
+	if err != nil {
+		return nil, fmt.Errorf("upload error: %w", err)
+	}
+
+	// Return a typed result
+	return &GDriveUploadResult{
+		FileName: uploaded.Name,
+		FileID:   uploaded.Id,
+		Status:   "uploaded",
+	}, nil
 }

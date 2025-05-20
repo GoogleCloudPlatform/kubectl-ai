@@ -87,6 +87,7 @@ type Options struct {
 	TracePath              string   `json:"tracePath,omitempty"`
 	RemoveWorkDir          bool     `json:"removeWorkDir,omitempty"`
 	ToolConfigPath         string   `json:"toolConfigPath,omitempty"`
+	GDriveCredentialsPath  string   `json:"gdriveCredentialsPath,omitempty"`
 
 	// UserInterface is the type of user interface to use.
 	UserInterface UserInterface `json:"userInterface,omitempty"`
@@ -144,6 +145,7 @@ func (o *Options) InitDefaults() {
 
 	// Default to not skipping SSL verification
 	o.SkipVerifySSL = false
+	o.GDriveCredentialsPath = ""
 }
 
 func (o *Options) LoadConfiguration(b []byte) error {
@@ -280,6 +282,7 @@ func (opt *Options) bindCLIFlags(f *pflag.FlagSet) error {
 
 	f.Var(&opt.UserInterface, "user-interface", "user interface mode to use")
 	f.BoolVar(&opt.SkipVerifySSL, "skip-verify-ssl", opt.SkipVerifySSL, "skip verifying the SSL certificate of the LLM provider")
+	f.StringVar(&opt.GDriveCredentialsPath, "gdrive-credentials-path", opt.GDriveCredentialsPath, "path to Google Drive credentials JSON file")
 
 	return nil
 }
@@ -290,6 +293,22 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 	// resolve kubeconfig path with priority: flag/env > KUBECONFIG > default path
 	if err = resolveKubeConfigPath(&opt); err != nil {
 		return fmt.Errorf("failed to resolve kubeconfig path: %w", err)
+	}
+
+	// This part has to run before MCP server is started, to properly set the credentials.
+	// Priority flag -> env -> ADC (Application Default Credentials)
+	resolveGDriveCredentialsPath(&opt)
+	if t := tools.Lookup("gdrive"); t != nil {
+		if gdt, ok := t.(*tools.GDriveTool); ok {
+			gdt.CredentialsFilePath = opt.GDriveCredentialsPath
+		}
+	}
+	if opt.GDriveCredentialsPath != "" {
+		if t := tools.Lookup("gdrive"); t != nil {
+			if gdt, ok := t.(*tools.GDriveTool); ok {
+				gdt.CredentialsFilePath = opt.GDriveCredentialsPath
+			}
+		}
 	}
 
 	if opt.MCPServer {
@@ -591,6 +610,15 @@ func resolveQueryInput(hasStdInData bool, args []string) (string, error) {
 	default:
 		// Case: No input at all — return empty string, no error
 		return "", nil
+	}
+}
+
+func resolveGDriveCredentialsPath(opt *Options) {
+	switch {
+	case opt.GDriveCredentialsPath != "":
+		// Means is set by flag
+	case os.Getenv("GOOGLE_APPLICATION_CREDENTIALS") != "":
+		opt.GDriveCredentialsPath = os.Getenv("GOOGLE_APPLICATION_CREDENTIALS")
 	}
 }
 

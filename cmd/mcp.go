@@ -17,6 +17,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"maps"
+
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/tools"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -64,9 +66,8 @@ func (s *kubectlMCPServer) handleToolCall(ctx context.Context, request mcp.CallT
 	log := klog.FromContext(ctx)
 
 	name := request.Params.Name
-	command := request.Params.Arguments["command"].(string)
-	modifiesResource := request.Params.Arguments["modifies_resource"].(string)
-	log.Info("Received tool call", "tool", name, "command", command, "modifies_resource", modifiesResource)
+	args := make(map[string]any, len(request.Params.Arguments))
+	maps.Copy(args, request.Params.Arguments)
 
 	ctx = context.WithValue(ctx, tools.KubeconfigKey, s.kubectlConfig)
 	ctx = context.WithValue(ctx, tools.WorkDirKey, s.workDir)
@@ -82,9 +83,8 @@ func (s *kubectlMCPServer) handleToolCall(ctx context.Context, request mcp.CallT
 			},
 		}, nil
 	}
-	output, err := tool.Run(ctx, map[string]any{
-		"command": command,
-	})
+
+	output, err := tool.Run(ctx, args)
 	if err != nil {
 		log.Error(err, "Error running tool call")
 		return &mcp.CallToolResult{
