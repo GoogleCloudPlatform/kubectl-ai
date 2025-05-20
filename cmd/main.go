@@ -490,7 +490,7 @@ func (s *session) repl(ctx context.Context, initialQuery string) error {
 		case query == "clear":
 			s.ui.ClearScreen()
 		case query == "exit" || query == "quit":
-			// s.ui.RenderOutput(ctx, "Allright...bye.\n")
+			// s.ui.RenderOutput(ctx, "Alright...bye.\n")
 			return nil
 		default:
 			if err := s.answerQuery(ctx, query); err != nil {
