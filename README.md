@@ -172,7 +172,7 @@ To specify tools configuration files or directories containing tools configurati
 kubectl-ai --custom-tools-config=YOUR_CONFIG
 ```
 
-You can include multiple tools in a single configuration file, or a single tool in multiple configuration files.
+You can include multiple tools in a single configuration file, or a directory with multiple configuration files, each dedicated to a single or multiple tools.
 Define your custom tools using the following schema:
 
 ```yaml
@@ -180,6 +180,25 @@ Define your custom tools using the following schema:
   description: "A clear description that helps the LLM understand when to use this tool."
   command: "your_command" # For example: 'gcloud' or 'gcloud container clusters'
   command_desc: "Detailed information for the LLM, including command syntax and usage examples."
+```
+
+A custom tool definition for `helm` could look like the following example:
+
+```yaml
+- name: helm
+  description: "Helm is the Kubernetes package manager and deployment tool. Use it to define, install, upgrade, and roll back applications packaged as Helm charts in a Kubernetes cluster."
+  command: "helm"
+  command_desc: |
+    Helm command-line interface, with the following core subcommands and usage patterns:    
+    - helm install <release-name> <chart> [flags]  
+      Install a chart into the cluster.      
+    - helm upgrade <release-name> <chart> [flags]  
+      Upgrade an existing release to a new chart version or configuration.      
+    - helm list [flags]  
+      List all releases in one or all namespaces.      
+    - helm uninstall <release-name> [flags]  
+      Uninstall a release and clean up associated resources.  
+    Use `helm --help` or `helm <subcommand> --help` to see full syntax, available flags, and examples for each command.
 ```
 
 ## Extras

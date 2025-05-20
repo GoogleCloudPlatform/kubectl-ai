@@ -139,8 +139,8 @@ func (o *Options) InitDefaults() {
 	o.TracePath = filepath.Join(os.TempDir(), "kubectl-ai-trace.txt")
 	o.RemoveWorkDir = false
 	o.ToolConfigPath = []string{
-		"{CONFIG}/kubectl-ai/tools.yaml",
-		"{HOME}/.config/kubectl-ai/tools.yaml",
+		filepath.Join("{CONFIG}", "kubectl-ai", "tools.yaml"),
+		filepath.Join("{HOME}", ".config", "kubectl-ai", "tools.yaml"),
 	}
 
 	// Default to terminal UI
@@ -159,13 +159,13 @@ func (o *Options) LoadConfiguration(b []byte) error {
 
 func (o *Options) LoadConfigurationFile() error {
 	configPaths := []string{
-		"{CONFIG}/kubectl-ai/config.yaml",
-		"{HOME}/.config/kubectl-ai/config.yaml",
+		filepath.Join("{CONFIG}", "kubectl-ai", "config.yaml"),
+		filepath.Join("{HOME}", ".config", "kubectl-ai", "config.yaml"),
 	}
 
 	for _, configPath := range configPaths {
 		// Try to load configuration
-		tokens := strings.Split(configPath, "/")
+		tokens := strings.Split(configPath, string(os.PathSeparator))
 		for i, token := range tokens {
 			if token == "{CONFIG}" {
 				configDir, err := os.UserConfigDir()
@@ -298,7 +298,7 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 
 	// Load and register custom tools from config files and dirs
 	for _, path := range opt.ToolConfigPath {
-		tokens := strings.Split(path, "/")
+		tokens := strings.Split(path, string(os.PathSeparator))
 		for i, token := range tokens {
 			if token == "{CONFIG}" {
 				configDir, err := os.UserConfigDir()
