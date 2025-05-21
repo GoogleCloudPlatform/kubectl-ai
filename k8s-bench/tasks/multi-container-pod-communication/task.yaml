@@ -1,6 +1,6 @@
 script:
 - prompt: |
-    Create a pod named 'communication-pod' in the 'multi-container-test' namespace with two containers: 1. A 'web' container using nginx:alpine image that serves web content on port 80. 2. A 'logger' container using busybox image that monitors the nginx access logs. The containers should share a volume named 'logs-volume' where nginx writes its access logs. The web container should be ready when port 80 is available. The logger container should start only after the web container is ready.
+    In the multi-container-test namespace, run a pod called communication-pod with two containers: a web server that serves traffic and writes logs, and a logger that processes those logs from a shared volume. The logger should only start once the web server is ready. The pod should be considered ready when the web server is serving traffic.
 setup: "setup.sh"
 verifier: "verify.sh"
 cleanup: "cleanup.sh"
