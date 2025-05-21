@@ -190,6 +190,10 @@ func ToolResultToMap(result any) (map[string]any, error) {
 func LoadAndRegisterCustomTools(configPath string) error {
 	pathInfo, err := os.Stat(configPath)
 	if err != nil {
+		if os.IsNotExist(err) {
+			// ignore
+			return nil
+		}
 		return fmt.Errorf("failed to describe config file %s: %w", configPath, err)
 	}
 
