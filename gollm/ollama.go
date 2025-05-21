@@ -37,7 +37,7 @@ func ollamaFactory(ctx context.Context, opts ClientOptions) (Client, error) {
 }
 
 const (
-	defaultOllamaModel = "gemma2:latest"
+	defaultOllamaModel = "gemma3:latest"
 )
 
 type OllamaClient struct {
