@@ -379,6 +379,32 @@ func (a *PromptData) ToolNames() string {
 	return strings.Join(a.Tools.Names(), ", ")
 }
 
+// MCPStatus returns information about connected MCP servers
+func (a *PromptData) MCPStatus() string {
+	// Check if auto-discovery is disabled
+	if autodiscover := os.Getenv("MCP_AUTO_DISCOVER"); autodiscover == "false" {
+		return "MCP auto-discovery disabled."
+	}
+
+	// Get access to MCP manager
+	mcpManager := tools.GetMCPManager()
+	if mcpManager == nil {
+		return "No MCP servers configured."
+	}
+
+	clients := mcpManager.ListClients()
+	if len(clients) == 0 {
+		return "No MCP servers connected."
+	}
+
+	var status []string
+	for _, client := range clients {
+		status = append(status, fmt.Sprintf("- %s: Connected", client.Name))
+	}
+
+	return fmt.Sprintf("Connected MCP servers:\n%s", strings.Join(status, "\n"))
+}
+
 type ReActResponse struct {
 	Thought string  `json:"thought"`
 	Answer  string  `json:"answer,omitempty"`
