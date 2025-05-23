@@ -14,13 +14,16 @@
 
 package ui
 
+// History allows us to have a history of interaction between Agents and Users.
+// It's a collection of Bloocks and has the ability to subscribe to changes.
+
 import (
 	"io"
 	"slices"
 	"sync"
 )
 
-type Document struct {
+type History struct {
 	mutex         sync.Mutex
 	subscriptions []*subscription
 	nextID        uint64
@@ -28,19 +31,19 @@ type Document struct {
 	blocks []Block
 }
 
-func (d *Document) Blocks() []Block {
-	d.mutex.Lock()
-	defer d.mutex.Unlock()
+func (h *History) Blocks() []Block {
+	h.mutex.Lock()
+	defer h.mutex.Unlock()
 
-	return d.blocks
+	return h.blocks
 }
 
-func (d *Document) NumBlocks() int {
-	return len(d.Blocks())
+func (h *History) NumBlocks() int {
+	return len(h.Blocks())
 }
 
-func (d *Document) IndexOf(find Block) int {
-	blocks := d.Blocks()
+func (h *History) IndexOf(find Block) int {
+	blocks := h.Blocks()
 
 	for i, b := range blocks {
 		if b == find {
@@ -50,29 +53,29 @@ func (d *Document) IndexOf(find Block) int {
 	return -1
 }
 
-func NewDocument() *Document {
-	return &Document{
+func NewHistory() *History {
+	return &History{
 		nextID: 1,
 	}
 }
 
 type Block interface {
-	attached(doc *Document)
+	attached(history *History)
 
-	Document() *Document
+	History() *History
 }
 
 type Subscriber interface {
-	DocumentChanged(doc *Document, block Block)
+	DocumentChanged(doc *History, block Block)
 }
 
-type SubscriberFunc func(doc *Document, block Block)
+type SubscriberFunc func(doc *History, block Block)
 
 type funcSubscriber struct {
 	fn SubscriberFunc
 }
 
-func (s *funcSubscriber) DocumentChanged(doc *Document, block Block) {
+func (s *funcSubscriber) DocumentChanged(doc *History, block Block) {
 	s.fn(doc, block)
 }
 
@@ -81,76 +84,76 @@ func SubscriberFromFunc(fn SubscriberFunc) Subscriber {
 }
 
 type subscription struct {
-	doc        *Document
+	history    *History
 	id         uint64
 	subscriber Subscriber
 }
 
 func (s *subscription) Close() error {
-	s.doc.mutex.Lock()
-	defer s.doc.mutex.Unlock()
+	s.history.mutex.Lock()
+	defer s.history.mutex.Unlock()
 	s.subscriber = nil
 	return nil
 }
 
-func (d *Document) AddSubscription(subscriber Subscriber) io.Closer {
-	d.mutex.Lock()
-	defer d.mutex.Unlock()
+func (h *History) AddSubscription(subscriber Subscriber) io.Closer {
+	h.mutex.Lock()
+	defer h.mutex.Unlock()
 
-	id := d.nextID
-	d.nextID++
+	id := h.nextID
+	h.nextID++
 
 	s := &subscription{
-		doc:        d,
+		history:    h,
 		id:         id,
 		subscriber: subscriber,
 	}
 
 	// Copy on write so we don't need to lock the subscriber list
-	newSubscriptions := make([]*subscription, 0, len(d.subscriptions)+1)
-	for _, s := range d.subscriptions {
+	newSubscriptions := make([]*subscription, 0, len(h.subscriptions)+1)
+	for _, s := range h.subscriptions {
 		if s == nil || s.subscriber == nil {
 			continue
 		}
 		newSubscriptions = append(newSubscriptions, s)
 	}
 	newSubscriptions = append(newSubscriptions, s)
-	d.subscriptions = newSubscriptions
+	h.subscriptions = newSubscriptions
 	return s
 }
 
-func (d *Document) sendDocumentChanged(b Block) {
-	d.mutex.Lock()
-	subscriptions := d.subscriptions
-	d.mutex.Unlock()
+func (h *History) sendDocumentChanged(b Block) {
+	h.mutex.Lock()
+	subscriptions := h.subscriptions
+	h.mutex.Unlock()
 
 	for _, s := range subscriptions {
 		if s == nil || s.subscriber == nil {
 			continue
 		}
 
-		s.subscriber.DocumentChanged(d, b)
+		s.subscriber.DocumentChanged(h, b)
 	}
 }
 
-func (d *Document) AddBlock(block Block) {
-	d.mutex.Lock()
+func (h *History) AddBlock(block Block) {
+	h.mutex.Lock()
 
 	// Copy-on-write to minimize locking
-	newBlocks := slices.Clone(d.blocks)
+	newBlocks := slices.Clone(h.blocks)
 	newBlocks = append(newBlocks, block)
-	d.blocks = newBlocks
+	h.blocks = newBlocks
 
-	block.attached(d)
-	d.mutex.Unlock()
+	block.attached(h)
+	h.mutex.Unlock()
 
-	d.sendDocumentChanged(block)
+	h.sendDocumentChanged(block)
 }
 
-func (d *Document) blockChanged(block Block) {
-	if d == nil {
+func (h *History) blockChanged(block Block) {
+	if h == nil {
 		return
 	}
 
-	d.sendDocumentChanged(block)
+	h.sendDocumentChanged(block)
 }

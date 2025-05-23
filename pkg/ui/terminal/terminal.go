@@ -12,7 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package ui
+package terminal
+
+// TerminalUI is a UI implementation that uses the terminal for input and output.
+// It uses the readline library for input handling and supports markdown rendering.
 
 import (
 	"bufio"
@@ -25,6 +28,7 @@ import (
 	"strings"
 
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/journal"
+	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/ui"
 	"github.com/charmbracelet/glamour"
 	"github.com/chzyer/readline"
 	"k8s.io/klog/v2"
@@ -40,9 +44,8 @@ type TerminalUI struct {
 	rlInstance        *readline.Instance // For readline input
 	ttyFile           *os.File           // For TTY input
 	ttyReaderInstance *bufio.Reader      // For TTY input
-
 	// currentBlock is the block we are rendering
-	currentBlock Block
+	currentBlock ui.Block
 	// currentBlockText is text of the currentBlock that we have already rendered to the screen
 	currentBlockText string
 
@@ -52,9 +55,9 @@ type TerminalUI struct {
 	useTTYForInput bool
 }
 
-var _ UI = &TerminalUI{}
+var _ ui.UI = &TerminalUI{}
 
-func NewTerminalUI(doc *Document, journal journal.Recorder, useTTYForInput bool) (*TerminalUI, error) {
+func NewTerminalUI(doc *ui.History, journal journal.Recorder, useTTYForInput bool) (*TerminalUI, error) {
 	mdRenderer, err := glamour.NewTermRenderer(
 		glamour.WithAutoStyle(),
 		glamour.WithPreservedNewLines(),
@@ -138,10 +141,10 @@ func (u *TerminalUI) Close() error {
 	return errors.Join(errs...)
 }
 
-func (u *TerminalUI) DocumentChanged(doc *Document, block Block) {
-	blockIndex := doc.IndexOf(block)
+func (u *TerminalUI) DocumentChanged(history *ui.History, block ui.Block) {
+	blockIndex := history.IndexOf(block)
 
-	if blockIndex != doc.NumBlocks()-1 {
+	if blockIndex != history.NumBlocks()-1 {
 		klog.Warningf("update to blocks other than the last block is not supported in terminal mode")
 		return
 	}
@@ -157,22 +160,22 @@ func (u *TerminalUI) DocumentChanged(doc *Document, block Block) {
 	text := ""
 	streaming := false
 
-	var styleOptions []StyleOption
+	var styleOptions []ui.StyleOption
 	switch block := block.(type) {
-	case *ErrorBlock:
-		styleOptions = append(styleOptions, Foreground(ColorRed))
+	case *ui.ErrorBlock:
+		styleOptions = append(styleOptions, ui.Foreground(ui.ColorRed))
 		text = block.Text()
-	case *FunctionCallRequestBlock:
-		styleOptions = append(styleOptions, Foreground(ColorGreen))
+	case *ui.FunctionCallRequestBlock:
+		styleOptions = append(styleOptions, ui.Foreground(ui.ColorGreen))
 		text = block.Text()
-	case *AgentTextBlock:
-		styleOptions = append(styleOptions, RenderMarkdown())
+	case *ui.AgentTextBlock:
+		styleOptions = append(styleOptions, ui.RenderMarkdown())
 		if block.Color != "" {
-			styleOptions = append(styleOptions, Foreground(block.Color))
+			styleOptions = append(styleOptions, ui.Foreground(block.Color))
 		}
 		text = block.Text()
 		streaming = block.Streaming()
-	case *InputTextBlock:
+	case *ui.InputTextBlock:
 		var query string
 		if u.useTTYForInput {
 			tReader, err := u.ttyReader()
@@ -209,7 +212,7 @@ func (u *TerminalUI) DocumentChanged(doc *Document, block Block) {
 		}
 		return
 
-	case *InputOptionBlock:
+	case *ui.InputOptionBlock:
 		fmt.Printf("%s\n", block.Prompt) // Print initial prompt text
 
 		if u.useTTYForInput {
@@ -272,7 +275,7 @@ func (u *TerminalUI) DocumentChanged(doc *Document, block Block) {
 		return
 	}
 
-	computedStyle := &ComputedStyle{}
+	computedStyle := &ui.ComputedStyle{}
 	for _, opt := range styleOptions {
 		opt(computedStyle)
 	}
@@ -305,13 +308,13 @@ func (u *TerminalUI) DocumentChanged(doc *Document, block Block) {
 
 	reset := ""
 	switch computedStyle.Foreground {
-	case ColorRed:
+	case ui.ColorRed:
 		fmt.Printf("\033[31m")
 		reset += "\033[0m"
-	case ColorGreen:
+	case ui.ColorGreen:
 		fmt.Printf("\033[32m")
 		reset += "\033[0m"
-	case ColorWhite:
+	case ui.ColorWhite:
 		fmt.Printf("\033[37m")
 		reset += "\033[0m"
 

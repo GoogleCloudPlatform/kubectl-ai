@@ -36,6 +36,7 @@ import (
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/tools"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/ui"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/ui/html"
+	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/ui/terminal"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
@@ -355,7 +356,7 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 		defer recorder.Close()
 	}
 
-	doc := ui.NewDocument()
+	history := ui.NewHistory()
 
 	var userInterface ui.UI
 	switch opt.UserInterface {
@@ -364,7 +365,7 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 		useTTYForInput := hasInputData
 
 		var u ui.UI
-		u, err = ui.NewTerminalUI(doc, recorder, useTTYForInput)
+		u, err = terminal.NewTerminalUI(history, recorder, useTTYForInput)
 		if err != nil {
 			return err
 		}
@@ -372,7 +373,7 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 
 	case UserInterfaceHTML:
 		var u ui.UI
-		u, err = html.NewHTMLUserInterface(doc, recorder)
+		u, err = html.NewHTMLUserInterface(history, recorder)
 		if err != nil {
 			return err
 		}
@@ -404,7 +405,7 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 		EnableToolUseShim:  opt.EnableToolUseShim,
 	}
 
-	err = conversation.Init(ctx, doc)
+	err = conversation.Init(ctx, history)
 	if err != nil {
 		return fmt.Errorf("starting conversation: %w", err)
 	}
@@ -412,7 +413,7 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 
 	chatSession := session{
 		model:        opt.ModelID,
-		doc:          doc,
+		history:      history,
 		ui:           userInterface,
 		conversation: conversation,
 		LLM:          llmClient,
@@ -471,7 +472,7 @@ func handleCustomTools(toolConfigPaths []string) error {
 type session struct {
 	model           string
 	ui              ui.UI
-	doc             *ui.Document
+	history         *ui.History
 	conversation    *agent.Conversation
 	availableModels []string
 	LLM             gollm.Client
@@ -481,12 +482,12 @@ type session struct {
 func (s *session) repl(ctx context.Context, initialQuery string) error {
 	query := initialQuery
 	if query == "" {
-		s.doc.AddBlock(ui.NewAgentTextBlock().WithText("Hey there, what can I help you with today?"))
+		s.history.AddBlock(ui.NewAgentTextBlock().WithText("Hey there, what can I help you with today?"))
 	}
 	for {
 		if query == "" {
 			input := ui.NewInputTextBlock()
-			s.doc.AddBlock(input)
+			s.history.AddBlock(input)
 
 			userInput, err := input.Observable().Wait()
 			if err != nil {
@@ -504,7 +505,7 @@ func (s *session) repl(ctx context.Context, initialQuery string) error {
 		case query == "":
 			continue
 		case query == "reset":
-			err := s.conversation.Init(ctx, s.doc)
+			err := s.conversation.Init(ctx, s.history)
 			if err != nil {
 				return err
 			}
@@ -517,7 +518,7 @@ func (s *session) repl(ctx context.Context, initialQuery string) error {
 			if err := s.answerQuery(ctx, query); err != nil {
 				errorBlock := &ui.ErrorBlock{}
 				errorBlock.SetText(fmt.Sprintf("Error: %v\n", err))
-				s.doc.AddBlock(errorBlock)
+				s.history.AddBlock(errorBlock)
 			}
 		}
 		// Reset query to empty string so that we prompt for input again
@@ -541,12 +542,12 @@ func (s *session) answerQuery(ctx context.Context, query string) error {
 	case query == "model":
 		infoBlock := &ui.AgentTextBlock{}
 		infoBlock.AppendText(fmt.Sprintf("Current model is `%s`\n", s.model))
-		s.doc.AddBlock(infoBlock)
+		s.history.AddBlock(infoBlock)
 
 	case query == "version":
 		infoBlock := &ui.AgentTextBlock{}
 		infoBlock.AppendText(fmt.Sprintf("Version: `%s`\n", version))
-		s.doc.AddBlock(infoBlock)
+		s.history.AddBlock(infoBlock)
 
 	case query == "models":
 		models, err := s.listModels(ctx)
@@ -556,16 +557,16 @@ func (s *session) answerQuery(ctx context.Context, query string) error {
 		infoBlock := &ui.AgentTextBlock{}
 		infoBlock.AppendText("\n  Available models:\n")
 		infoBlock.AppendText(strings.Join(models, "\n"))
-		s.doc.AddBlock(infoBlock)
+		s.history.AddBlock(infoBlock)
 
 	case query == "tools":
 		if s.conversation == nil {
-			return fmt.Errorf("listing tols: conversation is not initialized")
+			return fmt.Errorf("listing tools: conversation is not initialized")
 		}
 		infoBlock := &ui.AgentTextBlock{}
 		infoBlock.AppendText("\n  Available tools:\n")
 		infoBlock.AppendText(strings.Join(s.conversation.Tools.Names(), "\n"))
-		s.doc.AddBlock(infoBlock)
+		s.history.AddBlock(infoBlock)
 
 	default:
 		return s.conversation.RunOneRound(ctx, query)

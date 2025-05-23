@@ -27,7 +27,6 @@ import (
 
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/journal"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/ui"
-	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/ui/html/templates"
 	"github.com/charmbracelet/glamour"
 	"k8s.io/klog/v2"
 )
@@ -36,14 +35,14 @@ type HTMLUserInterface struct {
 	httpServer         *http.Server
 	httpServerListener net.Listener
 
-	doc              *ui.Document
+	history          *ui.History
 	journal          journal.Recorder
 	markdownRenderer *glamour.TermRenderer
 }
 
 var _ ui.UI = &HTMLUserInterface{}
 
-func NewHTMLUserInterface(doc *ui.Document, journal journal.Recorder) (*HTMLUserInterface, error) {
+func NewHTMLUserInterface(history *ui.History, journal journal.Recorder) (*HTMLUserInterface, error) {
 	listen := "localhost:8888"
 
 	mux := http.NewServeMux()
@@ -53,14 +52,14 @@ func NewHTMLUserInterface(doc *ui.Document, journal journal.Recorder) (*HTMLUser
 	}
 
 	u := &HTMLUserInterface{
-		doc:     doc,
+		history: history,
 		journal: journal,
 	}
 
 	mux.HandleFunc("GET /", u.serveIndex)
-	mux.HandleFunc("GET /doc-stream", u.serveDocStream)
-	mux.HandleFunc("POST /send-message", u.handlePOSTSendMessage)
-	mux.HandleFunc("POST /choose-option", u.handlePOSTChooseOption)
+	mux.HandleFunc("GET /stream", u.serveDocStream)
+	mux.HandleFunc("POST /send-message", u.handleSendMessage)
+	mux.HandleFunc("POST /choose-option", u.handleChooseOption)
 
 	httpServerListener, err := net.Listen("tcp", listen)
 	if err != nil {
@@ -97,17 +96,14 @@ func (u *HTMLUserInterface) serveIndex(w http.ResponseWriter, req *http.Request)
 	ctx := req.Context()
 	log := klog.FromContext(ctx)
 
-	var bb bytes.Buffer
-	if err := renderTemplate(ctx, &bb, "index.html", nil); err != nil {
+	if err := renderTemplate(ctx, w, "templates/index.html", nil); err != nil {
 		log.Error(err, "rendering index.html")
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-
-	w.Write(bb.Bytes())
 }
 
-func (u *HTMLUserInterface) handlePOSTSendMessage(w http.ResponseWriter, req *http.Request) {
+func (u *HTMLUserInterface) handleSendMessage(w http.ResponseWriter, req *http.Request) {
 	ctx := req.Context()
 	log := klog.FromContext(ctx)
 
@@ -127,7 +123,7 @@ func (u *HTMLUserInterface) handlePOSTSendMessage(w http.ResponseWriter, req *ht
 
 	// TODO: Match by block id
 	var inputBlock *ui.InputTextBlock
-	for _, block := range u.doc.Blocks() {
+	for _, block := range u.history.Blocks() {
 		if block, ok := block.(*ui.InputTextBlock); ok {
 			inputBlock = block
 		}
@@ -141,12 +137,10 @@ func (u *HTMLUserInterface) handlePOSTSendMessage(w http.ResponseWriter, req *ht
 
 	inputBlock.Observable().Set(q, nil)
 
-	var bb bytes.Buffer
-	bb.WriteString("ok")
-	w.Write(bb.Bytes())
+	w.Write([]byte("ok"))
 }
 
-func (u *HTMLUserInterface) handlePOSTChooseOption(w http.ResponseWriter, req *http.Request) {
+func (u *HTMLUserInterface) handleChooseOption(w http.ResponseWriter, req *http.Request) {
 	ctx := req.Context()
 	log := klog.FromContext(ctx)
 
@@ -166,7 +160,7 @@ func (u *HTMLUserInterface) handlePOSTChooseOption(w http.ResponseWriter, req *h
 
 	// TODO: Match by block id
 	var inputOptionBlock *ui.InputOptionBlock
-	for _, block := range u.doc.Blocks() {
+	for _, block := range u.history.Blocks() {
 		if block, ok := block.(*ui.InputOptionBlock); ok {
 			inputOptionBlock = block
 		}
@@ -179,9 +173,7 @@ func (u *HTMLUserInterface) handlePOSTChooseOption(w http.ResponseWriter, req *h
 	}
 
 	inputOptionBlock.Observable().Set(optionKey, nil)
-	var bb bytes.Buffer
-	bb.WriteString("ok")
-	w.Write(bb.Bytes())
+	w.Write([]byte("ok"))
 }
 
 func (u *HTMLUserInterface) serveDocStream(w http.ResponseWriter, req *http.Request) {
@@ -200,7 +192,7 @@ func (u *HTMLUserInterface) serveDocStream(w http.ResponseWriter, req *http.Requ
 		var sse bytes.Buffer
 		sse.WriteString("event: ReplaceAll\ndata: ")
 
-		blocks := u.doc.Blocks()
+		blocks := u.history.Blocks()
 		var html bytes.Buffer
 		for _, block := range blocks {
 			if err := u.renderBlock(ctx, &html, block); err != nil {
@@ -223,11 +215,11 @@ func (u *HTMLUserInterface) serveDocStream(w http.ResponseWriter, req *http.Requ
 		rc.Flush()
 	}
 
-	onDocChange := func(doc *ui.Document, block ui.Block) {
+	onDocChange := func(doc *ui.History, block ui.Block) {
 		sendAllBlocks()
 	}
 
-	subscription := u.doc.AddSubscription(ui.SubscriberFromFunc(onDocChange))
+	subscription := u.history.AddSubscription(ui.SubscriberFromFunc(onDocChange))
 	defer subscription.Close()
 
 	// Send initial message
@@ -256,20 +248,6 @@ func (u *HTMLUserInterface) serveDocStream(w http.ResponseWriter, req *http.Requ
 	}
 }
 
-func renderTemplate(ctx context.Context, w io.Writer, key string, data any) error {
-	log := klog.FromContext(ctx)
-	tmpl, err := templates.LoadTemplate(key)
-	if err != nil {
-		return fmt.Errorf("loading template %q: %w", key, err)
-	}
-	if err := tmpl.Execute(w, data); err != nil {
-		return fmt.Errorf("executing %q: %w", key, err)
-	}
-
-	log.Info("rendered page", "key", key)
-	return nil
-}
-
 func (u *HTMLUserInterface) Close() error {
 	var errs []error
 	if u.httpServerListener != nil {
@@ -285,15 +263,15 @@ func (u *HTMLUserInterface) Close() error {
 func (u *HTMLUserInterface) renderBlock(ctx context.Context, w io.Writer, block ui.Block) error {
 	switch block := block.(type) {
 	case *ui.ErrorBlock:
-		return renderTemplate(ctx, w, "error_block.html", block)
+		return renderTemplate(ctx, w, "templates/components/error_block.html", block)
 	case *ui.FunctionCallRequestBlock:
-		return renderTemplate(ctx, w, "function_call_request_block.html", block)
+		return renderTemplate(ctx, w, "templates/components/function_call_request_block.html", block)
 	case *ui.AgentTextBlock:
-		return renderTemplate(ctx, w, "agent_text_block.html", block)
+		return renderTemplate(ctx, w, "templates/components/agent_text_block.html", block)
 	case *ui.InputTextBlock:
-		return renderTemplate(ctx, w, "input_text_block.html", block)
+		return renderTemplate(ctx, w, "templates/components/input_text_block.html", block)
 	case *ui.InputOptionBlock:
-		return renderTemplate(ctx, w, "input_option_block.html", block)
+		return renderTemplate(ctx, w, "templates/components/input_option_block.html", block)
 
 	default:
 		return fmt.Errorf("unknown block type %T", block)

@@ -1,13 +1,105 @@
+<!DOCTYPE html>
 <html>
-    <head>
-        <script src="https://unpkg.com/htmx.org@2.0.4" crossorigin="anonymous"></script>
-        <script src="https://unpkg.com/htmx-ext-sse@2.2.2" crossorigin="anonymous"></script>
-    </head>
-<body hx-ext="sse">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script
+      src="https://unpkg.com/htmx.org@2.0.4"
+      integrity="sha384-HGfztofotfshcF7+8n44JQL2oJmowVChPTg48S+jvZoztPfvwD79OC/LTtG6dMp+"
+      crossorigin="anonymous"
+    ></script>
+    <script
+      src="https://unpkg.com/htmx-ext-sse@2.2.3"
+      integrity="sha384-Y4gc0CK6Kg+hmulDc6rZPJu0tqvk7EWlih0Oh+2OkAi1ZDlCbBDCQEE2uVk472Ky"
+      crossorigin="anonymous"
+    ></script>
+  </head>
+  <body hx-ext="sse">
+    <div class="flex flex-col h-screen bg-gray-100">
+      <!-- Chat header -->
+      <div class="bg-white shadow-md">
+        <div
+          class="max-w-3xl mx-auto py-3 px-4 flex items-center justify-between"
+        >
+          <div class="flex items-center space-x-4">
+            <div>
+              <h1 class="text-xl font-semibold text-gray-800">LLM Chat</h1>
+              <!-- p
+                hx-get="/llmodel"
+                hx-trigger="load"
+                class="text-sm text-gray-500"
+              >
+                Loading...
+              </p -->
+            </div>
+          </div>
+          <button class="text-gray-500 hover:text-gray-700">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              class="h-6 w-6"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"
+              />
+            </svg>
+          </button>
+        </div>
+      </div>
 
-    <div hx-ext="sse" sse-connect="/doc-stream" sse-swap="ReplaceAll">
-       
+      <!-- Chat messages -->
+      <div
+        class="flex-1 overflow-y-auto p-4 space-y-6 bg-gray-50"
+        id="history"
+        hx-ext="sse"
+        sse-connect="/stream"
+      >
+        <!-- Chat messages will be dynamically loaded here -->
+        <div sse-swap="ReplaceAll">Loading...</div>
+      </div>
+
+      <!-- Chat input -->
+      <div class="bg-white border-t-2 border-gray-200 px-4 pt-4 mb-2 sm:mb-0">
+        <form
+          hx-post="/send-message"
+          hx-swap="scroll:bottom"
+          hx-on::after-request="this.reset()"
+        >
+          <div class="relative flex">
+            <input
+              name="q"
+              type="text"
+              placeholder="Write your message!"
+              class="w-full focus:outline-none focus:placeholder-gray-400 text-gray-600 placeholder-gray-600 pl-4 bg-gray-200 rounded-md py-3"
+            />
+            <div class="absolute right-0 items-center inset-y-0 hidden sm:flex">
+              <button
+                type="submit"
+                class="inline-flex items-center justify-center rounded-lg px-4 py-3 transition duration-500 ease-in-out text-white bg-blue-500 hover:bg-blue-400 focus:outline-none"
+              >
+                <span class="font-bold">Send</span>
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                  class="h-6 w-6 ml-2 transform rotate-90"
+                >
+                  <path
+                    d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z"
+                  ></path>
+                </svg>
+              </button>
+            </div>
+          </div>
+        </form>
+      </div>
+
     </div>
-</body>
-
+  </body>
 </html>
