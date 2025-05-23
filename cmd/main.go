@@ -102,6 +102,9 @@ type Options struct {
 
 	// SkipVerifySSL is a flag to skip verifying the SSL certificate of the LLM provider.
 	SkipVerifySSL bool `json:"skipVerifySSL,omitempty"`
+
+	// SaveConfig is a flag to save the current configuration to the default config path.
+	SaveConfig bool `json:"-"`
 }
 
 type UserInterface string
@@ -157,6 +160,9 @@ func (o *Options) InitDefaults() {
 
 	// Default to not skipping SSL verification
 	o.SkipVerifySSL = false
+
+	// Default to not saving config
+	o.SaveConfig = false
 }
 
 func (o *Options) LoadConfiguration(b []byte) error {
@@ -166,48 +172,86 @@ func (o *Options) LoadConfiguration(b []byte) error {
 	return nil
 }
 
-func (o *Options) LoadConfigurationFile() error {
-	configPaths := []string{
-		filepath.Join("{CONFIG}", "kubectl-ai", "config.yaml"),
-		filepath.Join("{HOME}", ".config", "kubectl-ai", "config.yaml"),
-	}
+var defaultConfigPaths = []string{
+	"{CONFIG}/kubectl-ai/config.yaml",
+	"{HOME}/.config/kubectl-ai/config.yaml",
+}
 
-	for _, configPath := range configPaths {
-		// Try to load configuration
-		tokens := strings.Split(configPath, string(os.PathSeparator))
-		for i, token := range tokens {
-			if token == "{CONFIG}" {
-				configDir, err := os.UserConfigDir()
-				if err != nil {
-					return fmt.Errorf("getting user config directory: %w", err)
-				}
-				tokens[i] = configDir
+// expandConfigPath replaces {CONFIG} and {HOME} tokens in a path with actual directories.
+func expandConfigPath(configPath string) (string, error) {
+	tokens := strings.Split(configPath, "/")
+	for i, token := range tokens {
+		if token == "{CONFIG}" {
+			configDir, err := os.UserConfigDir()
+			if err != nil {
+				return "", fmt.Errorf("getting user config directory: %w", err)
 			}
-			if token == "{HOME}" {
-				homeDir, err := os.UserHomeDir()
-				if err != nil {
-					return fmt.Errorf("getting user home directory: %w", err)
-				}
-				tokens[i] = homeDir
-			}
+			tokens[i] = configDir
 		}
-		configPath = filepath.Join(tokens...)
-		configBytes, err := os.ReadFile(configPath)
+		if token == "{HOME}" {
+			homeDir, err := os.UserHomeDir()
+			if err != nil {
+				return "", fmt.Errorf("getting user home directory: %w", err)
+			}
+			tokens[i] = homeDir
+		}
+	}
+	return filepath.Join(tokens...), nil
+}
+
+func (o *Options) LoadConfigurationFile() error {
+	for _, configPath := range defaultConfigPaths {
+		finalPath, err := expandConfigPath(configPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not expand config path %q: %v\n", configPath, err)
+			continue
+		}
+		configBytes, err := os.ReadFile(finalPath)
 		if err != nil {
 			if os.IsNotExist(err) {
 				// ignore
 			} else {
-				fmt.Fprintf(os.Stderr, "warning: could not load defaults from %q: %v\n", configPath, err)
+				fmt.Fprintf(os.Stderr, "warning: could not load defaults from %q: %v\n", finalPath, err)
 			}
 		}
 		if len(configBytes) > 0 {
 			if err := o.LoadConfiguration(configBytes); err != nil {
-				fmt.Fprintf(os.Stderr, "warning: error loading configuration from %q: %v\n", configPath, err)
+				fmt.Fprintf(os.Stderr, "warning: error loading configuration from %q: %v\n", finalPath, err)
 			}
 		}
 	}
-
 	return nil
+}
+
+func (o *Options) WriteConfigurationFile() (string, error) {
+	if !o.SaveConfig {
+		return "", nil
+	}
+
+	configData, err := yaml.Marshal(o)
+	if err != nil {
+		return "", fmt.Errorf("marshaling config: %w", err)
+	}
+
+	var writeErrors []error
+	for _, configPath := range defaultConfigPaths {
+		finalPath, err := expandConfigPath(configPath)
+		if err != nil {
+			writeErrors = append(writeErrors, fmt.Errorf("expand path %q: %w", configPath, err))
+			continue
+		}
+		// Ensure parent directory exists
+		if err := os.MkdirAll(filepath.Dir(finalPath), 0o755); err != nil {
+			writeErrors = append(writeErrors, fmt.Errorf("mkdir %q: %w", filepath.Dir(finalPath), err))
+			continue
+		}
+		if err := os.WriteFile(finalPath, configData, 0o644); err != nil {
+			writeErrors = append(writeErrors, fmt.Errorf("write file %q: %w", finalPath, err))
+			continue
+		}
+		return finalPath, nil
+	}
+	return "", fmt.Errorf("failed to write config to any path: %v", writeErrors)
 }
 
 func main() {
@@ -266,6 +310,11 @@ func run(ctx context.Context) error {
 		return err
 	}
 
+	// Write the configuration to the default config path if --save-config is set
+	if _, err := opt.WriteConfigurationFile(); err != nil {
+		return fmt.Errorf("failed to write config file: %w", err)
+	}
+
 	return nil
 }
 
@@ -287,6 +336,7 @@ func (opt *Options) bindCLIFlags(f *pflag.FlagSet) error {
 
 	f.Var(&opt.UserInterface, "user-interface", "user interface mode to use")
 	f.BoolVar(&opt.SkipVerifySSL, "skip-verify-ssl", opt.SkipVerifySSL, "skip verifying the SSL certificate of the LLM provider")
+	f.BoolVar(&opt.SaveConfig, "save-config", opt.SaveConfig, "save the current configuration to the default config path")
 
 	return nil
 }
