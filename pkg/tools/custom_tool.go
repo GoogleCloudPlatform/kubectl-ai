@@ -26,10 +26,11 @@ import (
 
 // CustomToolConfig defines the structure for configuring a custom tool.
 type CustomToolConfig struct {
-	Name        string `yaml:"name"`
-	Description string `yaml:"description"`
-	Command     string `yaml:"command"`
-	CommandDesc string `yaml:"command_desc"`
+	Name          string `yaml:"name"`
+	Description   string `yaml:"description"`
+	Command       string `yaml:"command"`
+	CommandDesc   string `yaml:"command_desc"`
+	IsInteractive bool   `yaml:"is_interactive"`
 }
 
 // CustomTool implements the Tool interface for external commands.

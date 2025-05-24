@@ -19,7 +19,6 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
-	"strings"
 
 	"github.com/GoogleCloudPlatform/kubectl-ai/gollm"
 )
@@ -35,7 +34,17 @@ func (t *Kubectl) Name() string {
 }
 
 func (t *Kubectl) Description() string {
-	return "Executes a kubectl command against the user's Kubernetes cluster. Use this tool only when you need to query or modify the state of the user's Kubernetes cluster."
+	return `Executes a kubectl command against the user's Kubernetes cluster. Use this tool only when you need to query or modify the state of the user's Kubernetes cluster.
+
+IMPORTANT: Interactive commands are not supported in this environment. This includes:
+- kubectl exec with -it flag (use non-interactive exec instead)
+- kubectl edit (use kubectl get -o yaml, kubectl patch, or kubectl apply instead)
+- kubectl port-forward (use alternative methods like NodePort or LoadBalancer)
+
+For interactive operations, please use these non-interactive alternatives:
+- Instead of 'kubectl edit', use 'kubectl get -o yaml' to view, 'kubectl patch' for targeted changes, or 'kubectl apply' to apply full changes
+- Instead of 'kubectl exec -it', use 'kubectl exec' with a specific command
+- Instead of 'kubectl port-forward', use service types like NodePort or LoadBalancer`
 }
 
 func (t *Kubectl) FunctionDefinition() *gollm.FunctionDefinition {
@@ -48,13 +57,30 @@ func (t *Kubectl) FunctionDefinition() *gollm.FunctionDefinition {
 				"command": {
 					Type: gollm.TypeString,
 					Description: `The complete kubectl command to execute. Prefer to use heredoc syntax for multi-line commands. Please include the kubectl prefix as well.
-Example:
+
+IMPORTANT: Do not use interactive commands. Instead:
+- Use 'kubectl get -o yaml', 'kubectl patch', or 'kubectl apply' instead of 'kubectl edit'
+- Use 'kubectl exec' with specific commands instead of 'kubectl exec -it'
+- Use service types like NodePort or LoadBalancer instead of 'kubectl port-forward'
+
+Examples:
 user: what pods are running in the cluster?
 assistant: kubectl get pods
 
 user: what is the status of the pod my-pod?
 assistant: kubectl get pod my-pod -o jsonpath='{.status.phase}'
-`,
+
+user: I need to edit the pod configuration
+assistant: # Option 1: Using patch for targeted changes
+kubectl patch pod my-pod --patch '{"spec":{"containers":[{"name":"main","image":"new-image"}]}}'
+
+# Option 2: Using get and apply for full changes
+kubectl get pod my-pod -o yaml > pod.yaml
+# Edit pod.yaml locally
+kubectl apply -f pod.yaml
+
+user: I need to execute a command in the pod
+assistant: kubectl exec my-pod -- /bin/sh -c "your command here"`,
 				},
 				"modifies_resource": {
 					Type: gollm.TypeString,
@@ -89,11 +115,9 @@ func (t *Kubectl) Run(ctx context.Context, args map[string]any) (any, error) {
 }
 
 func runKubectlCommand(ctx context.Context, command, workDir, kubeconfig string) (*ExecResult, error) {
-	if strings.Contains(command, "kubectl edit") {
-		return &ExecResult{Error: "interactive mode not supported for kubectl, please use non-interactive commands"}, nil
-	}
-	if strings.Contains(command, "kubectl port-forward") {
-		return &ExecResult{Error: "port-forwarding is not allowed because assistant is running in an unattended mode, please try some other alternative"}, nil
+	// Check for interactive commands before proceeding
+	if isInteractive, errMsg := IsInteractiveCommand(command); isInteractive {
+		return &ExecResult{Error: errMsg}, nil
 	}
 
 	var cmd *exec.Cmd
@@ -113,4 +137,18 @@ func runKubectlCommand(ctx context.Context, command, workDir, kubeconfig string)
 	}
 
 	return executeCommand(cmd)
+}
+
+func (t *Kubectl) IsInteractive(args map[string]any) (bool, string) {
+	commandVal, ok := args["command"]
+	if !ok || commandVal == nil {
+		return false, ""
+	}
+
+	command, ok := commandVal.(string)
+	if !ok {
+		return false, ""
+	}
+
+	return IsInteractiveCommand(command)
 }

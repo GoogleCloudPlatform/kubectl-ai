@@ -243,3 +243,14 @@ func LoadAndRegisterCustomTools(configPath string) error {
 
 	return nil
 }
+
+// For CustomTool
+func (t *CustomTool) IsInteractive(args map[string]any) (bool, string) {
+	// Custom tools are not interactive by default
+	return false, ""
+}
+
+// Add a method to access the tool
+func (t *ToolCall) GetTool() Tool {
+	return t.tool
+}

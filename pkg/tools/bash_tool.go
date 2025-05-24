@@ -15,13 +15,16 @@
 package tools
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/GoogleCloudPlatform/kubectl-ai/gollm"
 	"k8s.io/klog/v2"
@@ -127,13 +130,139 @@ func (t *BashTool) Run(ctx context.Context, args map[string]any) (any, error) {
 }
 
 type ExecResult struct {
-	Error    string `json:"error,omitempty"`
-	Stdout   string `json:"stdout,omitempty"`
-	Stderr   string `json:"stderr,omitempty"`
-	ExitCode int    `json:"exit_code,omitempty"`
+	Error      string `json:"error,omitempty"`
+	Stdout     string `json:"stdout,omitempty"`
+	Stderr     string `json:"stderr,omitempty"`
+	ExitCode   int    `json:"exit_code,omitempty"`
+	StreamType string `json:"stream_type,omitempty"`
+}
+
+func IsInteractiveCommand(command string) (bool, string) {
+	// Inline isKubectlCommand logic
+	words := strings.Fields(command)
+	if len(words) == 0 {
+		return false, ""
+	}
+	base := filepath.Base(words[0])
+	if base != "kubectl" {
+		return false, ""
+	}
+
+	isExec := strings.Contains(command, " exec ") && strings.Contains(command, " -it")
+	isPortForward := strings.Contains(command, " port-forward ")
+	isEdit := strings.Contains(command, " edit ")
+
+	if isExec || isPortForward || isEdit {
+		return true, "interactive mode not supported for kubectl, please use non-interactive commands"
+	}
+	return false, ""
 }
 
 func executeCommand(cmd *exec.Cmd) (*ExecResult, error) {
+	command := strings.Join(cmd.Args, " ")
+
+	if isInteractive, errMsg := IsInteractiveCommand(command); isInteractive {
+		return &ExecResult{Error: errMsg}, nil
+	}
+
+	isWatch := strings.Contains(command, " get ") && strings.Contains(command, " -w")
+	isLogs := strings.Contains(command, " logs ") && strings.Contains(command, " -f")
+	isAttach := strings.Contains(command, " attach ")
+
+	// Handle streaming commands
+	if isWatch || isLogs || isAttach {
+		// Create a context with timeout
+		ctx, cancel := context.WithTimeout(context.Background(), 7*time.Second)
+		defer cancel()
+
+		// Create pipes for stdout and stderr
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			return nil, fmt.Errorf("creating stdout pipe: %w", err)
+		}
+		stderr, err := cmd.StderrPipe()
+		if err != nil {
+			return nil, fmt.Errorf("creating stderr pipe: %w", err)
+		}
+
+		if err := cmd.Start(); err != nil {
+			return nil, fmt.Errorf("starting command: %w", err)
+		}
+
+		// Read output in goroutines
+		var stdoutBuilder, stderrBuilder strings.Builder
+		stdoutDone := make(chan struct{})
+		stderrDone := make(chan struct{})
+		isTimeout := false
+
+		go func() {
+			scanner := bufio.NewScanner(stdout)
+			for scanner.Scan() {
+				if isTimeout {
+					// Stop reading if timeout occurred
+					return
+				}
+				line := scanner.Text() + "\n"
+				fmt.Print(line)
+				stdoutBuilder.WriteString(line)
+			}
+			close(stdoutDone)
+		}()
+
+		go func() {
+			scanner := bufio.NewScanner(stderr)
+			for scanner.Scan() {
+				if isTimeout {
+					// Stop reading if timeout occurred
+					return
+				}
+				line := scanner.Text() + "\n"
+				fmt.Fprint(os.Stderr, line)
+				stderrBuilder.WriteString(line)
+			}
+			close(stderrDone)
+		}()
+
+		// Wait for either timeout or command completion
+		select {
+		case <-ctx.Done():
+			isTimeout = true
+			// Kill the process immediately on timeout
+			if cmd.Process != nil {
+				cmd.Process.Kill()
+				cmd.Wait()
+			}
+			// Return timeout message to be displayed via UI
+			return &ExecResult{
+				Error:      "Timeout reached after 7 seconds",
+				Stdout:     stdoutBuilder.String(),
+				Stderr:     stderrBuilder.String(),
+				StreamType: "timeout",
+			}, nil
+		case <-stdoutDone:
+			<-stderrDone // Wait for stderr to finish too
+		}
+
+		// Ensure the command is terminated
+		if cmd.Process != nil {
+			cmd.Process.Kill()
+			cmd.Wait()
+		}
+
+		results := &ExecResult{
+			Stdout: stdoutBuilder.String(),
+			Stderr: stderrBuilder.String(),
+		}
+		if isWatch {
+			results.StreamType = "watch"
+		} else if isLogs {
+			results.StreamType = "logs"
+		} else if isAttach {
+			results.StreamType = "attach"
+		}
+		return results, nil
+	}
+
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	var stderr bytes.Buffer
@@ -150,4 +279,18 @@ func executeCommand(cmd *exec.Cmd) (*ExecResult, error) {
 	results.Stdout = stdout.String()
 	results.Stderr = stderr.String()
 	return results, nil
+}
+
+func (t *BashTool) IsInteractive(args map[string]any) (bool, string) {
+	commandVal, ok := args["command"]
+	if !ok || commandVal == nil {
+		return false, ""
+	}
+
+	command, ok := commandVal.(string)
+	if !ok {
+		return false, ""
+	}
+
+	return IsInteractiveCommand(command)
 }
