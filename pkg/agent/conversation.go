@@ -240,7 +240,7 @@ func (a *Conversation) RunOneRound(ctx context.Context, query string) error {
   3) No`
 
 				optionsBlock := ui.NewInputOptionBlock().SetPrompt(confirmationPrompt)
-				optionsBlock.SetOptions([]string{"1", "2", "3"})
+				optionsBlock.SetOptions([]string{"1", "2", "3", "yes", "y", "no", "n"})
 				a.doc.AddBlock(optionsBlock)
 
 				selectedChoice, err := optionsBlock.Observable().Wait()
@@ -253,12 +253,14 @@ func (a *Conversation) RunOneRound(ctx context.Context, query string) error {
 					return fmt.Errorf("reading input: %w", err)
 				}
 
+				// Normalize the input
+				selectedChoice = strings.ToLower(strings.TrimSpace(selectedChoice))
 				switch selectedChoice {
-				case "1":
+				case "1", "yes", "y":
 					// Proceed with the operation
 				case "2":
 					a.SkipPermissions = true
-				case "3":
+				case "3", "no", "n":
 					a.doc.AddBlock(ui.NewAgentTextBlock().WithText("Operation was skipped. User declined to run this operation."))
 					currChatContent = append(currChatContent, gollm.FunctionCallResult{
 						ID:   call.ID,

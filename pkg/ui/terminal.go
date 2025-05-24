@@ -219,7 +219,7 @@ func (u *TerminalUI) DocumentChanged(doc *Document, block Block) {
 				return
 			}
 			for {
-				fmt.Print("  Enter your choice (number): ") // Print loop prompt manually
+				fmt.Print("  Enter your choice (1,2,3): ") // Print loop prompt manually
 				response, err := tReader.ReadString('\n')
 				if err != nil {
 					block.Observable().Set("", err)
@@ -240,7 +240,7 @@ func (u *TerminalUI) DocumentChanged(doc *Document, block Block) {
 			}
 			// Temporarily change prompt for option selection
 			originalPrompt := rlInstance.Config.Prompt
-			choicePrompt := "  Enter your choice (number): "
+			choicePrompt := "  Enter your choice (1,2,3): "
 			rlInstance.SetPrompt(choicePrompt)
 			// Ensure original prompt is restored even if errors occur
 			defer rlInstance.SetPrompt(originalPrompt)
