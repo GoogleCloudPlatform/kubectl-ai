@@ -198,9 +198,8 @@ func (o *Options) LoadConfigurationFile() error {
 		configPath = filepath.Clean(pathWithPlaceholdersExpanded)
 		configBytes, err := os.ReadFile(configPath)
 		if err != nil {
-			if os.IsNotExist(err) && !slices.Contains(defaultConfigPaths, configPath) {
-				// user specified config file does not exist
-				return fmt.Errorf("could not load config from %q: %w", configPath, err)
+			if os.IsNotExist(err) {
+				// ignore missing config files, they are optional
 			} else {
 				fmt.Fprintf(os.Stderr, "warning: could not load defaults from %q: %v\n", configPath, err)
 			}
