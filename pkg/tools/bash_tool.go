@@ -15,10 +15,13 @@
 package tools
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -134,12 +137,86 @@ type ExecResult struct {
 }
 
 func executeCommand(cmd *exec.Cmd) (*ExecResult, error) {
+	// Detect streaming commands (e.g., kubectl logs -f, tail -f)
+	isStreaming := false
+	for _, arg := range cmd.Args {
+		if arg == "-f" || arg == "--follow" {
+			isStreaming = true
+			break
+		}
+	}
+
+	results := &ExecResult{}
+
+	if isStreaming {
+		// Print streaming message
+		fmt.Fprintln(os.Stdout, "\nStreaming output... Press CTRL-C to stop streaming and return to the prompt.")
+
+		stdoutPipe, err := cmd.StdoutPipe()
+		if err != nil {
+			results.Error = err.Error()
+			return results, err
+		}
+		stderrPipe, err := cmd.StderrPipe()
+		if err != nil {
+			results.Error = err.Error()
+			return results, err
+		}
+
+		if err := cmd.Start(); err != nil {
+			results.Error = err.Error()
+			return results, err
+		}
+
+		// Channel to catch interrupt
+		interrupt := make(chan os.Signal, 1)
+		signal.Notify(interrupt, os.Interrupt)
+		defer signal.Stop(interrupt)
+
+		// Read stdout and stderr concurrently
+		stdoutDone := make(chan struct{})
+		stderrDone := make(chan struct{})
+
+		go func() {
+			scanner := bufio.NewScanner(stdoutPipe)
+			for scanner.Scan() {
+				fmt.Fprintln(os.Stdout, scanner.Text())
+			}
+			stdoutDone <- struct{}{}
+		}()
+		go func() {
+			scanner := bufio.NewScanner(stderrPipe)
+			for scanner.Scan() {
+				fmt.Fprintln(os.Stderr, scanner.Text())
+			}
+			stderrDone <- struct{}{}
+		}()
+
+		// Wait for either interrupt or process exit
+		select {
+		case <-interrupt:
+			cmd.Process.Signal(os.Interrupt)
+			results.Error = "streaming interrupted by user"
+			// Wait for goroutines to finish
+			<-stdoutDone
+			<-stderrDone
+			return results, nil
+		case <-stdoutDone:
+			<-stderrDone
+			cmd.Wait()
+			return results, nil
+		case <-stderrDone:
+			<-stdoutDone
+			cmd.Wait()
+			return results, nil
+		}
+	}
+	// Non-streaming: collect output as before
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
-	results := &ExecResult{}
 	if err := cmd.Run(); err != nil {
 		if exitError, ok := err.(*exec.ExitError); ok {
 			results.ExitCode = exitError.ExitCode()
