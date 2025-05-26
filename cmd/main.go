@@ -289,7 +289,7 @@ func (opt *Options) bindCLIFlags(f *pflag.FlagSet) error {
 	f.BoolVar(&opt.EnableToolUseShim, "enable-tool-use-shim", opt.EnableToolUseShim, "enable tool use shim")
 	f.BoolVar(&opt.Quiet, "quiet", opt.Quiet, "run in non-interactive mode, requires a query to be provided as a positional argument")
 
-	f.Var(&opt.UserInterface, "user-interface", "user interface mode to use")
+	f.Var(&opt.UserInterface, "user-interface", "user interface mode to use. Supported values: terminal, html.")
 	f.BoolVar(&opt.SkipVerifySSL, "skip-verify-ssl", opt.SkipVerifySSL, "skip verifying the SSL certificate of the LLM provider")
 
 	return nil
