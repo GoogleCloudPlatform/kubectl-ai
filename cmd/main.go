@@ -595,24 +595,15 @@ func (writer klogWriter) Write(data []byte) (n int, err error) {
 }
 
 func hasStdInData() (bool, error) {
+	hasData := false
+
 	stat, err := os.Stdin.Stat()
 	if err != nil {
-		return false, fmt.Errorf("checking stdin: %w", err)
+		return hasData, fmt.Errorf("checking stdin: %w", err)
 	}
+	hasData = (stat.Mode() & os.ModeCharDevice) == 0
 
-	// If stdin is a character device (terminal), there's no piped data
-	if (stat.Mode() & os.ModeCharDevice) != 0 {
-		return false, nil
-	}
-
-	// For non-character devices, check if there's actually data available
-	// This handles cases like VS Code debugger where stdin might be redirected
-	// but there's no actual data
-	if stat.Size() == 0 {
-		return false, nil
-	}
-
-	return true, nil
+	return hasData, nil
 }
 
 // resolveQueryInput determines the query input from positional args and/or stdin.
