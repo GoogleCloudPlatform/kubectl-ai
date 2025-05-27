@@ -233,6 +233,9 @@ func (a *Conversation) RunOneRound(ctx context.Context, query string) error {
 				return fmt.Errorf("building tool call: %w", err)
 			}
 
+			// Sanitize arguments (e.g. enforce kubectl prefix, etc.)
+			sanitizeToolArguments(toolCall.GetTool().Name(), call.Arguments)
+
 			// Check if the command is interactive using the tool's implementation
 			isInteractive, err := toolCall.GetTool().IsInteractive(call.Arguments)
 			klog.Infof("isInteractive: %t, err: %v, CallArguments: %+v", isInteractive, err, call.Arguments)
@@ -442,6 +445,25 @@ func extractJSON(s string) (string, bool) {
 	data := s[first+len(jsonBlockMarker) : last]
 
 	return data, true
+}
+
+// Applies tool-specific sanity checks and corrections incase some
+// commands are not visible. This has been mostly experienced in local small LLM models.
+func sanitizeToolArguments(toolName string, args map[string]any) {
+	switch toolName {
+	case "kubectl":
+		// auto-prepend missing "kubectl " prefix
+		if cmd, ok := args["command"].(string); ok && !strings.HasPrefix(cmd, "kubectl ") {
+			klog.Warningf("kubectl missing prefix; auto-prepending")
+			args["command"] = "kubectl " + cmd
+		}
+
+	// case "gdrive":
+	//     // future logic for gdrive, etc.
+
+	default:
+		// no-op
+	}
 }
 
 // parseReActResponse parses the LLM response into a ReActResponse struct
