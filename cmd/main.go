@@ -100,9 +100,9 @@ type Options struct {
 	ToolConfigPaths        []string `json:"toolConfigPaths,omitempty"`
 
 	// UserInterface is the type of user interface to use.
-	UserInterface   UserInterface `json:"userInterface,omitempty"`
+	UserInterface UserInterface `json:"userInterface,omitempty"`
 	// UIListenAddress is the address to listen for the HTML UI.
-	UIListenAddress string        `json:"uiListenAddress,omitempty"`
+	UIListenAddress string `json:"uiListenAddress,omitempty"`
 
 	// SkipVerifySSL is a flag to skip verifying the SSL certificate of the LLM provider.
 	SkipVerifySSL bool `json:"skipVerifySSL,omitempty"`
