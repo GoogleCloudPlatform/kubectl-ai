@@ -43,12 +43,10 @@ type HTMLUserInterface struct {
 
 var _ ui.UI = &HTMLUserInterface{}
 
-func NewHTMLUserInterface(doc *ui.Document, journal journal.Recorder) (*HTMLUserInterface, error) {
-	listen := "localhost:8888"
-
+func NewHTMLUserInterface(doc *ui.Document, listenAddress string, journal journal.Recorder) (*HTMLUserInterface, error) {
 	mux := http.NewServeMux()
 	httpServer := &http.Server{
-		Addr:    listen,
+		Addr:    listenAddress,
 		Handler: mux,
 	}
 
@@ -62,7 +60,7 @@ func NewHTMLUserInterface(doc *ui.Document, journal journal.Recorder) (*HTMLUser
 	mux.HandleFunc("POST /send-message", u.handlePOSTSendMessage)
 	mux.HandleFunc("POST /choose-option", u.handlePOSTChooseOption)
 
-	httpServerListener, err := net.Listen("tcp", listen)
+	httpServerListener, err := net.Listen("tcp", listenAddress)
 	if err != nil {
 		return nil, fmt.Errorf("starting http server network listener: %w", err)
 	}

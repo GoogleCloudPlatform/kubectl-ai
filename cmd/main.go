@@ -100,7 +100,9 @@ type Options struct {
 	ToolConfigPaths        []string `json:"toolConfigPaths,omitempty"`
 
 	// UserInterface is the type of user interface to use.
-	UserInterface UserInterface `json:"userInterface,omitempty"`
+	UserInterface   UserInterface `json:"userInterface,omitempty"`
+	// UIListenAddress is the address to listen for the HTML UI.
+	UIListenAddress string        `json:"uiListenAddress,omitempty"`
 
 	// SkipVerifySSL is a flag to skip verifying the SSL certificate of the LLM provider.
 	SkipVerifySSL bool `json:"skipVerifySSL,omitempty"`
@@ -162,6 +164,8 @@ func (o *Options) InitDefaults() {
 	o.ToolConfigPaths = defaultToolConfigPaths
 	// Default to terminal UI
 	o.UserInterface = UserInterfaceTerminal
+	// Default UI listen address for HTML UI
+	o.UIListenAddress = "localhost:8888"
 
 	// Default to not skipping SSL verification
 	o.SkipVerifySSL = false
@@ -289,6 +293,7 @@ func (opt *Options) bindCLIFlags(f *pflag.FlagSet) error {
 	f.BoolVar(&opt.Quiet, "quiet", opt.Quiet, "run in non-interactive mode, requires a query to be provided as a positional argument")
 
 	f.Var(&opt.UserInterface, "user-interface", "user interface mode to use. Supported values: terminal, html.")
+	f.StringVar(&opt.UIListenAddress, "ui-listen-address", opt.UIListenAddress, "address to listen for the HTML UI.")
 	f.BoolVar(&opt.SkipVerifySSL, "skip-verify-ssl", opt.SkipVerifySSL, "skip verifying the SSL certificate of the LLM provider")
 
 	return nil
@@ -371,7 +376,7 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 
 	case UserInterfaceHTML:
 		var u ui.UI
-		u, err = html.NewHTMLUserInterface(doc, recorder)
+		u, err = html.NewHTMLUserInterface(doc, opt.UIListenAddress, recorder)
 		if err != nil {
 			return err
 		}
