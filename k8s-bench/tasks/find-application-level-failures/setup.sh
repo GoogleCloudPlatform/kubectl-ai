@@ -7,4 +7,4 @@ kubectl apply -f artifacts/eval-app-pod.yaml --namespace=app-level-fails-test
 # Wait a few seconds for pod to get at least 1 failure logged
 for i in {1..5}; do
     sleep 1
-done 
+done
