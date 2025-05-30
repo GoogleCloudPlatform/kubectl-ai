@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: eval-app-pod
+  namespace: app-level-fails-test
+spec:
+  containers:
+  - name: eval-app-executor
+    image: python:3.9-slim-buster
+    command: ["python"]
+    args: ["/etc/config/eval-app.py"]
+    volumeMounts:
+    - name: eval-app-volume
+      mountPath: /etc/config
+  volumes:
+  - name: eval-app-volume
+    configMap:
+      name: eval-app-map
