@@ -65,8 +65,31 @@ func (s *kubectlMCPServer) handleToolCall(ctx context.Context, request mcp.CallT
 	log := klog.FromContext(ctx)
 
 	name := request.Params.Name
-	command := request.Params.Arguments["command"].(string)
-	modifiesResource := request.Params.Arguments["modifies_resource"].(string)
+	
+	// In v0.31.0, Arguments is an interface{} that needs type assertion to a map
+	argMap, ok := request.Params.Arguments.(map[string]interface{})
+	if !ok {
+		return mcp.NewToolResultError("Invalid arguments format: expected a map"), nil
+	}
+	
+	// Safely extract command parameter with type checking
+	commandVal, ok := argMap["command"]
+	if !ok {
+		return mcp.NewToolResultError("Missing required parameter: command"), nil
+	}
+	command, ok := commandVal.(string)
+	if !ok {
+		return mcp.NewToolResultError("Parameter 'command' must be a string"), nil
+	}
+	
+	// Safely extract modifies_resource parameter (optional)
+	var modifiesResource string
+	if modVal, ok := argMap["modifies_resource"]; ok {
+		if modStr, ok := modVal.(string); ok {
+			modifiesResource = modStr
+		}
+	}
+	
 	log.Info("Received tool call", "tool", name, "command", command, "modifies_resource", modifiesResource)
 
 	ctx = context.WithValue(ctx, tools.KubeconfigKey, s.kubectlConfig)
@@ -74,43 +97,31 @@ func (s *kubectlMCPServer) handleToolCall(ctx context.Context, request mcp.CallT
 
 	tool := tools.Lookup(name)
 	if tool == nil {
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				mcp.TextContent{
-					Type: "text",
-					Text: fmt.Sprintf("Error: Tool %s not found", name),
-				},
-			},
-		}, nil
+		// Use utility method for error creation in v0.31.0
+		return mcp.NewToolResultError(fmt.Sprintf("Tool %s not found", name)), nil
 	}
-	output, err := tool.Run(ctx, map[string]any{
+	// Prepare arguments map with command and optional modifies_resource
+	args := map[string]any{
 		"command": command,
-	})
+	}
+	
+	// Add modifies_resource if available
+	if modifiesResource != "" {
+		args["modifies_resource"] = modifiesResource
+	}
+	
+	output, err := tool.Run(ctx, args)
 	if err != nil {
 		log.Error(err, "Error running tool call")
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				mcp.TextContent{
-					Type: "text",
-					Text: fmt.Sprintf("Error: %v", err),
-				},
-			},
-			IsError: true,
-		}, nil
+		// Use the NewToolResultError helper method in v0.31.0
+		return mcp.NewToolResultError(fmt.Sprintf("Error running tool: %v", err)), nil
 	}
 
 	result, err := tools.ToolResultToMap(output)
 	if err != nil {
 		log.Error(err, "Error converting tool call output to result")
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				mcp.TextContent{
-					Type: "text",
-					Text: fmt.Sprintf("Error: %v", err),
-				},
-			},
-			IsError: true,
-		}, nil
+		// Use the NewToolResultError helper method in v0.31.0
+		return mcp.NewToolResultError(fmt.Sprintf("Error processing result: %v", err)), nil
 	}
 
 	log.Info("Tool call output", "tool", name, "result", result)

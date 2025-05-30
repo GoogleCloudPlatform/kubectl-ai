@@ -171,14 +171,8 @@ func (c *Client) retryConnectionWithPing(ctx context.Context) error {
 // buildInitializeRequest creates the MCP initialize request
 func (c *Client) buildInitializeRequest() mcp.InitializeRequest {
 	return mcp.InitializeRequest{
-		Request: mcp.Request{
-			Method: "initialize",
-		},
-		Params: struct {
-			ProtocolVersion string                 `json:"protocolVersion"`
-			Capabilities    mcp.ClientCapabilities `json:"capabilities"`
-			ClientInfo      mcp.Implementation     `json:"clientInfo"`
-		}{
+		// In v0.31.0, InitializeRequest uses the InitializeParams struct directly
+		Params: mcp.InitializeParams{
 			ProtocolVersion: mcp.LATEST_PROTOCOL_VERSION,
 			Capabilities:    mcp.ClientCapabilities{},
 			ClientInfo: mcp.Implementation{
@@ -252,19 +246,16 @@ func (c *Client) CallTool(ctx context.Context, toolName string, arguments map[st
 		args[k] = v
 	}
 
-	// Call the tool on the MCP server
-	result, err := c.client.CallTool(ctx, mcp.CallToolRequest{
-		Params: struct {
-			Name      string                 `json:"name"`
-			Arguments map[string]interface{} `json:"arguments,omitempty"`
-			Meta      *struct {
-				ProgressToken mcp.ProgressToken `json:"progressToken,omitempty"`
-			} `json:"_meta,omitempty"`
-		}{
+	// In v0.31.0, CallToolRequest has a simplified structure with Params field
+	request := mcp.CallToolRequest{
+		Params: mcp.CallToolParams{
 			Name:      toolName,
 			Arguments: args,
 		},
-	})
+	}
+
+	// Call the tool on the MCP server
+	result, err := c.client.CallTool(ctx, request)
 
 	if err != nil {
 		return "", fmt.Errorf(ErrToolCallFmt, toolName, err)
@@ -273,16 +264,16 @@ func (c *Client) CallTool(ctx context.Context, toolName string, arguments map[st
 	// Handle error response
 	if result.IsError {
 		if len(result.Content) > 0 {
-			if textContent, ok := result.Content[0].(mcp.TextContent); ok {
+			if textContent, ok := mcp.AsTextContent(result.Content[0]); ok {
 				return "", fmt.Errorf("tool error: %s", textContent.Text)
 			}
 		}
 		return "", fmt.Errorf("tool returned an error")
 	}
 
-	// Convert the result to a string
+	// Convert the result to a string using utility method in v0.31.0
 	if len(result.Content) > 0 {
-		if textContent, ok := result.Content[0].(mcp.TextContent); ok {
+		if textContent, ok := mcp.AsTextContent(result.Content[0]); ok {
 			return textContent.Text, nil
 		}
 	}
