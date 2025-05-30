@@ -50,3 +50,9 @@ const (
 	ConfigFilePermissions = 0600
 	ConfigDirPermissions  = 0755
 )
+
+// Constants for environment variables
+const (
+	// EnvMCPServerPrefix is the prefix for MCP server environment variables
+	EnvMCPServerPrefix = "MCP_"
+)

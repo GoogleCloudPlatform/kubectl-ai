@@ -25,12 +25,6 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// Constants for environment variables
-const (
-	// EnvMCPServerPrefix is the prefix for MCP server environment variables
-	EnvMCPServerPrefix = "MCP_"
-)
-
 // Config represents the complete MCP client configuration file
 type Config struct {
 	// Servers is a list of MCP server configurations
