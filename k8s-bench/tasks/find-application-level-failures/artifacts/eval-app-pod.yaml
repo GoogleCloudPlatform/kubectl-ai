@@ -1,3 +1,4 @@
+# Pod for running the `eval-app.py` script
 apiVersion: v1
 kind: Pod
 metadata:
