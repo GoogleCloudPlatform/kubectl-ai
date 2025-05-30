@@ -19,12 +19,25 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/yaml"
 )
 
-// ServerConfig represents the configuration for an MCP server
+// Constants for environment variables
+const (
+	// EnvMCPServerPrefix is the prefix for MCP server environment variables
+	EnvMCPServerPrefix = "MCP_"
+)
+
+// Config represents the complete MCP client configuration file
+type Config struct {
+	// Servers is a list of MCP server configurations
+	Servers []ServerConfig `yaml:"servers,omitempty"`
+}
+
+// ServerConfig represents the configuration for a single MCP server
 type ServerConfig struct {
 	// Name is a friendly name for this MCP server
 	Name string `yaml:"name"`
@@ -34,13 +47,21 @@ type ServerConfig struct {
 	Args []string `yaml:"args,omitempty"`
 	// Env are the environment variables to set for the command
 	Env map[string]string `yaml:"env,omitempty"`
+	// URL is the URL for HTTP-based MCP servers
+	URL string `yaml:"url,omitempty"`
+	// Auth is the authentication configuration for HTTP-based MCP servers
+	Auth *AuthConfig `yaml:"auth,omitempty"`
+	// OAuthConfig is the OAuth configuration for HTTP-based MCP servers
+	OAuthConfig *OAuthConfig `yaml:"oauth,omitempty"`
+	// Timeout is the timeout in seconds for HTTP requests
+	Timeout int `yaml:"timeout,omitempty"`
+	// UseStreaming enables streaming HTTP for better performance
+	UseStreaming bool `yaml:"use_streaming,omitempty"`
 }
 
-// Config represents the MCP client configuration file
-type Config struct {
-	// Servers is a list of MCP server configurations
-	Servers []ServerConfig `yaml:"servers,omitempty"`
-}
+// ===================================================================
+// Configuration loading and management functions
+// ===================================================================
 
 // loadDefaultConfig loads the default configuration from the embedded file
 func loadDefaultConfig() (*Config, error) {
@@ -92,7 +113,9 @@ func DefaultConfigPath() (string, error) {
 	return configPath, nil
 }
 
-// LoadConfig loads the MCP configuration from the given path
+// LoadConfig loads the MCP configuration from the given path and applies environment variable overrides
+// If path is empty, the default config path is used
+// If the file doesn't exist, it creates a default configuration file
 func LoadConfig(path string) (*Config, error) {
 	if path == "" {
 		var err error
@@ -116,30 +139,36 @@ func LoadConfig(path string) (*Config, error) {
 			return nil, fmt.Errorf("loading default config: %w", err)
 		}
 
-		// Save the default configuration to the user's config path
+		// Save it to the config path
 		if err := defaultConfig.Save(path); err != nil {
 			return nil, fmt.Errorf("saving default config: %w", err)
 		}
 
-		klog.V(2).Info("Created default MCP configuration", "path", path)
+		// Apply environment variable overrides
+		applyEnvironmentVariables(defaultConfig)
+
 		return defaultConfig, nil
 	}
 
-	// Load existing configuration
+	// Read the file
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("reading config file: %w", err)
 	}
 
+	// Parse the YAML
 	var config Config
 	if err := yaml.Unmarshal(data, &config); err != nil {
-		return nil, fmt.Errorf("parsing YAML config file: %w", err)
+		return nil, fmt.Errorf("parsing config file: %w", err)
 	}
 
 	// Validate the configuration
 	if err := config.ValidateConfig(); err != nil {
 		return nil, fmt.Errorf("invalid configuration: %w", err)
 	}
+
+	// Apply environment variable overrides
+	applyEnvironmentVariables(&config)
 
 	return &config, nil
 }
@@ -211,6 +240,10 @@ func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
 	return os.Rename(tmpPath, path)
 }
 
+// ===================================================================
+// Configuration validation functions
+// ===================================================================
+
 // ValidateConfig validates the entire configuration
 func (c *Config) ValidateConfig() error {
 	if len(c.Servers) == 0 {
@@ -239,14 +272,106 @@ func ValidateServerConfig(config ServerConfig) error {
 		return fmt.Errorf("server name cannot be empty")
 	}
 
-	if config.Command == "" {
-		return fmt.Errorf("server command cannot be empty")
+	// URL-based server (HTTP) or Command-based server (stdio)
+	if config.URL == "" && config.Command == "" {
+		return fmt.Errorf("either URL or Command must be specified")
 	}
 
 	// Additional validation could be added here:
 	// - Check if command exists and is executable
 	// - Validate environment variable format
 	// - Check argument validity
+	// - Validate URL format
 
 	return nil
+}
+
+// ===================================================================
+// Environment variable handling functions
+// ===================================================================
+
+// applyEnvironmentVariables overrides config with environment variables
+func applyEnvironmentVariables(config *Config) {
+	// Apply MCP server-specific environment variables
+	for i := range config.Servers {
+		applyServerEnvironment(&config.Servers[i])
+	}
+}
+
+// applyServerEnvironment applies environment variables for a specific MCP server
+func applyServerEnvironment(server *ServerConfig) {
+	prefix := EnvMCPServerPrefix + strings.ToUpper(server.Name) + "_"
+
+	// Process URL for HTTP servers
+	if url := os.Getenv(prefix + "URL"); url != "" {
+		server.URL = url
+		klog.V(2).InfoS("Using URL from environment", "server", server.Name, "url", url)
+	}
+
+	// Process authentication for HTTP servers
+	if server.URL != "" && server.Auth != nil {
+		applyAuthEnvironmentVariables(server, prefix)
+	}
+
+	// Process command and arguments for stdio servers
+	if server.Command != "" {
+		applyCommandEnvironmentVariables(server, prefix)
+	}
+}
+
+// applyAuthEnvironmentVariables applies authentication-related environment variables
+func applyAuthEnvironmentVariables(server *ServerConfig, prefix string) {
+	// Process token for bearer auth
+	if server.Auth.Type == "bearer" {
+		if token := os.Getenv(prefix + "TOKEN"); token != "" {
+			server.Auth.Token = token
+			klog.V(2).InfoS("Using bearer token from environment", "server", server.Name)
+		}
+	}
+
+	// Process API key for API key auth
+	if server.Auth.Type == "api-key" {
+		if apiKey := os.Getenv(prefix + "API_KEY"); apiKey != "" {
+			server.Auth.ApiKey = apiKey
+			klog.V(2).InfoS("Using API key from environment", "server", server.Name)
+		}
+	}
+
+	// Process basic auth credentials
+	if server.Auth.Type == "basic" {
+		if username := os.Getenv(prefix + "USERNAME"); username != "" {
+			server.Auth.Username = username
+		}
+		if password := os.Getenv(prefix + "PASSWORD"); password != "" {
+			server.Auth.Password = password
+		}
+	}
+}
+
+// applyCommandEnvironmentVariables applies command-related environment variables
+func applyCommandEnvironmentVariables(server *ServerConfig, prefix string) {
+	// Override command
+	if cmd := os.Getenv(prefix + "COMMAND"); cmd != "" {
+		server.Command = cmd
+		klog.V(2).InfoS("Using command from environment", "server", server.Name, "command", cmd)
+	}
+
+	// Process environment variables for the server
+	for _, env := range os.Environ() {
+		if strings.HasPrefix(env, prefix) {
+			parts := strings.SplitN(env, "=", 2)
+			if len(parts) == 2 {
+				varName := strings.TrimPrefix(parts[0], prefix)
+				// Skip special variables that we process elsewhere
+				if varName != "COMMAND" && varName != "URL" && varName != "TOKEN" &&
+					varName != "API_KEY" && varName != "USERNAME" && varName != "PASSWORD" {
+					if server.Env == nil {
+						server.Env = make(map[string]string)
+					}
+					server.Env[varName] = parts[1]
+					klog.V(3).InfoS("Added environment variable from environment", "server", server.Name, "var", varName)
+				}
+			}
+		}
+	}
 }
