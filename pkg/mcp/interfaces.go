@@ -28,19 +28,19 @@ type MCPClient interface {
 
 	// Connect establishes a connection to the MCP server
 	Connect(ctx context.Context) error
-	
+
 	// Close closes the connection to the MCP server
 	Close() error
-	
+
 	// ListTools lists all available tools from the MCP server
 	ListTools(ctx context.Context) ([]Tool, error)
-	
+
 	// CallTool calls a tool on the MCP server and returns the result as a string
 	CallTool(ctx context.Context, toolName string, arguments map[string]interface{}) (string, error)
-	
+
 	// ensureConnected makes sure the client is connected
 	ensureConnected() error
-	
+
 	// getUnderlyingClient returns the underlying mcpclient.Client
 	getUnderlyingClient() *mcpclient.Client
 }
@@ -49,18 +49,18 @@ type MCPClient interface {
 type ClientConfig struct {
 	// Common fields
 	Name string
-	
+
 	// For stdio-based clients
 	Command string
 	Args    []string
 	Env     []string
-	
+
 	// For HTTP-based clients
 	URL          string
 	Auth         *AuthConfig
 	OAuthConfig  *OAuthConfig
 	Timeout      int
-	UseStreaming bool  // Whether to use streaming HTTP for better performance
+	UseStreaming bool // Whether to use streaming HTTP for better performance
 
 	// No LLM configuration needed - MCP doesn't need to know about LLM models
 }
@@ -91,13 +91,13 @@ func NewMCPClient(config ClientConfig) (MCPClient, error) {
 	if config.Name == "" {
 		return nil, fmt.Errorf("client name is required")
 	}
-	
+
 	// Choose the appropriate client implementation
 	if config.URL != "" {
 		// Use HTTP client
 		return NewHTTPClient(config), nil
 	}
-	
+
 	// Default to stdio client
 	if config.Command == "" {
 		return nil, fmt.Errorf("either URL or Command must be specified")

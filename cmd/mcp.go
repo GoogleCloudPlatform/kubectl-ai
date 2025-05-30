@@ -65,13 +65,13 @@ func (s *kubectlMCPServer) handleToolCall(ctx context.Context, request mcp.CallT
 	log := klog.FromContext(ctx)
 
 	name := request.Params.Name
-	
+
 	// In v0.31.0, Arguments is an interface{} that needs type assertion to a map
 	argMap, ok := request.Params.Arguments.(map[string]interface{})
 	if !ok {
 		return mcp.NewToolResultError("Invalid arguments format: expected a map"), nil
 	}
-	
+
 	// Safely extract command parameter with type checking
 	commandVal, ok := argMap["command"]
 	if !ok {
@@ -81,7 +81,7 @@ func (s *kubectlMCPServer) handleToolCall(ctx context.Context, request mcp.CallT
 	if !ok {
 		return mcp.NewToolResultError("Parameter 'command' must be a string"), nil
 	}
-	
+
 	// Safely extract modifies_resource parameter (optional)
 	var modifiesResource string
 	if modVal, ok := argMap["modifies_resource"]; ok {
@@ -89,7 +89,7 @@ func (s *kubectlMCPServer) handleToolCall(ctx context.Context, request mcp.CallT
 			modifiesResource = modStr
 		}
 	}
-	
+
 	log.Info("Received tool call", "tool", name, "command", command, "modifies_resource", modifiesResource)
 
 	ctx = context.WithValue(ctx, tools.KubeconfigKey, s.kubectlConfig)
@@ -104,12 +104,12 @@ func (s *kubectlMCPServer) handleToolCall(ctx context.Context, request mcp.CallT
 	args := map[string]any{
 		"command": command,
 	}
-	
+
 	// Add modifies_resource if available
 	if modifiesResource != "" {
 		args["modifies_resource"] = modifiesResource
 	}
-	
+
 	output, err := tool.Run(ctx, args)
 	if err != nil {
 		log.Error(err, "Error running tool call")

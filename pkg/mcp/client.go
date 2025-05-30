@@ -49,6 +49,7 @@ type Tool struct {
 // NewClient creates a new MCP client with the given configuration.
 // This function supports both stdio and HTTP-based MCP servers.
 func NewClient(config ClientConfig) *Client {
+
 	// Create the appropriate implementation based on configuration
 	var impl MCPClient
 	if config.URL != "" {

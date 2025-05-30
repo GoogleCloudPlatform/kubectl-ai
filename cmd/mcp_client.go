@@ -160,7 +160,7 @@ func createServerBlock(server mcp.ServerConnectionInfo) ui.Block {
 // extractCommandName gets the base command from a command string
 func extractCommandName(command string) string {
 	if command == "" {
-		return "remote"  // Return 'remote' for HTTP-based servers
+		return "remote" // Return 'remote' for HTTP-based servers
 	}
 
 	parts := strings.Fields(command)
