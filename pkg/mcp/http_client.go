@@ -1,3 +1,4 @@
+// Package mcp implements the Model Context Protocol client functionality.
 package mcp
 
 import (
@@ -46,10 +47,7 @@ func (c *httpClient) getUnderlyingClient() *mcpclient.Client {
 
 // ensureConnected makes sure the client is connected.
 func (c *httpClient) ensureConnected() error {
-	if c.client == nil {
-		return fmt.Errorf("client not connected")
-	}
-	return nil
+	return ensureClientConnected(c.client)
 }
 
 // Name returns the name of this client.
@@ -192,43 +190,17 @@ func (c *httpClient) createOAuthClient(ctx context.Context) (*mcpclient.Client, 
 
 // initializeConnection initializes the MCP connection with proper handshake
 func (c *httpClient) initializeConnection(ctx context.Context) error {
-	initCtx, cancel := context.WithTimeout(ctx, DefaultConnectionTimeout)
-	defer cancel()
-
-	// Create initialize request with the structure expected by v0.31.0
-	initReq := mcp.InitializeRequest{
-		// In v0.31.0, the structure might differ - adapt as needed
-		// This is a placeholder that will be updated when the actual API is known
-	}
-
-	_, err := c.client.Initialize(initCtx, initReq)
-	if err != nil {
-		return fmt.Errorf("initializing MCP client: %w", err)
-	}
-
-	return nil
+	return initializeClientConnection(ctx, c.client)
 }
 
 // verifyConnection verifies the connection works by testing tool listing
 func (c *httpClient) verifyConnection(ctx context.Context) error {
-	verifyCtx, cancel := context.WithTimeout(ctx, DefaultConnectionTimeout)
-	defer cancel()
-
-	// Try to list tools as a basic connectivity test
-	_, err := c.client.ListTools(verifyCtx, mcp.ListToolsRequest{})
-	if err != nil {
-		return fmt.Errorf("listing tools: %w", err)
-	}
-
-	return nil
+	return verifyClientConnection(ctx, c.client)
 }
 
 // cleanup closes the client connection and resets the client state
 func (c *httpClient) cleanup() {
-	if c.client != nil {
-		_ = c.client.Close() // Ignore errors on cleanup
-		c.client = nil
-	}
+	cleanupClient(&c.client)
 }
 
 // Close closes the connection to the MCP server
@@ -250,18 +222,10 @@ func (c *httpClient) Close() error {
 
 // ListTools lists all available tools from the MCP server
 func (c *httpClient) ListTools(ctx context.Context) ([]Tool, error) {
-	if err := c.ensureConnected(); err != nil {
+	tools, err := listClientTools(ctx, c.client, c.name)
+	if err != nil {
 		return nil, err
 	}
-
-	// Call the ListTools method on the MCP server
-	result, err := c.client.ListTools(ctx, mcp.ListToolsRequest{})
-	if err != nil {
-		return nil, fmt.Errorf("listing tools: %w", err)
-	}
-
-	// Convert the result using the helper function
-	tools := convertMCPToolsToTools(result.Tools)
 
 	klog.V(2).InfoS("Listed tools from HTTP MCP server", "count", len(tools), "server", c.name)
 	return tools, nil
@@ -289,23 +253,5 @@ func (c *httpClient) CallTool(ctx context.Context, toolName string, arguments ma
 		return "", fmt.Errorf("error calling tool %s: %w", toolName, err)
 	}
 
-	// Handle error response
-	if result.IsError {
-		if len(result.Content) > 0 {
-			if textContent, ok := mcp.AsTextContent(result.Content[0]); ok {
-				return "", fmt.Errorf("tool error: %s", textContent.Text)
-			}
-		}
-		return "", fmt.Errorf("tool returned an error")
-	}
-
-	// Extract result using v0.31.0 helper methods
-	if len(result.Content) > 0 {
-		if textContent, ok := mcp.AsTextContent(result.Content[0]); ok {
-			return textContent.Text, nil
-		}
-	}
-
-	// If we couldn't extract text content, return a generic message
-	return "Tool executed successfully, but no text content was returned", nil
+	return processToolResponse(result)
 }
