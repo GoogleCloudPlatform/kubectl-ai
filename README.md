@@ -219,18 +219,24 @@ Create or edit `~/.config/kubectl-ai/mcp.yaml` to customize MCP servers:
 
 ```yaml
 servers:
-  # By default, `kubectl-ai` comes pre-configured with useful MCP server:
+  # Local MCP server (stdio-based)
   # sequential-thinking: Advanced reasoning and step-by-step analysis
   - name: sequential-thinking
     command: npx
     args:
       - -y
       - "@modelcontextprotocol/server-sequential-thinking"
-  - name: custom-server
-    command: /path/to/your/mcp-server
-    args:
-      - --arg1
-      - value1
+  
+  # Remote MCP server (HTTP-based)
+  - name: cloudflare-documentation
+    url: https://docs.mcp.cloudflare.com/mcp
+    
+  # Optional: Remote MCP server with authentication
+  - name: custom-api
+    url: https://api.example.com/mcp
+    auth:
+      type: "bearer"
+      token: "${MCP_TOKEN}"
 ```
 
 The system automatically:

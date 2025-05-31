@@ -96,7 +96,22 @@ func (m *Manager) ConnectAll(ctx context.Context) error {
 			continue
 		}
 
-		client := NewClient(serverCfg.Name, serverCfg.Command, serverCfg.Args, serverCfg.Env)
+		// Convert environment map to slice
+		var envSlice []string
+		for k, v := range serverCfg.Env {
+			envSlice = append(envSlice, fmt.Sprintf("%s=%s", k, v))
+		}
+
+		// Create client config with environment map
+		config := ClientConfig{
+			Name:    serverCfg.Name,
+			Command: serverCfg.Command,
+			Args:    serverCfg.Args,
+			Env:     envSlice,
+			URL:     serverCfg.URL,
+		}
+
+		client := NewClient(config)
 		if err := client.Connect(ctx); err != nil {
 			err := fmt.Errorf(ErrServerConnectionFmt, serverCfg.Name, err)
 			errs = append(errs, err)
