@@ -1,0 +1,8 @@
+script:
+- prompt: "Is my app in the app-level-fails-test namespace healthy? Does anything stand out in the logs?"
+setup: "setup.sh"
+verifier: "verify.sh"
+cleanup: "cleanup.sh"
+difficulty: "medium"
+expect:
+- contains: "division by zero"
