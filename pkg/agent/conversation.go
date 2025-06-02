@@ -505,10 +505,6 @@ func candidateToShimCandidate(iterator gollm.ChatResponseIterator) (gollm.ChatRe
 					return
 				}
 			}
-
-			if _, found := extractJSON(buffer); found {
-				break
-			}
 		}
 
 		if buffer == "" {
