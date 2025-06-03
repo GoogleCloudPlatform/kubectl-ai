@@ -104,10 +104,10 @@ func (t *BashTool) Run(ctx context.Context, args map[string]any) (any, error) {
 	command := args["command"].(string)
 
 	if strings.Contains(command, "kubectl edit") {
-		return &ExecResult{Error: "interactive mode not supported for kubectl, please use non-interactive commands"}, nil
+		return &ExecResult{Command: command, Error: "interactive mode not supported for kubectl, please use non-interactive commands"}, nil
 	}
 	if strings.Contains(command, "kubectl port-forward") {
-		return &ExecResult{Error: "port-forwarding is not allowed because assistant is running in an unattended mode, please try some other alternative"}, nil
+		return &ExecResult{Command: command, Error: "port-forwarding is not allowed because assistant is running in an unattended mode, please try some other alternative"}, nil
 	}
 
 	var cmd *exec.Cmd
@@ -130,11 +130,16 @@ func (t *BashTool) Run(ctx context.Context, args map[string]any) (any, error) {
 }
 
 type ExecResult struct {
+	Command    string `json:"command,omitempty"`
 	Error      string `json:"error,omitempty"`
 	Stdout     string `json:"stdout,omitempty"`
 	Stderr     string `json:"stderr,omitempty"`
 	ExitCode   int    `json:"exit_code,omitempty"`
 	StreamType string `json:"stream_type,omitempty"`
+}
+
+func (e *ExecResult) String() string {
+	return fmt.Sprintf("Command: %q\nError: %q\nStdout: %q\nStderr: %q\nExitCode: %d\nStreamType: %q}", e.Command, e.Error, e.Stdout, e.Stderr, e.ExitCode, e.StreamType)
 }
 
 func IsInteractiveCommand(command string) (bool, error) {
@@ -162,7 +167,7 @@ func executeCommand(cmd *exec.Cmd) (*ExecResult, error) {
 	command := strings.Join(cmd.Args, " ")
 
 	if isInteractive, err := IsInteractiveCommand(command); isInteractive {
-		return &ExecResult{Error: err.Error()}, nil
+		return &ExecResult{Command: command, Error: err.Error()}, nil
 	}
 
 	isWatch := strings.Contains(command, " get ") && strings.Contains(command, " -w")
@@ -234,6 +239,7 @@ func executeCommand(cmd *exec.Cmd) (*ExecResult, error) {
 			}
 			// Return timeout message to be displayed via UI
 			return &ExecResult{
+				Command:    command,
 				Error:      "Timeout reached after 7 seconds",
 				Stdout:     stdoutBuilder.String(),
 				Stderr:     stderrBuilder.String(),
@@ -250,8 +256,9 @@ func executeCommand(cmd *exec.Cmd) (*ExecResult, error) {
 		}
 
 		results := &ExecResult{
-			Stdout: stdoutBuilder.String(),
-			Stderr: stderrBuilder.String(),
+			Command: command,
+			Stdout:  stdoutBuilder.String(),
+			Stderr:  stderrBuilder.String(),
 		}
 		if isWatch {
 			results.StreamType = "watch"
@@ -268,7 +275,9 @@ func executeCommand(cmd *exec.Cmd) (*ExecResult, error) {
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
-	results := &ExecResult{}
+	results := &ExecResult{
+		Command: command,
+	}
 	if err := cmd.Run(); err != nil {
 		if exitError, ok := err.(*exec.ExitError); ok {
 			results.ExitCode = exitError.ExitCode()

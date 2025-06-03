@@ -248,7 +248,7 @@ func (a *Conversation) RunOneRound(ctx context.Context, query string) error {
 
 				if a.EnableToolUseShim {
 					// Add the error as an observation
-					observation := fmt.Sprintf("Result of running %q:\n%s", call.Name, err.Error())
+					observation := fmt.Sprintf("Result of running %q:\n%v", call.Name, err)
 					currChatContent = append(currChatContent, observation)
 				} else {
 					// For models with tool-use support (shim disabled), use proper FunctionCallResult
@@ -330,7 +330,7 @@ func (a *Conversation) RunOneRound(ctx context.Context, query string) error {
 			// Add the tool call result to maintain conversation flow
 			if a.EnableToolUseShim {
 				// If shim is enabled, format the result as a text observation
-				observation := fmt.Sprintf("Result of running %q:\n%s", call.Name, output)
+				observation := fmt.Sprintf("Result of running %q:\n%v", call.Name, output)
 				currChatContent = append(currChatContent, observation)
 			} else {
 				// If shim is disabled, convert the result to a map and append FunctionCallResult
