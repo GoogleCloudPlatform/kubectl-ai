@@ -257,7 +257,7 @@ You can use the following special keywords for specific actions:
 * `tools`: List all available tools.
 * `version`: Display the `kubectl-ai` version.
 * `reset`: Clear the conversational context.
-- `reset-confirmation`: Re-enable confirmation prompts for resource-changing actions.
+* `reset-confirmation`: Re-enable confirmation prompts for resource-changing actions.
 * `clear`: Clear the terminal screen.
 * `exit` or `quit`: Terminate the interactive shell (Ctrl+C also works).
 
