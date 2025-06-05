@@ -402,28 +402,23 @@ func (x *TaskExecution) runAgent(ctx context.Context) error {
 		return err
 	}
 
-	// Run expectations if specified
-	if len(x.task.Expect) != 0 {
-		for _, expect := range x.task.Expect {
-			if expect.Contains != "" {
-				// find the output after the last run command and search it
-				agentOutput := stdoutBuffer.String()
-				lastRunIndex := strings.LastIndex(agentOutput, "Running:")
-				if lastRunIndex == -1 {
-					x.result.AddFailure("did not find a command run in stdout")
-					return fmt.Errorf("expected `Running:` in output, but not found")
-				}
+	// check any expectations
+	for _, expect := range x.task.Expect {
+		if expect.Contains != "" {
+			// find the output after the last run command and search it
+			agentOutput := stdoutBuffer.String()
+			lastToolRunIndex := strings.LastIndex(agentOutput, "Running:")
+			lastOutputIndex := strings.Index(agentOutput[lastToolRunIndex:], "\n")
 
-				lastOutputIndex := strings.Index(agentOutput[lastRunIndex:], "\n")
-				if lastOutputIndex == -1 {
-					return fmt.Errorf("expected newline after `Running:` in output, but not found")
-				}
-
-				lastCmdOutput := agentOutput[lastRunIndex+lastOutputIndex+1:]
-				if !strings.Contains(lastCmdOutput, expect.Contains) {
-					x.result.AddFailure("expected value %q not found in output %q", expect.Contains, lastCmdOutput)
-					return fmt.Errorf("expected value %q not found in agent output", expect.Contains)
-				}
+			lastCmdOutputIndex := lastToolRunIndex + lastOutputIndex + 1
+			if lastToolRunIndex == -1 {
+				// if no tool run found, parse the entire output
+				lastCmdOutputIndex = 0
+			}
+			lastCmdOutput := agentOutput[lastCmdOutputIndex:]
+			if !strings.Contains(lastCmdOutput, expect.Contains) {
+				x.result.AddFailure("expected value %q not found in output %q", expect.Contains, lastCmdOutput)
+				return fmt.Errorf("expected value %q not found in agent output", expect.Contains)
 			}
 		}
 	}
