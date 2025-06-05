@@ -1,3 +1,4 @@
+import random
 import sys
 import time
 
@@ -7,7 +8,7 @@ sys.stdout.flush()
 counter = 0
 while True:
     counter += 1
-    if counter % 4 == 0:
+    if random.randint(1, 4) % 4 == 0:
         try:
             result = 1 / 0
         except ZeroDivisionError as e:
@@ -16,5 +17,6 @@ while True:
     else:
         print(f"Run {counter} succeeded")
         sys.stdout.flush()
-    
-    time.sleep(1)
+
+    sleep_time = (1.2**counter)/20
+    time.sleep(sleep_time)
