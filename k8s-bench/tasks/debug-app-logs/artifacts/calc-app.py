@@ -1,7 +1,7 @@
 import sys
 import time
 
-print("Starting eval-app...")
+print("Starting calc-app...")
 sys.stdout.flush()
 
 counter = 0
