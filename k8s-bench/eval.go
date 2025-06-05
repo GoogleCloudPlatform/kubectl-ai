@@ -15,6 +15,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -26,7 +27,6 @@ import (
 	"sync"
 
 	"github.com/GoogleCloudPlatform/kubectl-ai/k8s-bench/pkg/model"
-	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/journal"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/yaml"
 )
@@ -382,8 +382,9 @@ func (x *TaskExecution) runAgent(ctx context.Context) error {
 	cmd.Stdin = stdinReader
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	var stdoutBuffer bytes.Buffer
 	if x.log != nil {
-		cmd.Stdout = io.MultiWriter(cmd.Stdout, x.log)
+		cmd.Stdout = io.MultiWriter(cmd.Stdout, x.log, &stdoutBuffer)
 		cmd.Stderr = io.MultiWriter(cmd.Stderr, x.log)
 	}
 
@@ -403,30 +404,25 @@ func (x *TaskExecution) runAgent(ctx context.Context) error {
 
 	// Run expectations if specified
 	if len(x.task.Expect) != 0 {
-		events, err := journal.ParseEventsFromFile(tracePath)
-		if err != nil {
-			return err
-		} else {
-			var lastEvent *journal.Event
-			for _, event := range events {
-				if event.Action == journal.ActionUIRender {
-					lastEvent = event
+		for _, expect := range x.task.Expect {
+			if expect.Contains != "" {
+				// find the output after the last run command and search it
+				agentOutput := stdoutBuffer.String()
+				lastRunIndex := strings.LastIndex(agentOutput, "Running:")
+				if lastRunIndex == -1 {
+					x.result.AddFailure("did not find a command run in stdout")
+					return fmt.Errorf("expected `Running:` in output, but not found")
 				}
-			}
 
-			if lastEvent == nil {
-				x.result.AddFailure("did not found ui.render event in trace")
-			} else {
-				lastOutput, ok := lastEvent.GetString("text")
-				if !ok {
-					x.result.AddFailure("did not found 'text' key in event %+v", lastEvent)
+				lastOutputIndex := strings.Index(agentOutput[lastRunIndex:], "\n")
+				if lastOutputIndex == -1 {
+					return fmt.Errorf("expected newline after `Running:` in output, but not found")
 				}
-				for _, expect := range x.task.Expect {
-					if expect.Contains != "" {
-						if !strings.Contains(lastOutput, expect.Contains) {
-							x.result.AddFailure("expected value %q not found in output %q", expect.Contains, lastOutput)
-						}
-					}
+
+				lastCmdOutput := agentOutput[lastRunIndex+lastOutputIndex+1:]
+				if !strings.Contains(lastCmdOutput, expect.Contains) {
+					x.result.AddFailure("expected value %q not found in output %q", expect.Contains, lastCmdOutput)
+					return fmt.Errorf("expected value %q not found in agent output", expect.Contains)
 				}
 			}
 		}
