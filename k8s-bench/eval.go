@@ -410,12 +410,11 @@ func (x *TaskExecution) runAgent(ctx context.Context) error {
 			lastToolRunIndex := strings.LastIndex(agentOutput, "Running:")
 			lastOutputIndex := strings.Index(agentOutput[lastToolRunIndex:], "\n")
 
-			lastCmdOutputIndex := lastToolRunIndex + lastOutputIndex + 1
+			lastCmdOutput := agentOutput[lastToolRunIndex+lastOutputIndex+1:]
 			if lastToolRunIndex == -1 {
 				// if no tool run found, parse the entire output
-				lastCmdOutputIndex = 0
+				lastCmdOutput = agentOutput
 			}
-			lastCmdOutput := agentOutput[lastCmdOutputIndex:]
 			if !strings.Contains(lastCmdOutput, expect.Contains) {
 				x.result.AddFailure("expected value %q not found in output %q", expect.Contains, lastCmdOutput)
 				return fmt.Errorf("expected value %q not found in agent output", expect.Contains)
