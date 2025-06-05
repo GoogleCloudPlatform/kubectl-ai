@@ -1,5 +1,5 @@
 script:
-- prompt: "Are there any issues with my app running in the calc-app namespace? Anything of interest in the logs?"
+- prompt: "How's the health of my app running in the calc-app namespace?"
 setup: "setup.sh"
 verifier: "verify.sh"
 cleanup: "cleanup.sh"
