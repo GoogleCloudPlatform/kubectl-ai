@@ -1,0 +1,19 @@
+# Pod for running the `calc-app.py` script
+apiVersion: v1
+kind: Pod
+metadata:
+  name: calc-app-pod
+  namespace: calc-app
+spec:
+  containers:
+  - name: calc-app-executor
+    image: python:3.9-slim-buster
+    command: ["python"]
+    args: ["/etc/config/calc-app.py"]
+    volumeMounts:
+    - name: calc-app-volume
+      mountPath: /etc/config
+  volumes:
+  - name: calc-app-volume
+    configMap:
+      name: calc-app-map

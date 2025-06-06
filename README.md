@@ -203,6 +203,8 @@ A custom tool definition for `helm` could look like the following example:
 
 ## MCP Client Mode
 
+> **Note:** MCP Client Mode is available in `kubectl-ai` version v0.0.12 and onwards.
+
 `kubectl-ai` can connect to external [MCP](https://modelcontextprotocol.io/examples) Servers to access additional tools in addition to built-in tools.
 
 ### Quick Start

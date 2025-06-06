@@ -1,0 +1,8 @@
+script:
+- prompt: "How's the health of my app running in the calc-app namespace?"
+setup: "setup.sh"
+verifier: "verify.sh"
+cleanup: "cleanup.sh"
+difficulty: "medium"
+expect:
+- contains: "division by zero"
