@@ -267,7 +267,18 @@ func (a *Conversation) RunOneRound(ctx context.Context, query string) error {
 			a.doc.AddBlock(ui.NewFunctionCallRequestBlock().SetText(fmt.Sprintf("  Running: %s\n", s)))
 
 			// Ask for confirmation only if SkipPermissions is false AND the tool modifies resources.
-			if !a.SkipPermissions && call.Arguments["modifies_resource"] != "no" {
+			// Use the tool's CheckModifiesResource method to determine if the command modifies resources
+			modifiesResourceStr := toolCall.GetTool().CheckModifiesResource(call.Arguments)
+
+			// If our code detection returned "unknown", fall back to the LLM's assessment if available
+			if modifiesResourceStr == "unknown" {
+				if llmModifies, ok := call.Arguments["modifies_resource"].(string); ok {
+					klog.Infof("Code detection returned 'unknown', falling back to LLM assessment: %s", llmModifies)
+					modifiesResourceStr = llmModifies
+				}
+			}
+
+			if !a.SkipPermissions && modifiesResourceStr != "no" {
 				confirmationPrompt := `  Do you want to proceed ?
   1) Yes
   2) Yes, and don't ask me again
@@ -323,7 +334,7 @@ func (a *Conversation) RunOneRound(ctx context.Context, query string) error {
 			}
 
 			// Handle timeout message using UI blocks
-			if execResult, ok := output.(*tools.ExecResult); ok && execResult.StreamType == "timeout" {
+			if execResult, ok := output.(*tools.ExecResult); ok && execResult != nil && execResult.StreamType == "timeout" {
 				a.doc.AddBlock(ui.NewAgentTextBlock().WithText("\nTimeout reached after 7 seconds\n"))
 			}
 

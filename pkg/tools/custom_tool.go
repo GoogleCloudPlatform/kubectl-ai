@@ -61,6 +61,7 @@ func (t *CustomTool) Description() string {
 }
 
 // FunctionDefinition returns the tool's function definition.
+
 func (t *CustomTool) FunctionDefinition() *gollm.FunctionDefinition {
 	return &gollm.FunctionDefinition{
 		Name:        t.Name(),
@@ -70,7 +71,7 @@ func (t *CustomTool) FunctionDefinition() *gollm.FunctionDefinition {
 			Properties: map[string]*gollm.Schema{
 				"command": {
 					Type:        gollm.TypeString,
-					Description: t.config.CommandDesc,
+					Description: `The bash command to execute.`,
 				},
 				"modifies_resource": {
 					Type: gollm.TypeString,
@@ -106,4 +107,14 @@ func (t *CustomTool) Run(ctx context.Context, args map[string]any) (any, error) 
 	cmd.Env = os.Environ()
 
 	return executeCommand(cmd)
+}
+
+// CheckModifiesResource determines if the command modifies kubernetes resources
+// For custom tools, we'll conservatively assume they might modify resources
+// unless we have specific knowledge otherwise
+// Returns "yes", "no", or "unknown"
+func (t *CustomTool) CheckModifiesResource(args map[string]any) string {
+	// For custom tools, we'll conservatively use "unknown" since we can't
+	// determine their effects on kubernetes resources
+	return "unknown"
 }

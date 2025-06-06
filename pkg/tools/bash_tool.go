@@ -303,3 +303,19 @@ func (t *BashTool) IsInteractive(args map[string]any) (bool, error) {
 
 	return IsInteractiveCommand(command)
 }
+
+// CheckModifiesResource determines if the command modifies kubernetes resources
+// This is used for permission checks before command execution
+// Returns "yes", "no", or "unknown"
+func (t *BashTool) CheckModifiesResource(args map[string]any) string {
+	command, ok := args["command"].(string)
+	if !ok {
+		return "unknown"
+	}
+
+	if strings.Contains(command, "kubectl") {
+		return KubectlModifiesResource(command)
+	}
+
+	return "unknown"
+}

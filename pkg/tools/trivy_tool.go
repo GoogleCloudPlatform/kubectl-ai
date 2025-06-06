@@ -92,3 +92,11 @@ func (t *ScanImageWithTrivy) IsInteractive(args map[string]any) (bool, error) {
 	// Trivy scan operations are not interactive
 	return false, nil
 }
+
+// CheckModifiesResource determines if the command modifies kubernetes resources
+// Trivy is a scanning tool and doesn't modify cluster resources
+// Returns "yes", "no", or "unknown"
+func (t *ScanImageWithTrivy) CheckModifiesResource(args map[string]any) string {
+	// Trivy is just a scanning tool, it doesn't modify cluster resources
+	return "no"
+}
