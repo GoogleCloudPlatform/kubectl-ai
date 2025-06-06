@@ -1,0 +1,6 @@
+script:
+- prompt: "There is a pod with name \"storage-test-pod\". Without creating new resources, can you resize the persistent volume claim (PVC) to request 15Gi of storage for this pod?"
+setup: "setup.sh"
+verifier: "verify.sh"
+cleanup: "cleanup.sh"
+difficulty: "easy"
