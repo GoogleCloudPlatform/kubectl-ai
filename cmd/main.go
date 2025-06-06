@@ -549,6 +549,8 @@ func (s *session) repl(ctx context.Context, initialQuery string, initialBlocks [
 			if err != nil {
 				return err
 			}
+		case query == "reset-confirmation":
+			s.conversation.SkipPermissions = false
 		case query == "clear":
 			s.ui.ClearScreen()
 		case query == "exit" || query == "quit":
