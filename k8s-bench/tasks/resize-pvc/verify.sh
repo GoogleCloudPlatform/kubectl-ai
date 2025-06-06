@@ -1,10 +1,10 @@
 #!/bin/bash
 
 # Configuration
-PVC_NAME="storage-pvc" # The name of your PersistentVolumeClaim
+PVC_NAME="storage-pvc" 
 EXPECTED_SIZE="15Gi"
-RETRY_ATTEMPTS=10 # Increased retries as resizing can take longer
-RETRY_INTERVAL_SECONDS=15 # Increased interval for resizing operations
+RETRY_ATTEMPTS=10 
+RETRY_INTERVAL_SECONDS=15 
 
 echo "Attempting to get PV name from PVC: $PVC_NAME"
 
