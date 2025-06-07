@@ -45,6 +45,20 @@ Then you can install with krew
 kubectl krew install ai
 ```
 Now you can invoke `kubectl-ai` as a kubectl plugin like this: `kubectl ai`.
+
+#### Install on NixOS
+There are multiple ways to install `kubectl-ai` on NixOS. For a permantent installation add the following to your NixOS-Configuration:
+
+```nix
+  environment.systemPackages = with pkgs; [
+    kubectl-ai
+  ];
+```
+For a temporary installation, you can use the following command:
+
+```
+nix-shell -p kubectl-ai
+```
 </details>
 
 ### Usage
