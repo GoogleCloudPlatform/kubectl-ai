@@ -24,6 +24,16 @@ case "$sysOS" in
     ;;
 esac
 
+# Detect NixOS
+nixos_check="$(grep "ID=nixos" /etc/os-release 2>/dev/null || echo "no-match")"
+case "$nixos_check" in
+  *nixos*)
+    echo "NixOS detected, please follow the manual installation instructions at:"
+    echo "https://github.com/GoogleCloudPlatform/kubectl-ai#install-on-nixos"
+    exit 1
+    ;;
+esac
+
 # Detect ARCH
 ARCH="$(uname -m)"
 case "$ARCH" in
