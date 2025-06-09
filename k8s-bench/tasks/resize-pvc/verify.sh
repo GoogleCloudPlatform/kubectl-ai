@@ -9,7 +9,7 @@ RETRY_INTERVAL_SECONDS=15
 echo "Attempting to get PV name from PVC: $PVC_NAME"
 
 # Dynamically get the PV name from the PVC
-PV_NAME=$(kubectl get pvc "$PVC_NAME" -n storage -o jsonpath='{.spec.volumeName}')
+PV_NAME=$(kubectl get pvc "$PVC_NAME" -n resize-pv -o jsonpath='{.spec.volumeName}')
 
 if [ -z "$PV_NAME" ]; then
   echo "Error: Could not retrieve PersistentVolume name for PVC '$PVC_NAME'. Make sure the PVC exists and is bound."
