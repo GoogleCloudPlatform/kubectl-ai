@@ -1,2 +1,2 @@
 #!/usr/bin/env bash
-kubectl delete namespace storage-test --ignore-not-found=true
+kubectl delete namespace storage --ignore-not-found=true

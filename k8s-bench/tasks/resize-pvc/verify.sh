@@ -9,7 +9,7 @@ RETRY_INTERVAL_SECONDS=15
 echo "Attempting to get PV name from PVC: $PVC_NAME"
 
 # Dynamically get the PV name from the PVC
-PV_NAME=$(kubectl get pvc "$PVC_NAME" -n storage-test -o jsonpath='{.spec.volumeName}')
+PV_NAME=$(kubectl get pvc "$PVC_NAME" -n storage -o jsonpath='{.spec.volumeName}')
 
 if [ -z "$PV_NAME" ]; then
   echo "Error: Could not retrieve PersistentVolume name for PVC '$PVC_NAME'. Make sure the PVC exists and is bound."
@@ -28,6 +28,8 @@ for i in $(seq 1 $RETRY_ATTEMPTS); do
     if [ "$PV_CAPACITY" == "$EXPECTED_SIZE" ]; then
       echo "SUCCESS: PersistentVolume '$PV_NAME' capacity is now: $PV_CAPACITY"
       exit 0 # Success, exit the script
+    elif [ "$i" -eq "$RETRY_ATTEMPTS" ]; then
+      echo "The PV size is not resized by final attempt."
     else
       echo "Current capacity for PV '$PV_NAME' is $PV_CAPACITY. Expected: $EXPECTED_SIZE. Retrying in $RETRY_INTERVAL_SECONDS seconds..."
       sleep $RETRY_INTERVAL_SECONDS

@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-kubectl delete namespace storage-test --ignore-not-found
-kubectl create namespace storage-test
+kubectl delete namespace storage --ignore-not-found
+kubectl create namespace storage
 
 cat <<EOF | kubectl apply -f -
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: storage-pvc
-  namespace: storage-test
+  namespace: storage
 spec:
   accessModes:
     - ReadWriteOnce
@@ -21,8 +21,8 @@ cat <<EOF | kubectl apply -f -
 apiVersion: v1
 kind: Pod
 metadata:
-  name: storage-test-pod
-  namespace: storage-test
+  name: storage-pod
+  namespace: storage
 spec:
   volumes:
     - name: my-storage
