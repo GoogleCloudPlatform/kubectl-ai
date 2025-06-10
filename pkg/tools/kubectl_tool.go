@@ -88,9 +88,7 @@ assistant: kubectl exec my-pod -- /bin/sh -c "your command here"`,
 Possible values:
 - "yes" if the command modifies a resource
 - "no" if the command does not modify a resource
-- "unknown" if the command's effect on the resource is unknown
-`,
-				},
+- "unknown" if the command's effect on the resource is unknown`},
 			},
 		},
 	}
@@ -151,4 +149,16 @@ func (t *Kubectl) IsInteractive(args map[string]any) (bool, error) {
 	}
 
 	return IsInteractiveCommand(command)
+}
+
+// CheckModifiesResource determines if the command modifies kubernetes resources
+// This is used for permission checks before command execution
+// Returns "yes", "no", or "unknown"
+func (t *Kubectl) CheckModifiesResource(args map[string]any) string {
+	command, ok := args["command"].(string)
+	if !ok {
+		return "unknown"
+	}
+
+	return kubectlModifiesResource(command)
 }

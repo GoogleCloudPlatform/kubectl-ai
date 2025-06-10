@@ -281,6 +281,8 @@ func executeCommand(cmd *exec.Cmd) (*ExecResult, error) {
 	if err := cmd.Run(); err != nil {
 		if exitError, ok := err.(*exec.ExitError); ok {
 			results.ExitCode = exitError.ExitCode()
+			results.Error = exitError.Error()
+			results.Stderr = string(exitError.Stderr)
 		} else {
 			return nil, err
 		}
@@ -302,4 +304,20 @@ func (t *BashTool) IsInteractive(args map[string]any) (bool, error) {
 	}
 
 	return IsInteractiveCommand(command)
+}
+
+// CheckModifiesResource determines if the command modifies kubernetes resources
+// This is used for permission checks before command execution
+// Returns "yes", "no", or "unknown"
+func (t *BashTool) CheckModifiesResource(args map[string]any) string {
+	command, ok := args["command"].(string)
+	if !ok {
+		return "unknown"
+	}
+
+	if strings.Contains(command, "kubectl") {
+		return kubectlModifiesResource(command)
+	}
+
+	return "unknown"
 }
