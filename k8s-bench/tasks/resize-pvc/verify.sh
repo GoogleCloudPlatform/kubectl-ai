@@ -3,8 +3,6 @@
 # Configuration
 PVC_NAME="storage-pvc" 
 EXPECTED_SIZE="15Gi"
-RETRY_ATTEMPTS=10 
-RETRY_INTERVAL_SECONDS=15 
 
 echo "Attempting to get PV name from PVC: $PVC_NAME"
 
@@ -16,29 +14,9 @@ if [ -z "$PV_NAME" ]; then
   exit 1
 fi
 
-echo "Found PersistentVolume '$PV_NAME' for PVC '$PVC_NAME'."
-echo "Verifying size of PersistentVolume: $PV_NAME to be $EXPECTED_SIZE"
-
-for i in $(seq 1 $RETRY_ATTEMPTS); do
-  echo "Attempt $i of $RETRY_ATTEMPTS..."
-
-  PV_CAPACITY=$(kubectl get pv "$PV_NAME" -o jsonpath='{.spec.capacity.storage}')
-
-  if [ -n "$PV_CAPACITY" ]; then
-    if [ "$PV_CAPACITY" == "$EXPECTED_SIZE" ]; then
-      echo "SUCCESS: PersistentVolume '$PV_NAME' capacity is now: $PV_CAPACITY"
-      exit 0 # Success, exit the script
-    elif [ "$i" -eq "$RETRY_ATTEMPTS" ]; then
-      echo "The PV size is not resized by final attempt."
-    else
-      echo "Current capacity for PV '$PV_NAME' is $PV_CAPACITY. Expected: $EXPECTED_SIZE. Retrying in $RETRY_INTERVAL_SECONDS seconds..."
-      sleep $RETRY_INTERVAL_SECONDS
-    fi
-  else
-    echo "Capacity not yet available for PV '$PV_NAME'. Retrying in $RETRY_INTERVAL_SECONDS seconds..."
-    sleep $RETRY_INTERVAL_SECONDS
-  fi
-done
-
-echo "FAILURE: PersistentVolume '$PV_NAME' did not reach the expected capacity of $EXPECTED_SIZE after $RETRY_ATTEMPTS attempts. Current size: $PV_CAPACITY"
-exit 1 # Failure, exit with an error code
+if ! kubectl wait --for=jsonpath='{.spec.capacity.storage}'='15Gi' pv/$PV_NAME --timeout=30s; then
+  echo "FAILURE: PersistentVolume '$PV_NAME' did not reach the expected capacity of $EXPECTED_SIZE."
+  exit 1 
+else 
+  echo "SUCCESS: PersistentVolume '$PV_NAME' reached the expected capacity of $EXPECTED_SIZE."
+fi
