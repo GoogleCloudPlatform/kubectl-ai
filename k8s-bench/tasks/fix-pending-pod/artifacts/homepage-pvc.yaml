@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: homepage-pvc
+  namespace: homepage-ns
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: sc 
+  resources:
+    requests:
+      storage: 1Gi

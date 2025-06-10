@@ -1,2 +1,2 @@
 #!/usr/bin/env bash
-kubectl delete namespace storage --ignore-not-found=true
+kubectl delete namespace homepage-ns --ignore-not-found=true
