@@ -96,6 +96,16 @@ func (t *MCPTool) IsInteractive(args map[string]any) (bool, error) {
 	return false, nil
 }
 
+// CheckModifiesResource determines if the command modifies kubernetes resources
+// For MCP tools, we'll conservatively assume they might modify resources
+// since we can't easily determine this for arbitrary external tools
+// Returns "yes", "no", or "unknown"
+func (t *MCPTool) CheckModifiesResource(args map[string]any) string {
+	// Since MCP tools can be arbitrary external tools and we don't have a way to know
+	// if they modify resources, we'll conservatively return "unknown"
+	return "unknown"
+}
+
 // Run executes the MCP tool by calling the appropriate MCP server.
 func (t *MCPTool) Run(ctx context.Context, args map[string]any) (any, error) {
 	// Get MCP client for the server
