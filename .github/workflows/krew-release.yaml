@@ -1,0 +1,23 @@
+name: Krew Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  krew-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Krew Release Bot
+        uses: krew-release-bot/krew-release-bot@v1
+        with:
+          plugin-name: ai
+          plugin-repo: GoogleCloudPlatform/kubectl-ai
+          krew-index-repo: kubernetes-sigs/krew-index
+          manifest-file: krew-plugin.yaml 
