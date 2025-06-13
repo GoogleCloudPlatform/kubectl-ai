@@ -264,6 +264,8 @@ No additional setup required - just use the `--mcp-client` flag and the AI will 
 
 📖 **For detailed configuration options, troubleshooting, and advanced features for MCP Client mode, see the [MCP Client Documentation](pkg/mcp/README.md).**
 
+📖 **For multi-server orchestration and security automation examples, see the [MCP Client Integration Guide](docs/mcp-client.md).**
+
 ## Extras
 
 You can use the following special keywords for specific actions:

@@ -198,6 +198,8 @@ The MCP client is integrated with `kubectl-ai` to automatically discover and use
 5. **Handles execution** with proper error handling and result formatting
 6. **Displays status** showing connected servers and available tool counts
 
+📖 **For practical multi-server orchestration examples and security automation workflows, see the [MCP Client Integration Guide](../../docs/mcp-client.md).**
+
 ## Security Considerations
 
 - MCP servers can execute arbitrary commands with the same permissions as the `kubectl-ai` process
