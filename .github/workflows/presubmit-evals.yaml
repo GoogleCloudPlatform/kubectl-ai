@@ -33,7 +33,7 @@ jobs:
           # Output as comma-separated string
           echo "dirs=$(echo "$CHANGED_DIRS" | paste -sd ',' -)" >> $GITHUB_OUTPUT
 
-  run-eval:
+  run-evals:
     needs: detect-changed-tasks
     if: needs.detect-changed-tasks.outputs.task_dirs != ''
     runs-on: ubuntu-latest
@@ -68,7 +68,7 @@ jobs:
           echo "Running eval for ${{ matrix.task }}"
           ./dev/ci/periodics/run-evals.sh
 
-      - name: Analyse results
+      - name: Analyze results
         run: |
           ./dev/ci/periodics/analyze-evals.sh
           cat ${{ github.workspace }}/.build/k8s-bench.md >> $GITHUB_STEP_SUMMARY
