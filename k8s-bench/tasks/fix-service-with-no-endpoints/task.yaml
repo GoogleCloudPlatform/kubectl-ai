@@ -1,0 +1,6 @@
+script:
+- prompt: "The 'web-app-service' service in the 'node-selector-test' namespace has no endpoints. Diagnose and fix the underlying issue."
+setup: "setup.sh"
+verifier: "verify.sh"
+cleanup: "cleanup.sh"
+difficulty: "medium"

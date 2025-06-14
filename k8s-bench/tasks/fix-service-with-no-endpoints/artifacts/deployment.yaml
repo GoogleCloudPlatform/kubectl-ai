@@ -1,0 +1,24 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-app-deployment
+  namespace: node-selector-test
+  labels:
+    app: web-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: web-app
+  template:
+    metadata:
+      labels:
+        app: web-app
+    spec:
+      nodeSelector:
+        nonexistent-label-key: nonexistent-label-value
+      containers:
+      - name: web-app-container
+        image: nginx:latest
+        ports:
+        - containerPort: 80
