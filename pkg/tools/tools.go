@@ -132,6 +132,7 @@ func (t *Tools) ParseToolInvocation(ctx context.Context, name string, arguments 
 type InvokeToolOptions struct {
 	WorkDir string
 
+	// Kubeconfig is the path to the kubeconfig file.
 	Kubeconfig string
 }
 
