@@ -50,7 +50,9 @@ type Conversation struct {
 
 	MaxIterations int
 
-	Kubeconfig      string
+	// Kubeconfig is the path to the kubeconfig file.
+	Kubeconfig string
+
 	SkipPermissions bool
 
 	Tools tools.Tools
