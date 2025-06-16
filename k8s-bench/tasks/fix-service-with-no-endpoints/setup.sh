@@ -2,21 +2,21 @@
 set -e
 
 # Delete namespace if it exists
-kubectl delete namespace node-selector-test --ignore-not-found
+kubectl delete namespace webshop-frontend --ignore-not-found
 
 # Create a fresh namespace
-kubectl create namespace node-selector-test
+kubectl create namespace webshop-frontend
 
 # Apply the service and deployment with the invalid node selector
 kubectl apply -f artifacts/service.yaml
 kubectl apply -f artifacts/deployment.yaml
 
-# Wait briefly to ensure resources are created
+# Wait for the deployment to be available or timeout after 30 seconds
 echo "Waiting for resources to be created..."
-sleep 5
+kubectl wait --for=condition=Available=False --timeout=30s deployment/web-app-deployment -n webshop-frontend || true
 
 # Check the service has no endpoints (due to deployment with invalid node selector)
-ENDPOINTS=$(kubectl get endpoints web-app-service -n node-selector-test -o jsonpath='{.subsets}')
+ENDPOINTS=$(kubectl get endpoints web-app-service -n webshop-frontend -o jsonpath='{.subsets}')
 if [[ -z "$ENDPOINTS" ]]; then
   echo "Setup successful: Service has no endpoints as expected"
 else

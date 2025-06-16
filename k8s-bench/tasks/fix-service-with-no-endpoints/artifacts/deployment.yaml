@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: web-app-deployment
-  namespace: node-selector-test
+  namespace: webshop-frontend
   labels:
     app: web-app
 spec:
@@ -16,7 +16,7 @@ spec:
         app: web-app
     spec:
       nodeSelector:
-        nonexistent-label-key: nonexistent-label-value
+        environment: production-gpu
       containers:
       - name: web-app-container
         image: nginx:latest
