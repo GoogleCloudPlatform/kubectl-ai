@@ -160,7 +160,7 @@ func runEvals(ctx context.Context) error {
 	llmProvider := "gemini"
 	modelList := ""
 	defaultKubeConfig := "~/.kube/config"
-	enableToolUseShim := true
+	enableToolUseShim := false
 	quiet := true
 
 	flag.StringVar(&config.TasksDir, "tasks-dir", config.TasksDir, "Directory containing evaluation tasks")
