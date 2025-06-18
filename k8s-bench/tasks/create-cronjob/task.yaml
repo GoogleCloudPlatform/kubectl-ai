@@ -1,0 +1,5 @@
+script:
+- prompt: "Create a Kubernetes CronJob named 'data-backup' in the 'create-cronjob-test' namespace that runs every day at midnight. The job should run a busybox container that executes a simple command to echo 'Backup completed' and then sleep for 5 seconds."
+verifier: "verify.sh"
+cleanup: "cleanup.sh"
+difficulty: "medium" 
