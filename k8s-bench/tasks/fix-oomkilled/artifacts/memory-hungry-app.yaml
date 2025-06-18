@@ -22,9 +22,8 @@ spec:
           args:
             - -c
             - |
-              echo "Starting memory-intensive application..."
-              # Simulate a memory-hungry application
-              dd if=/dev/zero of=/tmp/memory-hog bs=1M count=150 &
+              echo "Starting backend service..."
+              dd if=/dev/zero of=/tmp/cache.dat bs=1M count=150 &
               nginx -g 'daemon off;'
           ports:
             - containerPort: 80
@@ -33,7 +32,7 @@ spec:
               memory: "64Mi"
               cpu: "50m"
             limits:
-              memory: "128Mi" # This is insufficient for the 150MB allocation above
+              memory: "128Mi"
               cpu: "100m"
           livenessProbe:
             httpGet:
