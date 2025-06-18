@@ -94,6 +94,31 @@ func (s *DataStore) Add(record *gollm.RecordMessage) error {
 	return err
 }
 
+// SetHistory replaces the current history with a new set of records and overwrites the data file.
+func (s *DataStore) SetHistory(newHistory []*gollm.RecordMessage) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.history = newHistory
+
+	f, err := os.OpenFile(s.dataFile, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	for _, record := range newHistory {
+		b, err := json.Marshal(record)
+		if err != nil {
+			return err // Or handle more gracefully, e.g., by restoring the old history
+		}
+		if _, err := f.Write(append(b, '\n')); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // History returns a copy of the current conversation history.
 func (s *DataStore) History() []*gollm.RecordMessage {
 	s.mu.Lock()

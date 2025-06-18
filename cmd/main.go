@@ -29,6 +29,7 @@ import (
 	"slices"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/GoogleCloudPlatform/kubectl-ai/gollm"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/agent"
@@ -634,6 +635,64 @@ func (s *session) answerQuery(ctx context.Context, query string) error {
 		}
 	case query == "clear":
 		s.ui.ClearScreen()
+
+	case query == "compact":
+		if s.dataStore == nil {
+			return fmt.Errorf("data store not enabled, compaction is not possible")
+		}
+		history := s.dataStore.History()
+		if len(history) == 0 {
+			s.doc.AddBlock((&ui.AgentTextBlock{}).WithText("History is empty, nothing to compact."))
+			return nil
+		}
+
+		var historyBuilder strings.Builder
+		for _, record := range history {
+			for _, content := range record.Content {
+				historyBuilder.WriteString(fmt.Sprintf("%s: %s\n", record.Role, content))
+			}
+		}
+
+		prompt := fmt.Sprintf("Summarize the following conversation, keeping information that is relevant to future conversation:\n\n%s", historyBuilder.String())
+
+		req := &gollm.CompletionRequest{
+			Model:  s.model,
+			Prompt: prompt,
+		}
+
+		resp, err := s.LLM.GenerateCompletion(ctx, req)
+		if err != nil {
+			return fmt.Errorf("failed to summarize history: %w", err)
+		}
+		summaryContent := resp.Response()
+		if summaryContent == "" {
+			return fmt.Errorf("LLM returned no summary")
+		}
+
+		newHistory := []*gollm.RecordMessage{
+			{
+				Role:      "user",
+				Content:   []any{"The following is a summary of our conversation so far."},
+				Timestamp: time.Now(),
+			},
+			{
+				Role:      "model",
+				Content:   []any{summaryContent},
+				Timestamp: time.Now(),
+			},
+		}
+
+		if err := s.dataStore.SetHistory(newHistory); err != nil {
+			return fmt.Errorf("failed to set new history: %w", err)
+		}
+
+		// Reload conversation history
+		if err := s.conversation.Init(ctx, s.doc); err != nil {
+			return fmt.Errorf("re-initializing conversation: %w", err)
+		}
+
+		s.doc.AddBlock((&ui.AgentTextBlock{}).WithText("History compacted successfully."))
+		return nil
 
 	default:
 		return s.conversation.RunOneRound(ctx, query)
