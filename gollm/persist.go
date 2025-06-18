@@ -56,16 +56,8 @@ type PersistentChat struct {
 
 // NewPersistentChat creates a new PersistentChat.
 func NewPersistentChat(chat Chat, filePath string) (*PersistentChat, error) {
-	history, err := LoadHistoryFromFile(filePath)
-	if err != nil {
-		return nil, err
-	}
-	if len(history) > 0 {
-		if err := chat.LoadHistory(history); err != nil {
-			return nil, err
-		}
-	}
-
+	// We do not load history here anymore.
+	// The history should be loaded by the application and passed to chat.LoadHistory.
 	return &PersistentChat{
 		chat:     chat,
 		filePath: filePath,

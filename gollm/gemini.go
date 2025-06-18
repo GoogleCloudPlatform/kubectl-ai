@@ -476,8 +476,31 @@ func (r *GeminiChatResponse) MarshalJSON() ([]byte, error) {
 	return json.Marshal(&formatted)
 }
 
+func (r *GeminiChatResponse) UnmarshalJSON(b []byte) error {
+	var rec RecordChatResponse
+	if err := json.Unmarshal(b, &rec); err != nil {
+		return err
+	}
+
+	rawBytes, err := json.Marshal(rec.Raw)
+	if err != nil {
+		return err
+	}
+
+	var genaiResp genai.GenerateContentResponse
+	if err := json.Unmarshal(rawBytes, &genaiResp); err != nil {
+		return err
+	}
+
+	r.geminiResponse = &genaiResp
+	return nil
+}
+
 // String returns a string representation of the response.
 func (r *GeminiChatResponse) String() string {
+	if r == nil || r.geminiResponse == nil {
+		return ""
+	}
 	return r.geminiResponse.Text()
 }
 
@@ -659,14 +682,7 @@ func (c *GeminiChat) LoadHistory(history []*RecordMessage) error {
 			}
 			var genaiResp genai.GenerateContentResponse
 			if err := json.Unmarshal(b, &genaiResp); err != nil {
-				// For backwards compatibility, we also try to unmarshal as the old format.
-				// TODO: Remove this after a few releases.
-				var oldResp genai.GenerateContentResponse
-				if err := json.Unmarshal(b, &oldResp); err == nil {
-					genaiResp = oldResp
-				} else {
-					return err
-				}
+				return err
 			}
 
 			if len(genaiResp.Candidates) > 0 {
