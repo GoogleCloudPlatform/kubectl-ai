@@ -289,8 +289,12 @@ func (c *LlamaCppChat) SendStreaming(ctx context.Context, contents ...any) (Chat
 }
 
 func (c *LlamaCppChat) IsRetryableError(err error) bool {
-	// TODO(droot): Implement this
 	return false
+}
+
+// LoadHistory implements Chat.
+func (c *LlamaCppChat) LoadHistory(history []*RecordMessage) error {
+	return fmt.Errorf("LoadHistory not yet implemented for llamacpp")
 }
 
 func ptrTo[T any](t T) *T {

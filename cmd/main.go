@@ -111,6 +111,9 @@ type Options struct {
 
 	// SkipVerifySSL is a flag to skip verifying the SSL certificate of the LLM provider.
 	SkipVerifySSL bool `json:"skipVerifySSL,omitempty"`
+
+	// HistoryFile is the path to a file to record the conversation history.
+	HistoryFile string `json:"historyFile,omitempty"`
 }
 
 type UserInterface string
@@ -175,6 +178,8 @@ func (o *Options) InitDefaults() {
 
 	// Default to not skipping SSL verification
 	o.SkipVerifySSL = false
+
+	o.HistoryFile = ""
 }
 
 func (o *Options) LoadConfiguration(b []byte) error {
@@ -303,6 +308,8 @@ func (opt *Options) bindCLIFlags(f *pflag.FlagSet) error {
 	f.StringVar(&opt.UIListenAddress, "ui-listen-address", opt.UIListenAddress, "address to listen for the HTML UI.")
 	f.BoolVar(&opt.SkipVerifySSL, "skip-verify-ssl", opt.SkipVerifySSL, "skip verifying the SSL certificate of the LLM provider")
 
+	f.StringVar(&opt.HistoryFile, "history-file", opt.HistoryFile, "Path to a file to record the conversation history.")
+
 	return nil
 }
 
@@ -428,6 +435,7 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 		SkipPermissions:    opt.SkipPermissions,
 		EnableToolUseShim:  opt.EnableToolUseShim,
 		MCPClientEnabled:   opt.MCPClient,
+		HistoryFile:        opt.HistoryFile,
 	}
 
 	err = conversation.Init(ctx, doc)

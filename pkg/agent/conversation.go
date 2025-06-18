@@ -65,6 +65,9 @@ type Conversation struct {
 	// Recorder captures events for diagnostics
 	Recorder journal.Recorder
 
+	// HistoryFile is the path to a file to record the conversation history.
+	HistoryFile string
+
 	// doc is the document which renders the conversation
 	doc *ui.Document
 
@@ -94,8 +97,17 @@ func (s *Conversation) Init(ctx context.Context, doc *ui.Document) error {
 	}
 
 	// Start a new chat session
+	chat := s.LLM.StartChat(systemPrompt, s.Model)
+	if s.HistoryFile != "" {
+		persistentChat, err := gollm.NewPersistentChat(chat, s.HistoryFile)
+		if err != nil {
+			return fmt.Errorf("creating persistent chat: %w", err)
+		}
+		chat = persistentChat
+	}
+
 	s.llmChat = gollm.NewRetryChat(
-		s.LLM.StartChat(systemPrompt, s.Model),
+		chat,
 		gollm.RetryConfig{
 			MaxAttempts:    3,
 			InitialBackoff: 10 * time.Second,

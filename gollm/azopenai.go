@@ -264,8 +264,12 @@ func (c *AzureOpenAIChat) Send(ctx context.Context, contents ...any) (ChatRespon
 }
 
 func (c *AzureOpenAIChat) IsRetryableError(err error) bool {
-	// TODO: Implement this
 	return false
+}
+
+// LoadHistory implements Chat.
+func (c *AzureOpenAIChat) LoadHistory(history []*RecordMessage) error {
+	return fmt.Errorf("LoadHistory not yet implemented for azopenai")
 }
 
 func (c *AzureOpenAIChat) SendStreaming(ctx context.Context, contents ...any) (ChatResponseIterator, error) {

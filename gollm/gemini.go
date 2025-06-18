@@ -18,11 +18,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"iter"
-	"net"
-	"net/http"
 	"os"
 	"os/exec"
 	"strings"
@@ -425,6 +422,8 @@ func (c *GeminiChat) SendStreaming(ctx context.Context, contents ...any) (ChatRe
 		return nil, err
 	}
 
+	// incoming messages
+	// could be user entered messages or result of function calls.
 	genaiContent := &genai.Content{
 		Role:  "user",
 		Parts: parts,
@@ -452,6 +451,7 @@ func (c *GeminiChat) SendStreaming(ctx context.Context, contents ...any) (ChatRe
 				log.V(1).Info("empty response probably with STOP finishedReason")
 				return
 			}
+			// response from the LLM
 			c.history = append(c.history, content)
 			// yield only when we have a non-empty response
 			if !yield(&GeminiChatResponse{geminiResponse: geminiResponse}, err) {
@@ -593,29 +593,88 @@ func (r *GeminiCompletionResponse) String() string {
 }
 
 func (c *GeminiChat) IsRetryableError(err error) bool {
-	if err == nil {
-		return false
-	}
+	return DefaultIsRetryableError(err)
+}
 
-	var apiErr genai.APIError
-	if errors.As(err, &apiErr) {
-		switch apiErr.Code {
-		case http.StatusConflict, http.StatusTooManyRequests,
-			http.StatusInternalServerError, http.StatusBadGateway,
-			http.StatusServiceUnavailable, http.StatusGatewayTimeout:
-			return true
+func reconstructContent(contents []any) ([]any, error) {
+	reconstructed := make([]any, 0, len(contents))
+	for _, content := range contents {
+		switch v := content.(type) {
+		case string:
+			reconstructed = append(reconstructed, v)
+		case map[string]interface{}:
+			// It could be a FunctionCallResult.
+			// Let's try to marshal and unmarshal.
+			b, err := json.Marshal(v)
+			if err != nil {
+				return nil, fmt.Errorf("failed to marshal content map: %w", err)
+			}
+			var fcr FunctionCallResult
+			// We check for name because an empty map would unmarshal without error.
+			if err := json.Unmarshal(b, &fcr); err == nil && fcr.Name != "" {
+				reconstructed = append(reconstructed, fcr)
+			} else {
+				return nil, fmt.Errorf("unexpected map in content that is not a FunctionCallResult: %v", v)
+			}
 		default:
-			return false
+			// This is an unexpected type from JSON unmarshalling.
+			return nil, fmt.Errorf("unexpected type in content: %T", v)
 		}
 	}
+	return reconstructed, nil
+}
 
-	var netErr net.Error
-	if errors.As(err, &netErr) && netErr.Timeout() {
-		return true
+// LoadHistory implements Chat.
+func (c *GeminiChat) LoadHistory(history []*RecordMessage) error {
+	for _, record := range history {
+		switch record.Role {
+		case "user":
+			reconstructedContent, err := reconstructContent(record.Content)
+			if err != nil {
+				return fmt.Errorf("failed to reconstruct content from history: %w", err)
+			}
+			parts, err := c.partsToGemini(reconstructedContent...)
+			if err != nil {
+				return err
+			}
+			c.history = append(c.history, &genai.Content{
+				Role:  "user",
+				Parts: parts,
+			})
+		case "model":
+			// The response is a RecordChatResponse, which needs to be unmarshaled.
+			b, err := json.Marshal(record.Response)
+			if err != nil {
+				return err
+			}
+			var resp RecordChatResponse
+			if err := json.Unmarshal(b, &resp); err != nil {
+				return err
+			}
+
+			// The raw response is a genai.GenerateContentResponse.
+			b, err = json.Marshal(resp.Raw)
+			if err != nil {
+				return err
+			}
+			var genaiResp genai.GenerateContentResponse
+			if err := json.Unmarshal(b, &genaiResp); err != nil {
+				// For backwards compatibility, we also try to unmarshal as the old format.
+				// TODO: Remove this after a few releases.
+				var oldResp genai.GenerateContentResponse
+				if err := json.Unmarshal(b, &oldResp); err == nil {
+					genaiResp = oldResp
+				} else {
+					return err
+				}
+			}
+
+			if len(genaiResp.Candidates) > 0 {
+				c.history = append(c.history, genaiResp.Candidates[0].Content)
+			}
+		default:
+			return fmt.Errorf("unknown role in history: %q", record.Role)
+		}
 	}
-
-	// Add other error checks specific to LLM clients if needed
-	// e.g., if errors.Is(err, specificLLMRateLimitError) { return true }
-
-	return false
+	return nil
 }
