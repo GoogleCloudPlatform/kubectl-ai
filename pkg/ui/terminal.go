@@ -21,7 +21,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/journal"
@@ -211,31 +211,53 @@ func (u *TerminalUI) DocumentChanged(doc *Document, block Block) {
 
 	case *InputOptionBlock:
 		fmt.Printf("%s\n", block.Prompt) // Print initial prompt text
+		for i, option := range block.Options {
+			fmt.Printf("  %d) %s\n", i+1, option.Message)
+		}
+
+		var choiceNumbers []string
+		var allOptions []string
+		inputMap := make(map[string]string)
+		for i, option := range block.Options {
+			choiceNumber := strconv.Itoa(i + 1)
+			choiceNumbers = append(choiceNumbers, choiceNumber)
+
+			allOptions = append(allOptions, choiceNumber)
+			inputMap[choiceNumber] = option.Key
+
+			for _, alias := range option.Aliases {
+				allOptions = append(allOptions, alias)
+				inputMap[alias] = option.Key
+			}
+		}
+		fmt.Printf("  Enter your choice (%s): ", strings.Join(choiceNumbers, ","))
 
 		if u.useTTYForInput {
 			tReader, err := u.ttyReader()
 			if err != nil {
-				block.Observable().Set("", fmt.Errorf("TTY reader not initialized"))
+				block.Selection().Set("", fmt.Errorf("TTY reader not initialized"))
 				return
 			}
 			for {
-				fmt.Print("  Enter your choice (1,2,3): ") // Print loop prompt manually
+				fmt.Printf("  Enter your choice (%s): ", strings.Join(choiceNumbers, ",")) // Print loop prompt manually
 				response, err := tReader.ReadString('\n')
 				if err != nil {
-					block.Observable().Set("", err)
+					block.Selection().Set("", err)
 					return
 				}
-				choice := strings.TrimSpace(response)
-				if slices.Contains(block.Options, choice) {
-					block.Observable().Set(choice, nil)
-					break
+				response = strings.TrimSpace(response)
+				optionKey, foundMatchingOption := inputMap[response]
+				if foundMatchingOption {
+					block.Selection().Set(optionKey, nil)
+					break // Exit loop on valid choice
+				} else {
+					fmt.Printf("  Invalid choice. Please enter one of: %s\n", strings.Join(allOptions, ", "))
 				}
-				fmt.Printf("  Invalid choice. Please enter one of: %s\n", strings.Join(block.Options, ", "))
 			}
 		} else {
 			rlInstance, err := u.readlineInstance()
 			if err != nil {
-				block.Observable().Set("", fmt.Errorf("readline instance not initialized: %w", err))
+				block.Selection().Set("", fmt.Errorf("readline instance not initialized: %w", err))
 				return
 			}
 			// Temporarily change prompt for option selection
@@ -249,24 +271,25 @@ func (u *TerminalUI) DocumentChanged(doc *Document, block Block) {
 				response, err := rlInstance.Readline()
 				if err != nil {
 					if err == readline.ErrInterrupt { // Handle Ctrl+C
-						block.Observable().Set("", io.EOF)
+						block.Selection().Set("", io.EOF)
 						return
 					} else if err == io.EOF { // Handle Ctrl+D
-						block.Observable().Set("", io.EOF)
+						block.Selection().Set("", io.EOF)
 						return
 					} else {
-						block.Observable().Set("", err)
+						block.Selection().Set("", err)
 						return
 					}
 				}
 
-				choice := strings.TrimSpace(response)
-				if slices.Contains(block.Options, choice) {
-					block.Observable().Set(choice, nil)
+				response = strings.TrimSpace(response)
+				optionKey, foundMatchingOption := inputMap[response]
+				if foundMatchingOption {
+					block.Selection().Set(optionKey, nil)
 					break // Exit loop on valid choice
+				} else {
+					fmt.Printf("\n  Invalid choice. Please enter one of: %s\n", strings.Join(allOptions, ", "))
 				}
-				// Print error message; readline will reprint the prompt
-				fmt.Printf("\n  Invalid choice. Please enter one of: %s\n", strings.Join(block.Options, ", "))
 			}
 		}
 		return

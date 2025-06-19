@@ -289,16 +289,15 @@ func (a *Conversation) RunOneRound(ctx context.Context, query string) error {
 			}
 
 			if !a.SkipPermissions && modifiesResourceStr != "no" {
-				confirmationPrompt := `  Do you want to proceed ?
-  1) Yes
-  2) Yes, and don't ask me again
-  3) No`
+				confirmationPrompt := `  Do you want to proceed ?`
 
 				optionsBlock := ui.NewInputOptionBlock().SetPrompt(confirmationPrompt)
-				optionsBlock.SetOptions([]string{"1", "2", "3", "yes", "y", "no", "n"})
+				optionsBlock.AddOption("yes", "Yes", "yes", "y")
+				optionsBlock.AddOption("yes_and_dont_ask_me_again", "Yes, and don't ask me again")
+				optionsBlock.AddOption("no", "No", "no", "n")
 				a.doc.AddBlock(optionsBlock)
 
-				selectedChoice, err := optionsBlock.Observable().Wait()
+				selectedChoice, err := optionsBlock.Selection().Wait()
 				if err != nil {
 					if err == io.EOF {
 						return nil
@@ -307,13 +306,12 @@ func (a *Conversation) RunOneRound(ctx context.Context, query string) error {
 				}
 
 				// Normalize the input
-				selectedChoice = strings.ToLower(strings.TrimSpace(selectedChoice))
 				switch selectedChoice {
-				case "1", "yes", "y":
+				case "yes":
 					// Proceed with the operation
-				case "2":
+				case "yes_and_dont_ask_me_again":
 					a.SkipPermissions = true
-				case "3", "no", "n":
+				case "no":
 					a.doc.AddBlock(ui.NewAgentTextBlock().WithText("Operation was skipped. User declined to run this operation."))
 					currChatContent = append(currChatContent, gollm.FunctionCallResult{
 						ID:   call.ID,

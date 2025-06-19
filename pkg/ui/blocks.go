@@ -205,27 +205,52 @@ type InputOptionBlock struct {
 	doc *Document
 
 	// Options are the valid options that can be chosen
-	Options []string
+	Options []InputOptionChoice
 
 	// Prompt is the prompt to show the user
 	Prompt string
 
-	// text is populated when we have input from the user
-	text Observable[string]
+	// selection is populated when we have input from the user
+	selection Observable[string]
+}
+
+type InputOptionChoice struct {
+	// Key is the internal system identifier for the option
+	Key string
+
+	// Message is the text to show the user
+	Message string
+
+	// Aliases are alternative shortcuts for the option (other than the number),
+	//typically used in terminal mode.
+	Aliases []string
 }
 
 func NewInputOptionBlock() *InputOptionBlock {
 	return &InputOptionBlock{}
 }
 
-func (b *InputOptionBlock) SetOptions(options []string) *InputOptionBlock {
-	b.Options = options
+// Editable returns true if the input option block is editable
+func (b *InputOptionBlock) Editable() bool {
+	v, err := b.selection.Get()
+	return err == nil && v == ""
+}
+
+// AddOption adds an option to the input option block
+func (b *InputOptionBlock) AddOption(key string, message string, aliases ...string) *InputOptionBlock {
+	b.Options = append(b.Options, InputOptionChoice{
+		Key:     key,
+		Message: message,
+		Aliases: aliases,
+	})
+	b.doc.blockChanged(b)
 	return b
 }
 
 // SetPrompt sets the prompt to show the user
 func (b *InputOptionBlock) SetPrompt(prompt string) *InputOptionBlock {
 	b.Prompt = prompt
+	b.doc.blockChanged(b)
 	return b
 }
 
@@ -237,6 +262,6 @@ func (b *InputOptionBlock) Document() *Document {
 	return b.doc
 }
 
-func (b *InputOptionBlock) Observable() *Observable[string] {
-	return &b.text
+func (b *InputOptionBlock) Selection() *Observable[string] {
+	return &b.selection
 }

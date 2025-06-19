@@ -177,7 +177,20 @@ func (u *HTMLUserInterface) handlePOSTChooseOption(w http.ResponseWriter, req *h
 		return
 	}
 
-	inputOptionBlock.Observable().Set(optionKey, nil)
+	foundOption := false
+	for _, option := range inputOptionBlock.Options {
+		if option.Key == optionKey {
+			inputOptionBlock.Selection().Set(option.Key, nil)
+			foundOption = true
+			break
+		}
+	}
+
+	if !foundOption {
+		log.Info("option not found", "option", optionKey)
+		http.Error(w, "option not found", http.StatusBadRequest)
+	}
+
 	var bb bytes.Buffer
 	bb.WriteString("ok")
 	w.Write(bb.Bytes())
