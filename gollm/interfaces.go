@@ -119,6 +119,7 @@ const (
 
 	TypeString  SchemaType = "string"
 	TypeBoolean SchemaType = "boolean"
+	TypeNumber  SchemaType = "number"
 	TypeInteger SchemaType = "integer"
 )
 

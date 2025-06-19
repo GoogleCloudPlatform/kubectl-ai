@@ -305,6 +305,9 @@ type GeminiChat struct {
 func (c *GeminiChat) SetFunctionDefinitions(functionDefinitions []*FunctionDefinition) error {
 	var genaiFunctionDeclarations []*genai.FunctionDeclaration
 	for _, functionDefinition := range functionDefinitions {
+		if functionDefinition.Parameters == nil {
+			return fmt.Errorf("function %q has no parameters", functionDefinition.Name)
+		}
 		parameters, err := toGeminiSchema(functionDefinition.Parameters)
 		if err != nil {
 			return err
@@ -335,6 +338,8 @@ func toGeminiSchema(schema *Schema) (*genai.Schema, error) {
 		ret.Type = genai.TypeObject
 	case TypeString:
 		ret.Type = genai.TypeString
+	case TypeNumber:
+		ret.Type = genai.TypeNumber
 	case TypeBoolean:
 		ret.Type = genai.TypeBoolean
 	case TypeInteger:

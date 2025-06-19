@@ -208,8 +208,7 @@ func (m *Manager) ListAvailableTools(ctx context.Context) (map[string][]Tool, er
 	for name, client := range m.clients {
 		toolList, err := client.ListTools(ctx)
 		if err != nil {
-			klog.Errorf("Failed to list tools from MCP server %q: %v", name, err)
-			continue
+			return nil, fmt.Errorf("listing tools from MCP server %q: %w", name, err)
 		}
 
 		var serverTools []Tool

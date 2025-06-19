@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"reflect"
 
+	"github.com/GoogleCloudPlatform/kubectl-ai/gollm"
 	mcpclient "github.com/mark3labs/mcp-go/client"
 	mcp "github.com/mark3labs/mcp-go/mcp"
 	"k8s.io/klog/v2"
@@ -44,6 +45,8 @@ type Tool struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
 	Server      string `json:"server,omitempty"`
+
+	InputSchema *gollm.Schema `json:"inputSchema,omitempty"`
 }
 
 // NewClient creates a new MCP client with the given configuration.
@@ -162,23 +165,6 @@ func (c *Client) CallTool(ctx context.Context, toolName string, arguments map[st
 // Tool Factory Functions and Methods
 // ===================================================================
 
-// NewTool creates a new tool with basic information.
-func NewTool(name, description string) Tool {
-	return Tool{
-		Name:        name,
-		Description: description,
-	}
-}
-
-// NewToolWithServer creates a new tool with server information.
-func NewToolWithServer(name, description, server string) Tool {
-	return Tool{
-		Name:        name,
-		Description: description,
-		Server:      server,
-	}
-}
-
 // WithServer returns a copy of the tool with server information added.
 func (t Tool) WithServer(server string) Tool {
 	copy := t
@@ -215,15 +201,130 @@ func (t Tool) IsFromServer(server string) bool {
 }
 
 // convertMCPToolsToTools converts MCP library tools to our Tool type.
-func convertMCPToolsToTools(mcpTools []mcp.Tool) []Tool {
+func convertMCPToolsToTools(mcpTools []mcp.Tool) ([]Tool, error) {
 	tools := make([]Tool, 0, len(mcpTools))
 	for _, mcpTool := range mcpTools {
-		tools = append(tools, Tool{
+		tool := Tool{
 			Name:        mcpTool.Name,
 			Description: mcpTool.Description,
-		})
+		}
+		// TODO: Annotations (give hints about e.g. read-only, destructive, idempotent, open-world)
+
+		if mcpTool.InputSchema.Type != "" {
+			schema, err := convertMCPInputSchema(&mcpTool.InputSchema)
+			if err != nil {
+				return nil, fmt.Errorf("converting MCP input schema to tool input schema: %w", err)
+			}
+			tool.InputSchema = schema
+		} else {
+			// TODO: Use RawInputSchema if available
+			// klog.Warningf("no input schema for tool %s", mcpTool.Name)
+			return nil, fmt.Errorf("no input schema for tool %s", mcpTool.Name)
+		}
+
+		tools = append(tools, tool)
 	}
-	return tools
+	return tools, nil
+}
+
+func convertMCPInputSchema(mcpInputSchema *mcp.ToolInputSchema) (*gollm.Schema, error) {
+	gollmSchema := &gollm.Schema{}
+	switch mcpInputSchema.Type {
+	case "string":
+		gollmSchema.Type = gollm.TypeString
+	// case "number":
+	// 	gollmSchema.Type = gollm.TypeNumber
+	case "boolean":
+		gollmSchema.Type = gollm.TypeBoolean
+	case "object":
+		gollmSchema.Type = gollm.TypeObject
+	default:
+		return nil, fmt.Errorf("unexpected MCP input schema type: %s", mcpInputSchema.Type)
+	}
+	if mcpInputSchema.Properties != nil {
+		gollmSchema.Properties = make(map[string]*gollm.Schema)
+		for key, value := range mcpInputSchema.Properties {
+			if valueSchema, ok := value.(mcp.ToolInputSchema); ok {
+				gollmValue, err := convertMCPInputSchema(&valueSchema)
+				if err != nil {
+					return nil, fmt.Errorf("converting MCP input schema to tool input schema: %w", err)
+				}
+				gollmSchema.Properties[key] = gollmValue
+			} else if valueMap, ok := value.(map[string]interface{}); ok {
+				gollmValue, err := convertMCPMapSchema(key, valueMap)
+				if err != nil {
+					return nil, fmt.Errorf("converting MCP input schema to tool input schema: %w", err)
+				}
+				gollmSchema.Properties[key] = gollmValue
+			} else {
+				return nil, fmt.Errorf("unexpected input schema type for %q: %T %+v", key, value, value)
+			}
+		}
+	}
+	gollmSchema.Required = mcpInputSchema.Required
+	return gollmSchema, nil
+}
+
+func convertMCPMapSchema(key string, schemaMap map[string]interface{}) (*gollm.Schema, error) {
+	gollmSchema := &gollm.Schema{}
+
+	if descriptionObj, ok := schemaMap["description"]; ok {
+		description, ok := descriptionObj.(string)
+		if !ok {
+			return nil, fmt.Errorf("unexpected description for key %q: %+v", key, schemaMap)
+		}
+		gollmSchema.Description = description
+	}
+
+	// required, ok := valueSchema["required"].(bool)
+	// if !ok {
+	// 	return nil, fmt.Errorf("unexpected input schema type for %q: %T %+v", key, value, value)
+	// }
+	// switch required {
+	// case true:
+	// 	// TODO: Add required flag to gollm.Schema
+	// default:
+	// 	return nil, fmt.Errorf("unexpected input schema type for %q: %T %+v", key, value, value)
+	// }
+
+	mcpType, ok := schemaMap["type"].(string)
+	if !ok {
+		return nil, fmt.Errorf("expected type for key %q: %v", key, schemaMap)
+	}
+	switch mcpType {
+	case "string":
+		gollmSchema.Type = gollm.TypeString
+	case "number":
+		gollmSchema.Type = gollm.TypeNumber
+	case "boolean":
+		gollmSchema.Type = gollm.TypeBoolean
+	case "array":
+		items, ok := schemaMap["items"].(map[string]interface{})
+		if !ok {
+			return nil, fmt.Errorf("did not find items for array: key %q: %+v", key, schemaMap)
+		}
+		itemsSchema, err := convertMCPMapSchema(key+".items", items)
+		if err != nil {
+			return nil, fmt.Errorf("converting MCP input schema to tool input schema: %w", err)
+		}
+		gollmSchema.Type = gollm.TypeArray
+		gollmSchema.Items = itemsSchema
+
+	case "object":
+		gollmSchema.Type = gollm.TypeObject
+		gollmSchema.Properties = make(map[string]*gollm.Schema)
+		for key, value := range schemaMap["properties"].(map[string]interface{}) {
+			propertySchema, err := convertMCPMapSchema(key, value.(map[string]interface{}))
+			if err != nil {
+				return nil, fmt.Errorf("converting MCP input schema to tool input schema: %w", err)
+			}
+			gollmSchema.Properties[key] = propertySchema
+		}
+	default:
+		return nil, fmt.Errorf("unexpected input schema type %q for key %q: %+v", mcpType, key, schemaMap)
+	}
+
+	return gollmSchema, nil
 }
 
 // ===================================================================
@@ -302,7 +403,7 @@ func processToolResponse(result any) (string, error) {
 		// Handle error response
 		if isError {
 			// Try to extract error message if possible
-			return "", fmt.Errorf("tool returned an error")
+			return "", fmt.Errorf("tool returned an error: %+v", result)
 		}
 	}
 
@@ -334,7 +435,10 @@ func listClientTools(ctx context.Context, client *mcpclient.Client, serverName s
 	}
 
 	// Convert the result using the helper function
-	tools := convertMCPToolsToTools(result.Tools)
+	tools, err := convertMCPToolsToTools(result.Tools)
+	if err != nil {
+		return nil, fmt.Errorf("parsing tools from MCP server: %w", err)
+	}
 
 	// Add the server name to each tool
 	for i := range tools {

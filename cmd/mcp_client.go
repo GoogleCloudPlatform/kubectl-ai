@@ -38,10 +38,7 @@ func InitializeMCPClient() (*mcp.Manager, error) {
 	ctx := context.Background()
 	err = manager.RegisterWithToolSystem(ctx, func(serverName string, toolInfo mcp.Tool) error {
 		// Create schema for the tool
-		schema, err := tools.ConvertToolToGollm(&mcp.Tool{
-			Name:        toolInfo.Name,
-			Description: toolInfo.Description,
-		})
+		schema, err := tools.ConvertToolToGollm(&toolInfo)
 		if err != nil {
 			return err
 		}

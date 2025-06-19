@@ -29,20 +29,12 @@ import (
 
 // ConvertToolToGollm converts an MCP tool to gollm.FunctionDefinition with a simple schema
 func ConvertToolToGollm(mcpTool *mcp.Tool) (*gollm.FunctionDefinition, error) {
-	return &gollm.FunctionDefinition{
+	def := &gollm.FunctionDefinition{
 		Name:        mcpTool.Name,
 		Description: mcpTool.Description,
-		Parameters: &gollm.Schema{
-			Type: gollm.TypeObject,
-			Properties: map[string]*gollm.Schema{
-				"arguments": {
-					Type:        gollm.TypeObject,
-					Description: "Arguments for the MCP tool",
-					Properties:  map[string]*gollm.Schema{},
-				},
-			},
-		},
-	}, nil
+		Parameters:  mcpTool.InputSchema,
+	}
+	return def, nil
 }
 
 // =============================================================================
