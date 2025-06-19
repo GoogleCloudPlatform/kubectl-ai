@@ -271,6 +271,7 @@ func run(ctx context.Context) error {
 	// cobra has to know that we pass pass flags with flag lib, otherwise it creates conflict with flags.parse() method
 	// We add just the klog flags we want, not all the klog flags (there are a lot, most of them are very niche)
 	rootCmd.PersistentFlags().AddGoFlag(klogFlags.Lookup("v"))
+	rootCmd.PersistentFlags().AddGoFlag(klogFlags.Lookup("alsologtostderr"))
 
 	// do this early, before the third-party code logs anything.
 	redirectStdLogToKlog()
