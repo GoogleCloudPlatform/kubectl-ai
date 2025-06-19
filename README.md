@@ -174,6 +174,75 @@ You can even combine a positional argument with stdin input. The positional argu
 cat error.log | kubectl-ai "explain the error"
 ```
 
+## Configuration
+
+You can also configure `kubectl-ai` using a YAML configuration file at `~/.config/kubectl-ai/config.yaml`:
+
+```shell
+mkdir -p ~/.config/kubectl-ai/
+cat <<EOF > ~/.config/kubectl-ai/config.yaml
+model: gemini-2.5-flash-preview-04-17
+llm-provider: gemini
+custom-tools-config: ~/.config/kubectl-ai/tools.yaml
+EOF
+```
+
+Verify your configuration:
+
+```shell
+kubectl-ai --quiet model
+```
+
+<details>
+
+<summary>More configuration Options</summary>
+
+Here's a complete configuration file with all available options and their default values:
+
+```yaml
+# LLM provider configuration
+llm-provider: "gemini"               # Default LLM provider
+model: "gemini-2.5-pro-preview-06-05" # Default model
+skip-verify-ssl: false              # Skip SSL verification for LLM API calls
+
+# Tool and permission settings
+custom-tools-config: ["~/.config/kubectl-ai/tools.yaml"]  # Custom tools configuration paths
+skip-permissions: false             # Skip confirmation for resource-modifying commands
+enable-tool-use-shim: false        # Enable tool use shim for certain models
+
+# MCP configuration
+mcp-server: false                  # Run in MCP server mode
+mcp-client: false                  # Enable MCP client mode
+external-tools: false             # Discover external MCP tools (requires mcp-server)
+
+# Runtime settings
+max-iterations: 20                 # Maximum iterations for the agent
+quiet: false                       # Run in non-interactive mode
+remove-workdir: false             # Remove temporary working directory after execution
+
+# Kubernetes configuration
+kubeconfig: "~/.kube/config"      # Path to kubeconfig file
+
+# UI configuration
+user-interface: "terminal"         # UI mode: "terminal" or "html"
+ui-listen-address: "localhost:8888" # Address for HTML UI server
+
+# Prompt configuration
+prompt-template-file-path: ""      # Custom prompt template file
+extra-prompt-paths: []            # Additional prompt template paths
+
+# Debug and trace settings
+trace-path: "/tmp/kubectl-ai-trace.txt" # Path to trace file
+```
+</details>
+
+All these settings can be configured through either:
+1. Command line flags (e.g., `--model=gemini-2.5-pro`)
+2. Configuration file (`~/.config/kubectl-ai/config.yaml`)
+3. Environment variables (e.g., `GEMINI_API_KEY`)
+
+Command line flags take precedence over configuration file settings.
+
 ## Tools
 
 `kubectl-ai` leverages LLMs to suggest and execute Kubernetes operations using a set of powerful tools. It comes with built-in tools like `kubectl` and `bash`.
