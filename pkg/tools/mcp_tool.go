@@ -21,6 +21,7 @@ import (
 
 	"github.com/GoogleCloudPlatform/kubectl-ai/gollm"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/mcp"
+	"k8s.io/klog/v2"
 )
 
 // =============================================================================
@@ -108,18 +109,22 @@ func (t *MCPTool) CheckModifiesResource(args map[string]any) string {
 
 // Run executes the MCP tool by calling the appropriate MCP server.
 func (t *MCPTool) Run(ctx context.Context, args map[string]any) (any, error) {
+	log := klog.FromContext(ctx)
+
 	// Get MCP client for the server
 	client, exists := t.manager.GetClient(t.serverName)
 	if !exists {
 		return nil, fmt.Errorf("MCP server %q not connected", t.serverName)
 	}
 
-	// Convert arguments to proper types for MCP server using the MCP package's functions
-	convertedArgs := mcp.ConvertArgs(args)
+	// // Convert arguments to proper types for MCP server using the MCP package's functions
+	// args = mcp.ConvertArgs(args)
 
 	// Execute tool on MCP server
-	result, err := client.CallTool(ctx, t.toolName, convertedArgs)
+	result, err := client.CallTool(ctx, t.toolName, args)
 	if err != nil {
+		log.Info("tool info", "name", t.toolName, "schema", t.schema)
+		log.Info("call info", "args", args)
 		return nil, fmt.Errorf("calling MCP tool %q on server %q: %w", t.toolName, t.serverName, err)
 	}
 

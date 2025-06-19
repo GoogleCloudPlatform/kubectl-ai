@@ -149,11 +149,6 @@ func (c *Client) CallTool(ctx context.Context, toolName string, arguments map[st
 		return "", err
 	}
 
-	// Ensure we have a valid context
-	if ctx == nil {
-		ctx = context.Background()
-	}
-
 	// Delegate to implementation
 	return c.impl.CallTool(ctx, toolName, arguments)
 }
