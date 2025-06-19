@@ -1,94 +1,172 @@
-# `kubectl-ai` as a MCP Server
+# kubectl-ai MCP Server
 
-`kubectl-ai` can act as a [Model Context Protocol (MCP)](https://github.com/modelcontextprotocol) server. This allows MCP clients such as AI agents and IDEs (Claude, Cursor) to connect to the `kubectl-ai` MCP server, effectively interacting with your local Kubernetes environment via `kubectl`.
+kubectl-ai can run as an MCP (Model Context Protocol) server, exposing kubectl-ai tools to other MCP clients. The server can run in two modes:
 
-## Overview
+1. **Built-in tools only**: Exposes only kubectl-ai's native tools
+2. **External tool discovery**: Additionally discovers and exposes tools from other MCP servers
 
-The MCP server integrated into `kubectl-ai` exposes the power of `kubectl` commands as "tools" that MCP-compatible clients can invoke. When an AI agent needs to interact with your Kubernetes cluster, it can use these tools through the MCP server.
+## Quick Start
 
-Currently, the server primarily supports exposing `kubectl` commands as tools. This means a client can request the server to run a `kubectl` command (like `get pods`, `describe deployment`, etc.), and the server will execute it and return the output.
+### Basic MCP Server (Built-in tools only)
 
-## Using with MCP Clients
+Start the MCP server with only kubectl-ai's built-in tools:
 
-### Claude
+```bash
+kubectl-ai --mcp-server
+```
 
-Here is an example Claude configuration for MacOS:
+### Enhanced MCP Server (With external tool discovery)
 
+Start the MCP server with external MCP tool discovery enabled:
+
+```bash
+kubectl-ai --mcp-server --external-tools
+```
+
+## Configuration
+
+The enhanced MCP server will automatically discover and expose tools from configured MCP servers when `--external-tools` is enabled. Configure MCP servers using the standard MCP client configuration.
+
+### Example MCP Configuration
+
+Create `~/.config/kubectl-ai/mcp.yaml`:
+
+```yaml
+servers:
+  filesystem:
+    command: "npx"
+    args: ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/allowed/files"]
+  
+  brave-search:
+    command: "npx"
+    args: ["-y", "@modelcontextprotocol/server-brave-search"]
+    env:
+      BRAVE_API_KEY: "your-api-key"
+```
+
+## Features
+
+### Tool Aggregation
+
+When external tool discovery is enabled with `--external-tools`, the kubectl-ai MCP server acts as a **tool aggregator**, providing:
+
+- All kubectl-ai built-in tools (kubectl, cluster analysis, etc.)
+- Tools from external MCP servers (filesystem, web search, etc.)
+- Unified interface for all tools through a single MCP endpoint
+
+### Graceful Degradation
+
+The server handles external MCP connection failures gracefully:
+
+- If external MCP servers are unavailable, the server continues with built-in tools only
+- Individual tool failures don't affect the overall server operation
+- Clear logging for troubleshooting connection issues
+
+### Example Usage in Claude Desktop
+
+Configure Claude Desktop to use kubectl-ai as an MCP server:
+
+**Basic usage (built-in tools only):**
 ```json
 {
   "mcpServers": {
     "kubectl-ai": {
-      // Find the right path by running `which kubectl-ai`
-      "command": "/usr/local/bin/kubectl-ai",
-      // The `--kubeconfig` argument can often be omitted if your `kubectl` is already configured to point to the desired cluster
-      "args": ["--kubeconfig", "~/.kube/config", "--mcp-server"],
-      "env": {
-        "PATH": "/Users/<your-user-name>/work/google-cloud-sdk/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
-        "HOME": "/Users/<your-user-name>"
-      }
+      "command": "kubectl-ai",
+      "args": ["--mcp-server"]
     }
   }
 }
 ```
 
-### Cursor
-
-Cursor also supports MCP servers. You can [configure `kubectl-ai` MCP Server](https://docs.cursor.com/context/model-context-protocol#configuring-mcp-servers). The `mcp.json` file should look like this:
-
+**Enhanced usage (with external tools):**
 ```json
 {
   "mcpServers": {
     "kubectl-ai": {
-      // Find the right path by running `which kubectl-ai`
-      "command": "/usr/local/bin/kubectl-ai",
-      // The `--kubeconfig` argument can often be omitted if your `kubectl` is already configured to point to the desired cluster
-      "args": ["--kubeconfig", "~/.kube/config", "--mcp-server"],
-      "env": {
-        // Define specific environment variables needed
-      }
+      "command": "kubectl-ai",
+      "args": ["--mcp-server", "--external-tools"]
     }
   }
 }
 ```
 
-### VS Code
+## Available Tools
 
-[VS Code](https://code.visualstudio.com/docs/copilot/chat/mcp-servers) supports MCP servers as well. The `.vscode/settings.json` file could be configured as follows:
+### Built-in Tools
 
-```json
-    "mcp": {
-        "servers": {
-            "kubectl-ai": {
-                "type": "stdio",
-                // Find the right path by running `which kubectl-ai`
-                "command": "/usr/local/bin/kubectl-ai",
-                // The `--kubeconfig` argument can often be omitted if your `kubectl` is already configured to point to the desired cluster
-                "args": ["--kubeconfig", "~/.kube/config", "--mcp-server"],
-                "env": {
-                  // Define specific environment variables needed
-                }
-            }
-        }
-    }
+kubectl-ai provides these native tools:
+
+- `kubectl_apply`: Apply Kubernetes manifests
+- `kubectl_get`: Get Kubernetes resources
+- `kubectl_describe`: Describe Kubernetes resources
+- `kubectl_logs`: Get container logs
+- `kubectl_exec`: Execute commands in containers
+- And more...
+
+### External Tools (when --external-tools is enabled)
+
+Additional tools available depend on configured MCP servers:
+
+- **Filesystem tools**: Read/write files, list directories
+- **Web search tools**: Search the internet for information  
+- **Database tools**: Query databases
+- **API tools**: Interact with external APIs
+- **Custom tools**: Any MCP-compatible tools
+
+## Command Line Options
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--mcp-server` | `false` | Run in MCP server mode |
+| `--external-tools` | `false` | Discover and expose external MCP tools (requires --mcp-server) |
+| `--kubeconfig` | `~/.kube/config` | Path to kubeconfig file |
+
+## Architecture
+
+```
+┌─────────────────┐    ┌───────────────────┐    ┌─────────────────┐
+│   MCP Client    │───▶│ kubectl-ai Server │───▶│ External Tools  │
+│  (Claude, etc.) │    │                   │    │ (filesystem,    │
+│                 │    │ ┌───────────────┐ │    │  web search,    │
+│                 │    │ │ Built-in      │ │    │  etc.)          │
+│                 │    │ │ kubectl tools │ │    │                 │
+│                 │    │ └───────────────┘ │    │                 │
+└─────────────────┘    └───────────────────┘    └─────────────────┘
 ```
 
-## Demo
+The kubectl-ai MCP server acts as both:
+- An **MCP Server** (exposing tools to clients)
+- An **MCP Client** (consuming tools from other servers, when `--external-tools` is enabled)
 
-*(Coming Soon)*
+This creates a powerful tool aggregation pattern where kubectl-ai becomes a central hub for both Kubernetes operations and general-purpose tools.
 
 ## Troubleshooting
 
-*   `kubectl-ai` not found:
-    *   Ensure the `command` path in your MCP client's configuration (`Claude`, `Cursor`, etc.) points to the correct location of the `kubectl-ai` executable.
-    *   Verify that `kubectl-ai` is in your system's `PATH` if you are not using an absolute path.
-*   Incorrect Kubernetes Context:
-    *   `kubectl-ai` uses the same mechanisms as `kubectl` to determine the active cluster and namespace. This usually comes from your `~/.kube/config` file or `KUBECONFIG` environment variable.
-    *   Ensure your `kubectl` context is set correctly *before* the MCP client tries to use the tool.
-*   Permission Issues:
-    *   The `kubectl-ai` tool runs with the permissions of the user who started the MCP client.
-    *   Ensure this user has the necessary RBAC permissions in the Kubernetes cluster to perform the actions requested by the MCP client.
-*   Client Specific Issues:
-    *   Refer to the documentation of your specific MCP client (Claude, Cursor, etc.) for troubleshooting steps related to their MCP implementation.
-    *   Check the client's logs for any error messages related to MCP communication.
-*   Error Logs:
-    *   `kubectl-ai` logs errors. If it's launched via an MCP client, refer to the documentation of your specific MCP client to see how to access the logs directly. You can also run `kubectl-ai --mcp-server -v=X` manually (where X is a log level) to see if it reports any issues when a client tries to connect or send a command.
+### External Tools Not Available
+
+If external tools aren't appearing:
+
+1. Ensure you're using both `--mcp-server` and `--external-tools` flags
+2. Check MCP configuration file exists and is valid
+3. Verify external MCP servers are working independently
+4. Check kubectl-ai logs for connection errors
+5. Try running with external tools disabled to isolate issues
+
+### Performance Considerations
+
+- Tool discovery adds startup time (usually 2-3 seconds) when `--external-tools` is enabled
+- Each external tool call has network overhead
+- Consider running without `--external-tools` for faster startup if external tools aren't needed
+
+### Debugging
+
+Enable verbose logging to troubleshoot:
+
+```bash
+kubectl-ai --mcp-server --external-tools -v=2
+```
+
+This will show:
+- MCP server connection attempts
+- Tool discovery results
+- Tool call routing decisions

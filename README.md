@@ -174,76 +174,6 @@ You can even combine a positional argument with stdin input. The positional argu
 cat error.log | kubectl-ai "explain the error"
 ```
 
-## Configuration
-
-You can also configure `kubectl-ai` using a YAML configuration file at `~/.config/kubectl-ai/config.yaml`:
-
-```shell
-mkdir -p ~/.config/kubectl-ai/
-cat <<EOF > ~/.config/kubectl-ai/config.yaml
-model: gemini-2.5-flash-preview-04-17
-llm-provider: gemini
-custom-tools-config: ~/.config/kubectl-ai/tools.yaml
-EOF
-```
-
-Verify your configuration:
-
-```shell
-kubectl-ai --quiet model
-```
-
-<details>
-
-<summary>More configuration Options</summary>
-
-Here's a complete configuration file with all available options and their default values:
-
-```yaml
-# LLM provider configuration
-llm-provider: "gemini"               # Default LLM provider
-model: "gemini-2.5-pro-preview-06-05" # Default model
-skip-verify-ssl: false              # Skip SSL verification for LLM API calls
-
-# Tool and permission settings
-custom-tools-config: ["~/.config/kubectl-ai/tools.yaml"]  # Custom tools configuration paths
-skip-permissions: false             # Skip confirmation for resource-modifying commands
-enable-tool-use-shim: false        # Enable tool use shim for certain models
-
-# MCP configuration
-mcp-server: false                  # Run in MCP server mode
-mcp-client: false                  # Enable MCP client mode
-
-# Runtime settings
-max-iterations: 20                 # Maximum iterations for the agent
-quiet: false                       # Run in non-interactive mode
-remove-workdir: false             # Remove temporary working directory after execution
-
-# Kubernetes configuration
-kubeconfig: "~/.kube/config"      # Path to kubeconfig file
-
-# UI configuration
-user-interface: "terminal"         # UI mode: "terminal" or "html"
-ui-listen-address: "localhost:8888" # Address for HTML UI server
-
-# Prompt configuration
-prompt-template-file-path: ""      # Custom prompt template file
-extra-prompt-paths: []            # Additional prompt template paths
-
-# Debug and trace settings
-trace-path: "/tmp/kubectl-ai-trace.txt" # Path to trace file
-```
-
-</details>
-
-All these settings can be configured through either:
-
-1. Command line flags (e.g., `--model=gemini-2.5-pro`)
-2. Configuration file (`~/.config/kubectl-ai/config.yaml`)
-3. Environment variables (e.g., `GEMINI_API_KEY`)
-
-Command line flags take precedence over configuration file settings.
-
 ## Tools
 
 `kubectl-ai` leverages LLMs to suggest and execute Kubernetes operations using a set of powerful tools. It comes with built-in tools like `kubectl` and `bash`.
@@ -354,17 +284,31 @@ You can also run `kubectl ai`. `kubectl` finds any executable file in your `PATH
 
 ## MCP Server Mode
 
-`kubectl-ai` can also act as an MCP server that exposes `kubectl` as a tool for other MCP clients (like Claude, Cursor, or VS Code) to interact with your locally configured Kubernetes environment. 
+`kubectl-ai` can act as an MCP server that exposes kubectl tools to other MCP clients (like Claude, Cursor, or VS Code). The server can run in two modes:
 
-Enable MCP server mode:
+### Basic MCP Server (Built-in tools only)
+
+Expose only kubectl-ai's native Kubernetes tools:
 
 ```bash
 kubectl-ai --mcp-server
 ```
 
-This allows AI agents and tools to execute kubectl commands in your environment through the Model Context Protocol.
+### Enhanced MCP Server (With external tool discovery)
 
-📖 **For details on configuring kubectl-ai as an MCP server for use with Claude, Cursor, VS Code, and other MCP clients, see the [MCP Server Documentation](./docs/mcp-server.md).**
+Additionally discover and expose tools from other MCP servers as a unified interface:
+
+```bash
+kubectl-ai --mcp-server --external-tools
+```
+
+This creates a powerful **tool aggregation hub** where kubectl-ai acts as both:
+- **MCP Server**: Exposing kubectl tools to clients 
+- **MCP Client**: Consuming tools from other MCP servers
+
+The enhanced mode provides AI clients with access to both Kubernetes operations and general-purpose tools (filesystem, web search, databases, etc.) through a single MCP endpoint.
+
+📖 **For detailed configuration, examples, and troubleshooting, see the [MCP Server Documentation](./docs/mcp-server.md).**
 
 ## k8s-bench
 
