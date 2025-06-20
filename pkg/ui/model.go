@@ -15,17 +15,71 @@
 package ui
 
 import (
+	"fmt"
 	"io"
 	"slices"
 	"sync"
+
+	"github.com/charmbracelet/glamour"
+	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/parser"
+	"github.com/yuin/goldmark/renderer/html"
 )
 
-type Document struct {
-	mutex         sync.Mutex
-	subscriptions []*subscription
-	nextID        uint64
+type DocumentOptions struct {
+	MarkdownTerminalRenderer *glamour.TermRenderer
+	MarkdownHTMLRenderer     goldmark.Markdown
+}
 
-	blocks []Block
+func NewDocumentOptions(useMarkdown bool) (*DocumentOptions, error) {
+	options := &DocumentOptions{}
+	if useMarkdown {
+		mdRenderer, err := glamour.NewTermRenderer(
+			glamour.WithAutoStyle(),
+			glamour.WithPreservedNewLines(),
+			glamour.WithEmoji(),
+		)
+		if err != nil {
+			return nil, fmt.Errorf("initializing the markdown renderer: %w", err)
+		}
+		options.MarkdownTerminalRenderer = mdRenderer
+
+		// Initialize Goldmark for HTML rendering
+		md := goldmark.New(
+			// goldmark.WithExtensions(
+			// 	extension.GFM,
+			// 	extension.DefinitionList,
+			// ),
+			goldmark.WithParserOptions(
+				parser.WithAutoHeadingID(),
+			),
+			goldmark.WithRendererOptions(
+				html.WithHardWraps(),
+				html.WithXHTML(),
+			),
+		)
+		options.MarkdownHTMLRenderer = md
+	}
+	return options, nil
+}
+
+type Document struct {
+	options DocumentOptions
+
+	mutex              sync.Mutex
+	subscriptions      []*subscription
+	nextSubscriptionID uint64
+
+	blocks      []Block
+	nextBlockID uint64
+}
+
+func (d *Document) MarkdownTerminalRenderer() *glamour.TermRenderer {
+	return d.options.MarkdownTerminalRenderer
+}
+
+func (d *Document) MarkdownHTMLRenderer() goldmark.Markdown {
+	return d.options.MarkdownHTMLRenderer
 }
 
 func (d *Document) Blocks() []Block {
@@ -50,16 +104,38 @@ func (d *Document) IndexOf(find Block) int {
 	return -1
 }
 
-func NewDocument() *Document {
+func NewDocument(options *DocumentOptions) *Document {
 	return &Document{
-		nextID: 1,
+		nextSubscriptionID: 1,
+		nextBlockID:        1,
+		options:            *options,
 	}
 }
 
 type Block interface {
-	attached(doc *Document)
+	attached(doc *Document, id uint64)
 
 	Document() *Document
+
+	ID() uint64
+}
+
+type blockBase struct {
+	doc *Document
+	id  uint64
+}
+
+func (b *blockBase) attached(doc *Document, id uint64) {
+	b.doc = doc
+	b.id = id
+}
+
+func (b *blockBase) ID() uint64 {
+	return b.id
+}
+
+func (b *blockBase) Document() *Document {
+	return b.doc
 }
 
 type Subscriber interface {
@@ -97,8 +173,8 @@ func (d *Document) AddSubscription(subscriber Subscriber) io.Closer {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
 
-	id := d.nextID
-	d.nextID++
+	id := d.nextSubscriptionID
+	d.nextSubscriptionID++
 
 	s := &subscription{
 		doc:        d,
@@ -141,7 +217,10 @@ func (d *Document) AddBlock(block Block) {
 	newBlocks = append(newBlocks, block)
 	d.blocks = newBlocks
 
-	block.attached(d)
+	id := d.nextBlockID
+	d.nextBlockID++
+
+	block.attached(d, id)
 	d.mutex.Unlock()
 
 	d.sendDocumentChanged(block)
