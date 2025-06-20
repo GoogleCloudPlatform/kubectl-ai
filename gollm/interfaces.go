@@ -57,6 +57,9 @@ type Chat interface {
 
 	// IsRetryableError returns true if the error is retryable.
 	IsRetryableError(error) bool
+
+	// LoadHistory loads a previous conversation history.
+	LoadHistory(history []*RecordMessage) error
 }
 
 // CompletionRequest is a request to generate a completion for a given prompt.

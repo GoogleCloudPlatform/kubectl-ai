@@ -340,3 +340,7 @@ func (rc *retryChat[C]) SetFunctionDefinitions(functionDefinitions []*FunctionDe
 func (rc *retryChat[C]) IsRetryableError(err error) bool {
 	return rc.underlying.IsRetryableError(err)
 }
+
+func (rc *retryChat[C]) LoadHistory(history []*RecordMessage) error {
+	return rc.underlying.LoadHistory(history)
+}

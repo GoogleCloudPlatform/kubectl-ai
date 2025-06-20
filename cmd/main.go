@@ -29,11 +29,13 @@ import (
 	"slices"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/GoogleCloudPlatform/kubectl-ai/gollm"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/agent"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/journal"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/mcp"
+	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/store"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/tools"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/ui"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/ui/html"
@@ -103,6 +105,7 @@ type Options struct {
 	TracePath              string   `json:"tracePath,omitempty"`
 	RemoveWorkDir          bool     `json:"removeWorkDir,omitempty"`
 	ToolConfigPaths        []string `json:"toolConfigPaths,omitempty"`
+	DataFile               string   `json:"dataFile,omitempty"`
 
 	// UserInterface is the type of user interface to use.
 	UserInterface UserInterface `json:"userInterface,omitempty"`
@@ -151,12 +154,12 @@ var defaultConfigPaths = []string{
 
 func (o *Options) InitDefaults() {
 	o.ProviderID = "gemini"
-	o.ModelID = "gemini-2.5-pro-preview-06-05"
+	o.ModelID = "gemini-2.5-pro"
 	// by default, confirm before executing kubectl commands that modify resources in the cluster.
 	o.SkipPermissions = false
 	o.MCPServer = false
 	o.MCPClient = false
-	// We now default to our strongest model (gemini-2.5-pro-exp-03-25) which supports tool use natively.
+	// We now default to our strongest model which supports tool use natively.
 	// so we don't need shim.
 	o.EnableToolUseShim = false
 	o.Quiet = false
@@ -168,6 +171,7 @@ func (o *Options) InitDefaults() {
 	o.TracePath = filepath.Join(os.TempDir(), "kubectl-ai-trace.txt")
 	o.RemoveWorkDir = false
 	o.ToolConfigPaths = defaultToolConfigPaths
+	o.DataFile = "/tmp/kubectl-ai-data"
 	// Default to terminal UI
 	o.UserInterface = UserInterfaceTerminal
 	// Default UI listen address for HTML UI
@@ -286,16 +290,16 @@ func run(ctx context.Context) error {
 func (opt *Options) bindCLIFlags(f *pflag.FlagSet) error {
 	f.IntVar(&opt.MaxIterations, "max-iterations", opt.MaxIterations, "maximum number of iterations agent will try before giving up")
 	f.StringVar(&opt.KubeConfigPath, "kubeconfig", opt.KubeConfigPath, "path to kubeconfig file")
-	f.StringVar(&opt.PromptTemplateFilePath, "prompt-template-file-path", opt.PromptTemplateFilePath, "path to custom prompt template file")
+	f.StringVar(&opt.PromptTemplateFilePath, "prompt-template-file", opt.PromptTemplateFilePath, "path to custom prompt template file")
 	f.StringArrayVar(&opt.ExtraPromptPaths, "extra-prompt-paths", opt.ExtraPromptPaths, "extra prompt template paths")
 	f.StringVar(&opt.TracePath, "trace-path", opt.TracePath, "path to the trace file")
-	f.BoolVar(&opt.RemoveWorkDir, "remove-workdir", opt.RemoveWorkDir, "remove the temporary working directory after execution")
+	f.BoolVar(&opt.RemoveWorkDir, "remove-work-dir", opt.RemoveWorkDir, "remove the temporary working directory after execution")
 
 	f.StringVar(&opt.ProviderID, "llm-provider", opt.ProviderID, "language model provider")
-	f.StringVar(&opt.ModelID, "model", opt.ModelID, "language model e.g. gemini-2.0-flash-thinking-exp-01-21, gemini-2.0-flash")
+	f.StringVar(&opt.ModelID, "model", opt.ModelID, "language model e.g. gemini-1.5-flash-latest, gemini-1.5-pro-latest")
 	f.BoolVar(&opt.SkipPermissions, "skip-permissions", opt.SkipPermissions, "(dangerous) skip asking for confirmation before executing kubectl commands that modify resources")
 	f.BoolVar(&opt.MCPServer, "mcp-server", opt.MCPServer, "run in MCP server mode")
-	f.StringArrayVar(&opt.ToolConfigPaths, "custom-tools-config", opt.ToolConfigPaths, "path to custom tools config file or directory")
+	f.StringSliceVar(&opt.ToolConfigPaths, "custom-tools-config", opt.ToolConfigPaths, "path to custom tools config file or directory")
 	f.BoolVar(&opt.MCPClient, "mcp-client", opt.MCPClient, "enable MCP client mode to connect to external MCP servers")
 	f.BoolVar(&opt.EnableToolUseShim, "enable-tool-use-shim", opt.EnableToolUseShim, "enable tool use shim")
 	f.BoolVar(&opt.Quiet, "quiet", opt.Quiet, "run in non-interactive mode, requires a query to be provided as a positional argument")
@@ -303,6 +307,8 @@ func (opt *Options) bindCLIFlags(f *pflag.FlagSet) error {
 	f.Var(&opt.UserInterface, "user-interface", "user interface mode to use. Supported values: terminal, html.")
 	f.StringVar(&opt.UIListenAddress, "ui-listen-address", opt.UIListenAddress, "address to listen for the HTML UI.")
 	f.BoolVar(&opt.SkipVerifySSL, "skip-verify-ssl", opt.SkipVerifySSL, "skip verifying the SSL certificate of the LLM provider")
+
+	f.StringVar(&opt.DataFile, "data-file", opt.DataFile, "Path to a file to record the conversation history.")
 
 	return nil
 }
@@ -416,6 +422,14 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 		return fmt.Errorf("user-interface mode %q is not known", opt.UserInterface)
 	}
 
+	var dataStore *store.DataStore
+	if opt.DataFile != "" {
+		dataStore, err = store.New(opt.DataFile)
+		if err != nil {
+			return fmt.Errorf("creating data store: %w", err)
+		}
+	}
+
 	conversation := &agent.Conversation{
 		Model:              opt.ModelID,
 		Kubeconfig:         opt.KubeConfigPath,
@@ -429,6 +443,7 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 		SkipPermissions:    opt.SkipPermissions,
 		EnableToolUseShim:  opt.EnableToolUseShim,
 		MCPClientEnabled:   opt.MCPClient,
+		DataStore:          dataStore,
 	}
 
 	err = conversation.Init(ctx, doc)
@@ -444,6 +459,7 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 		conversation: conversation,
 		LLM:          llmClient,
 		mcpManager:   mcpManager,
+		dataStore:    dataStore,
 	}
 
 	// Prepare MCP server status blocks only when MCP client is enabled
@@ -518,68 +534,62 @@ type session struct {
 	availableModels []string
 	LLM             gollm.Client
 	mcpManager      *mcp.Manager
+	dataStore       *store.DataStore
 }
 
 // repl is a read-eval-print loop for the chat session.
 func (s *session) repl(ctx context.Context, initialQuery string, initialBlocks []ui.Block) error {
-	for _, block := range initialBlocks {
-		s.doc.AddBlock(block)
+	s.doc = ui.NewDocument()
+
+	// The UI must be created before we add any blocks to the document,
+	// so that it can receive the change notifications.
+	terminalUI, err := ui.NewTerminalUI(s.doc, s.conversation.Recorder, false)
+	if err != nil {
+		return fmt.Errorf("creating terminal ui: %w", err)
 	}
-	query := initialQuery
-	if query == "" {
-		s.doc.AddBlock(ui.NewAgentTextBlock().WithText("Hey there, what can I help you with today?"))
+	s.ui = terminalUI
+	defer terminalUI.Close()
+
+	if err := s.conversation.Init(ctx, s.doc); err != nil {
+		return fmt.Errorf("starting conversation: %w", err)
 	}
+	defer s.conversation.Close()
+
+	if initialQuery != "" {
+		s.doc.AddBlock((&ui.AgentTextBlock{}).WithText(initialQuery))
+		if err := s.answerQuery(ctx, initialQuery); err != nil {
+			s.doc.AddBlock((&ui.ErrorBlock{}).SetText(err.Error()))
+		}
+	} else {
+		s.doc.AddBlock((&ui.AgentTextBlock{}).WithText("Hey there, what can I help you with today?"))
+	}
+
 	for {
-		if query == "" {
-			input := ui.NewInputTextBlock()
-			input.SetEditable(true)
-			s.doc.AddBlock(input)
-
-			userInput, err := input.Observable().Wait()
-			if err != nil {
-				if err == io.EOF {
-					// Use hit control-D, or was piping and we reached the end of stdin.
-					// Not a "big" problem
-					return nil
-				}
-				return fmt.Errorf("reading input: %w", err)
+		inputBlock := ui.NewInputTextBlock()
+		s.doc.AddBlock(inputBlock)
+		query, err := inputBlock.Observable().Wait()
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil // Ctrl+D pressed, exit gracefully
 			}
-			query = strings.TrimSpace(userInput)
+			return fmt.Errorf("reading input: %w", err)
 		}
 
-		switch {
-		case query == "":
-			continue
-		case query == "reset":
-			err := s.conversation.Init(ctx, s.doc)
-			if err != nil {
-				return err
-			}
-		case query == "clear":
-			s.ui.ClearScreen()
-		case query == "exit" || query == "quit":
-			// s.ui.RenderOutput(ctx, "Alright...bye.\n")
-			return nil
-		default:
-			if err := s.answerQuery(ctx, query); err != nil {
-				errorBlock := &ui.ErrorBlock{}
-				errorBlock.SetText(fmt.Sprintf("Error: %v\n", err))
-				s.doc.AddBlock(errorBlock)
-			}
+		if err := s.answerQuery(ctx, query); err != nil {
+			s.doc.AddBlock((&ui.ErrorBlock{}).SetText(err.Error()))
 		}
-		// Reset query to empty string so that we prompt for input again
-		query = ""
 	}
 }
 
 func (s *session) listModels(ctx context.Context) ([]string, error) {
-	if s.availableModels == nil {
-		modelNames, err := s.LLM.ListModels(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("listing models: %w", err)
-		}
-		s.availableModels = modelNames
+	if s.availableModels != nil {
+		return s.availableModels, nil
 	}
+	modelNames, err := s.LLM.ListModels(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("listing models: %w", err)
+	}
+	s.availableModels = modelNames
 	return s.availableModels, nil
 }
 
@@ -613,6 +623,77 @@ func (s *session) answerQuery(ctx context.Context, query string) error {
 		infoBlock.AppendText("\n  Available tools:\n")
 		infoBlock.AppendText(strings.Join(s.conversation.Tools.Names(), "\n"))
 		s.doc.AddBlock(infoBlock)
+
+	case query == "reset":
+		if s.dataStore != nil {
+			if err := s.dataStore.Clear(); err != nil {
+				return fmt.Errorf("clearing data store: %w", err)
+			}
+		}
+		err := s.conversation.Init(ctx, s.doc)
+		if err != nil {
+			return err
+		}
+	case query == "clear":
+		s.ui.ClearScreen()
+
+	case query == "compact":
+		if s.dataStore == nil {
+			return fmt.Errorf("data store not enabled, compaction is not possible")
+		}
+		history := s.dataStore.History()
+		if len(history) == 0 {
+			s.doc.AddBlock((&ui.AgentTextBlock{}).WithText("History is empty, nothing to compact."))
+			return nil
+		}
+
+		var historyBuilder strings.Builder
+		for _, record := range history {
+			for _, content := range record.Content {
+				historyBuilder.WriteString(fmt.Sprintf("%s: %s\n", record.Role, content))
+			}
+		}
+
+		prompt := fmt.Sprintf("Summarize the following conversation, keeping information that is relevant to future conversation:\n\n%s", historyBuilder.String())
+
+		req := &gollm.CompletionRequest{
+			Model:  s.model,
+			Prompt: prompt,
+		}
+
+		resp, err := s.LLM.GenerateCompletion(ctx, req)
+		if err != nil {
+			return fmt.Errorf("failed to summarize history: %w", err)
+		}
+		summaryContent := resp.Response()
+		if summaryContent == "" {
+			return fmt.Errorf("LLM returned no summary")
+		}
+
+		newHistory := []*gollm.RecordMessage{
+			{
+				Role:      "user",
+				Content:   []any{"The following is a summary of our conversation so far."},
+				Timestamp: time.Now(),
+			},
+			{
+				Role:      "model",
+				Content:   []any{summaryContent},
+				Timestamp: time.Now(),
+			},
+		}
+
+		if err := s.dataStore.SetHistory(newHistory); err != nil {
+			return fmt.Errorf("failed to set new history: %w", err)
+		}
+
+		// Reload conversation history
+		if err := s.conversation.Init(ctx, s.doc); err != nil {
+			return fmt.Errorf("re-initializing conversation: %w", err)
+		}
+
+		s.doc.AddBlock((&ui.AgentTextBlock{}).WithText("History compacted successfully."))
+		return nil
 
 	default:
 		return s.conversation.RunOneRound(ctx, query)

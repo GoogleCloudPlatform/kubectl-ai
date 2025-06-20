@@ -372,10 +372,12 @@ func (cs *grokChatSession) SendStreaming(ctx context.Context, contents ...any) (
 
 // IsRetryableError determines if an error from the Grok API should be retried.
 func (cs *grokChatSession) IsRetryableError(err error) bool {
-	if err == nil {
-		return false
-	}
 	return DefaultIsRetryableError(err)
+}
+
+// LoadHistory implements Chat.
+func (cs *grokChatSession) LoadHistory(history []*RecordMessage) error {
+	return fmt.Errorf("LoadHistory not yet implemented for grok")
 }
 
 // --- Helper structs for ChatResponse interface ---

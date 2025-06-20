@@ -194,8 +194,12 @@ func (c *OllamaChat) Send(ctx context.Context, contents ...any) (ChatResponse, e
 }
 
 func (c *OllamaChat) IsRetryableError(err error) bool {
-	// TODO(droot): Implement this
 	return false
+}
+
+// LoadHistory implements Chat.
+func (c *OllamaChat) LoadHistory(history []*RecordMessage) error {
+	return fmt.Errorf("LoadHistory not yet implemented for ollama")
 }
 
 func (c *OllamaChat) SendStreaming(ctx context.Context, contents ...any) (ChatResponseIterator, error) {
