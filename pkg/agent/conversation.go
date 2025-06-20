@@ -295,6 +295,7 @@ func (a *Conversation) RunOneRound(ctx context.Context, query string) error {
 				optionsBlock.AddOption("yes", "Yes", "yes", "y")
 				optionsBlock.AddOption("yes_and_dont_ask_me_again", "Yes, and don't ask me again")
 				optionsBlock.AddOption("no", "No", "no", "n")
+				optionsBlock.SetEditable(true)
 				a.doc.AddBlock(optionsBlock)
 
 				selectedChoice, err := optionsBlock.Selection().Wait()
@@ -304,6 +305,8 @@ func (a *Conversation) RunOneRound(ctx context.Context, query string) error {
 					}
 					return fmt.Errorf("reading input: %w", err)
 				}
+				optionsBlock.SetEditable(false)
+		
 
 				// Normalize the input
 				switch selectedChoice {

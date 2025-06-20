@@ -37,6 +37,7 @@ import (
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/tools"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/ui"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/ui/html"
+	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/ui/tui"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
@@ -118,12 +119,13 @@ type UserInterface string
 const (
 	UserInterfaceTerminal UserInterface = "terminal"
 	UserInterfaceHTML     UserInterface = "html"
+	UserInterfaceTUI      UserInterface = "tui"
 )
 
 // Implement pflag.Value for UserInterface
 func (u *UserInterface) Set(s string) error {
 	switch s {
-	case "terminal", "html":
+	case "terminal", "html", "tui":
 		*u = UserInterface(s)
 		return nil
 	default:
@@ -300,7 +302,7 @@ func (opt *Options) bindCLIFlags(f *pflag.FlagSet) error {
 	f.BoolVar(&opt.EnableToolUseShim, "enable-tool-use-shim", opt.EnableToolUseShim, "enable tool use shim")
 	f.BoolVar(&opt.Quiet, "quiet", opt.Quiet, "run in non-interactive mode, requires a query to be provided as a positional argument")
 
-	f.Var(&opt.UserInterface, "user-interface", "user interface mode to use. Supported values: terminal, html.")
+	f.Var(&opt.UserInterface, "user-interface", "user interface mode to use. Supported values: terminal, html, tui.")
 	f.StringVar(&opt.UIListenAddress, "ui-listen-address", opt.UIListenAddress, "address to listen for the HTML UI.")
 	f.BoolVar(&opt.SkipVerifySSL, "skip-verify-ssl", opt.SkipVerifySSL, "skip verifying the SSL certificate of the LLM provider")
 
@@ -383,7 +385,7 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 
 	useMarkdown := false
 	switch opt.UserInterface {
-	case UserInterfaceHTML:
+	case UserInterfaceHTML, UserInterfaceTUI:
 		useMarkdown = true
 	}
 
@@ -399,28 +401,35 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 		// since stdin is already consumed, we use TTY for taking input from user
 		useTTYForInput := hasInputData
 
-		var u ui.UI
-		u, err = ui.NewTerminalUI(doc, recorder, useTTYForInput)
+		u, err := ui.NewTerminalUI(doc, recorder, useTTYForInput)
 		if err != nil {
 			return err
 		}
 		userInterface = u
 
 	case UserInterfaceHTML:
-		var u ui.UI
-		u, err = html.NewHTMLUserInterface(doc, opt.UIListenAddress, recorder)
+		htmlUI, err := html.NewHTMLUserInterface(doc, opt.UIListenAddress, recorder)
 		if err != nil {
 			return err
 		}
-		// Only run server if the UI is actually an HTML UI
-		if htmlUI, ok := u.(*html.HTMLUserInterface); ok {
-			go func() {
-				if err := htmlUI.RunServer(ctx); err != nil {
-					klog.Fatalf("error running http server: %v", err)
-				}
-			}()
+		go func() {
+			if err := htmlUI.RunServer(ctx); err != nil {
+				klog.Fatalf("error running http server: %v", err)
+			}
+		}()
+		userInterface = htmlUI
+
+	case UserInterfaceTUI:
+		tui, err := tui.NewBubbleTeaUserInterface(doc, recorder)
+		if err != nil {
+			return err
 		}
-		userInterface = u
+		ctx, cancel := context.WithCancel(ctx)
+		if err := tui.Start(ctx, cancel); err != nil {
+			return err
+		}
+
+		userInterface = tui
 
 	default:
 		return fmt.Errorf("user-interface mode %q is not known", opt.UserInterface)
