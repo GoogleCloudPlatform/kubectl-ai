@@ -15,7 +15,11 @@
 package ui
 
 import (
+	"bytes"
+	"context"
 	"html/template"
+
+	"k8s.io/klog/v2"
 )
 
 // AgentTextBlock is used to render agent textual responses
@@ -30,6 +34,10 @@ type AgentTextBlock struct {
 
 	// streaming is true if we are still streaming results in
 	streaming bool
+
+	// html is populated with the rendered HTML
+	// This is populated lazily, only when HTML() is called.
+	html *template.HTML
 }
 
 func NewAgentTextBlock() *AgentTextBlock {
@@ -46,6 +54,31 @@ func (b *AgentTextBlock) Document() *Document {
 
 func (b *AgentTextBlock) Text() string {
 	return b.text
+}
+
+func (b *AgentTextBlock) HTML() template.HTML {
+	log := klog.FromContext(context.Background())
+
+	cached := b.html
+	if cached != nil {
+		return *cached
+	}
+	text := b.text
+	if b.doc != nil {
+		htmlRenderer := b.doc.MarkdownHTMLRenderer()
+		if htmlRenderer != nil {
+			var buf bytes.Buffer
+			if err := htmlRenderer.Convert([]byte(text), &buf); err != nil {
+				log.Error(err, "Error rendering markdown to HTML")
+			} else {
+				v := template.HTML(buf.String())
+				b.html = &v
+				return v
+			}
+		}
+	}
+
+	return template.HTML(template.HTMLEscapeString(b.text))
 }
 
 func (b *AgentTextBlock) Streaming() bool {
@@ -74,6 +107,7 @@ func (b *AgentTextBlock) WithText(agentText string) *AgentTextBlock {
 
 func (b *AgentTextBlock) AppendText(text string) {
 	b.text = b.text + text
+	b.html = nil
 	b.doc.blockChanged(b)
 }
 
