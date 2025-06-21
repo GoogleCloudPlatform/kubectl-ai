@@ -291,6 +291,8 @@ func convertMCPMapSchema(key string, schemaMap map[string]interface{}) (*gollm.S
 		gollmSchema.Type = gollm.TypeString
 	case "number":
 		gollmSchema.Type = gollm.TypeNumber
+	case "integer":
+		gollmSchema.Type = gollm.TypeNumber
 	case "boolean":
 		gollmSchema.Type = gollm.TypeBoolean
 	case "array":
