@@ -89,9 +89,11 @@ type Options struct {
 	EnableToolUseShim bool `json:"enableToolUseShim,omitempty"`
 	// Quiet flag indicates if the agent should run in non-interactive mode.
 	// It requires a query to be provided as a positional argument.
-	Quiet         bool `json:"quiet,omitempty"`
-	MCPServer     bool `json:"mcpServer,omitempty"`
-	MCPClient     bool `json:"mcpClient,omitempty"`
+	Quiet     bool `json:"quiet,omitempty"`
+	MCPServer bool `json:"mcpServer,omitempty"`
+	MCPClient bool `json:"mcpClient,omitempty"`
+	// ExternalTools enables discovery and exposure of external MCP tools (only works with --mcp-server)
+	ExternalTools bool `json:"externalTools,omitempty"`
 	MaxIterations int  `json:"maxIterations,omitempty"`
 
 	// KubeConfigPath is the path to the kubeconfig file.
@@ -156,6 +158,8 @@ func (o *Options) InitDefaults() {
 	o.SkipPermissions = false
 	o.MCPServer = false
 	o.MCPClient = false
+	// by default, external tools are disabled (only works with --mcp-server)
+	o.ExternalTools = false
 	// We now default to our strongest model (gemini-2.5-pro-exp-03-25) which supports tool use natively.
 	// so we don't need shim.
 	o.EnableToolUseShim = false
@@ -295,6 +299,7 @@ func (opt *Options) bindCLIFlags(f *pflag.FlagSet) error {
 	f.StringVar(&opt.ModelID, "model", opt.ModelID, "language model e.g. gemini-2.0-flash-thinking-exp-01-21, gemini-2.0-flash")
 	f.BoolVar(&opt.SkipPermissions, "skip-permissions", opt.SkipPermissions, "(dangerous) skip asking for confirmation before executing kubectl commands that modify resources")
 	f.BoolVar(&opt.MCPServer, "mcp-server", opt.MCPServer, "run in MCP server mode")
+	f.BoolVar(&opt.ExternalTools, "external-tools", opt.ExternalTools, "in MCP server mode, discover and expose external MCP tools")
 	f.StringArrayVar(&opt.ToolConfigPaths, "custom-tools-config", opt.ToolConfigPaths, "path to custom tools config file or directory")
 	f.BoolVar(&opt.MCPClient, "mcp-client", opt.MCPClient, "enable MCP client mode to connect to external MCP servers")
 	f.BoolVar(&opt.EnableToolUseShim, "enable-tool-use-shim", opt.EnableToolUseShim, "enable tool use shim")
@@ -309,6 +314,11 @@ func (opt *Options) bindCLIFlags(f *pflag.FlagSet) error {
 
 func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 	var err error // Declare err once for the whole function
+
+	// Validate flag combinations
+	if opt.ExternalTools && !opt.MCPServer {
+		return fmt.Errorf("--external-tools can only be used with --mcp-server")
+	}
 
 	// resolve kubeconfig path with priority: flag/env > KUBECONFIG > default path
 	if err = resolveKubeConfigPath(&opt); err != nil {
@@ -735,7 +745,7 @@ func startMCPServer(ctx context.Context, opt Options) error {
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
 		return fmt.Errorf("error creating work directory: %w", err)
 	}
-	mcpServer, err := newKubectlMCPServer(ctx, opt.KubeConfigPath, tools.Default(), workDir)
+	mcpServer, err := newKubectlMCPServer(ctx, opt.KubeConfigPath, tools.Default(), workDir, opt.ExternalTools)
 	if err != nil {
 		return fmt.Errorf("creating mcp server: %w", err)
 	}

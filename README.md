@@ -213,6 +213,7 @@ enable-tool-use-shim: false        # Enable tool use shim for certain models
 # MCP configuration
 mcp-server: false                  # Run in MCP server mode
 mcp-client: false                  # Enable MCP client mode
+external-tools: false             # Discover external MCP tools (requires mcp-server)
 
 # Runtime settings
 max-iterations: 20                 # Maximum iterations for the agent
@@ -233,11 +234,9 @@ extra-prompt-paths: []            # Additional prompt template paths
 # Debug and trace settings
 trace-path: "/tmp/kubectl-ai-trace.txt" # Path to trace file
 ```
-
 </details>
 
 All these settings can be configured through either:
-
 1. Command line flags (e.g., `--model=gemini-2.5-pro`)
 2. Configuration file (`~/.config/kubectl-ai/config.yaml`)
 3. Environment variables (e.g., `GEMINI_API_KEY`)
@@ -354,17 +353,31 @@ You can also run `kubectl ai`. `kubectl` finds any executable file in your `PATH
 
 ## MCP Server Mode
 
-`kubectl-ai` can also act as an MCP server that exposes `kubectl` as a tool for other MCP clients (like Claude, Cursor, or VS Code) to interact with your locally configured Kubernetes environment. 
+`kubectl-ai` can act as an MCP server that exposes kubectl tools to other MCP clients (like Claude, Cursor, or VS Code). The server can run in two modes:
 
-Enable MCP server mode:
+### Basic MCP Server (Built-in tools only)
+
+Expose only kubectl-ai's native Kubernetes tools:
 
 ```bash
 kubectl-ai --mcp-server
 ```
 
-This allows AI agents and tools to execute kubectl commands in your environment through the Model Context Protocol.
+### Enhanced MCP Server (With external tool discovery)
 
-📖 **For details on configuring kubectl-ai as an MCP server for use with Claude, Cursor, VS Code, and other MCP clients, see the [MCP Server Documentation](./docs/mcp.md).**
+Additionally discover and expose tools from other MCP servers as a unified interface:
+
+```bash
+kubectl-ai --mcp-server --external-tools
+```
+
+This creates a powerful **tool aggregation hub** where kubectl-ai acts as both:
+- **MCP Server**: Exposing kubectl tools to clients 
+- **MCP Client**: Consuming tools from other MCP servers
+
+The enhanced mode provides AI clients with access to both Kubernetes operations and general-purpose tools (filesystem, web search, databases, etc.) through a single MCP endpoint.
+
+📖 **For detailed configuration, examples, and troubleshooting, see the [MCP Server Documentation](./docs/mcp-server.md).**
 
 ## k8s-bench
 

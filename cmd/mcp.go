@@ -18,8 +18,10 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/GoogleCloudPlatform/kubectl-ai/gollm"
+	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/mcp"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/tools"
-	"github.com/mark3labs/mcp-go/mcp"
+	mcpgo "github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"k8s.io/klog/v2"
 )
@@ -29,9 +31,10 @@ type kubectlMCPServer struct {
 	server        *server.MCPServer
 	tools         tools.Tools
 	workDir       string
+	mcpManager    *mcp.Manager // Add MCP manager for external tool calls
 }
 
-func newKubectlMCPServer(ctx context.Context, kubectlConfig string, tools tools.Tools, workDir string) (*kubectlMCPServer, error) {
+func newKubectlMCPServer(ctx context.Context, kubectlConfig string, tools tools.Tools, workDir string, exposeExternalTools bool) (*kubectlMCPServer, error) {
 	s := &kubectlMCPServer{
 		kubectlConfig: kubectlConfig,
 		workDir:       workDir,
@@ -42,95 +45,281 @@ func newKubectlMCPServer(ctx context.Context, kubectlConfig string, tools tools.
 		),
 		tools: tools,
 	}
+
+	// Add built-in tools
 	for _, tool := range s.tools.AllTools() {
 		toolDefn := tool.FunctionDefinition()
 		toolInputSchema, err := toolDefn.Parameters.ToRawSchema()
 		if err != nil {
 			return nil, fmt.Errorf("converting tool schema to json.RawMessage: %w", err)
 		}
-		s.server.AddTool(mcp.NewToolWithRawSchema(
+		s.server.AddTool(mcpgo.NewToolWithRawSchema(
 			toolDefn.Name,
 			toolDefn.Description,
 			toolInputSchema,
 		), s.handleToolCall)
 	}
+
+	// Only discover external MCP tools if explicitly enabled
+	if exposeExternalTools {
+		// Initialize MCP manager to get client tools
+		manager, err := mcp.InitializeManager()
+		if err != nil {
+			klog.Warningf("Failed to initialize MCP manager: %v", err)
+			return s, nil // Return server with just built-in tools
+		}
+
+		// Store the manager for later use in tool calls
+		s.mcpManager = manager
+
+		// Connect to MCP servers and get their tools
+		if err := manager.DiscoverAndConnectServers(ctx); err != nil {
+			klog.Warningf("Failed to connect to MCP servers: %v", err)
+			return s, nil // Return server with just built-in tools
+		}
+
+		// Get tools from all connected MCP servers
+		serverTools, err := manager.ListAvailableTools(ctx)
+		if err != nil {
+			klog.Warningf("Failed to list tools from MCP servers: %v", err)
+			return s, nil // Return server with just built-in tools
+		}
+
+		// Add tools from MCP servers
+		for _, tools := range serverTools {
+			for _, tool := range tools {
+				// Create a schema for the tool
+				schema := &gollm.FunctionDefinition{
+					Name:        tool.Name,
+					Description: tool.Description,
+					Parameters: &gollm.Schema{
+						Type: gollm.TypeObject,
+						Properties: map[string]*gollm.Schema{
+							"args": {
+								Type:        gollm.TypeObject,
+								Description: "Tool arguments",
+							},
+						},
+					},
+				}
+
+				toolInputSchema, err := schema.Parameters.ToRawSchema()
+				if err != nil {
+					klog.Warningf("Failed to convert tool schema for %s: %v", tool.Name, err)
+					continue
+				}
+
+				// Add the tool to the server
+				s.server.AddTool(mcpgo.NewToolWithRawSchema(
+					tool.Name,
+					tool.Description,
+					toolInputSchema,
+				), s.handleToolCall)
+			}
+		}
+
+		klog.Infof("MCP server initialized with external tool discovery enabled")
+	} else {
+		klog.Infof("MCP server initialized with external tool discovery disabled")
+	}
+
 	return s, nil
 }
+
 func (s *kubectlMCPServer) Serve(ctx context.Context) error {
+	// Ensure proper cleanup of MCP manager on shutdown
+	if s.mcpManager != nil {
+		defer func() {
+			if err := s.mcpManager.Close(); err != nil {
+				klog.Warningf("Failed to close MCP manager: %v", err)
+			}
+		}()
+	}
+
+	klog.Info("Starting kubectl-ai MCP server")
 	return server.ServeStdio(s.server)
 }
 
-func (s *kubectlMCPServer) handleToolCall(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func (s *kubectlMCPServer) handleToolCall(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+	toolName := request.Params.Name
 
-	log := klog.FromContext(ctx)
-
-	name := request.Params.Name
-
-	// In v0.31.0, Arguments is an interface{} that needs type assertion to a map
-	argMap, ok := request.Params.Arguments.(map[string]interface{})
-	if !ok {
-		return mcp.NewToolResultError("Invalid arguments format: expected a map"), nil
+	// First, try to find the tool in our built-in tools collection
+	builtinTool := s.tools.Lookup(toolName)
+	if builtinTool != nil {
+		return s.handleBuiltinToolCall(ctx, request, builtinTool)
 	}
 
-	// Safely extract command parameter with type checking
-	commandVal, ok := argMap["command"]
-	if !ok {
-		return mcp.NewToolResultError("Missing required parameter: command"), nil
-	}
-	command, ok := commandVal.(string)
-	if !ok {
-		return mcp.NewToolResultError("Parameter 'command' must be a string"), nil
+	// If not a built-in tool, try to handle as external MCP tool
+	if s.mcpManager != nil {
+		return s.handleExternalMCPToolCall(ctx, request)
 	}
 
-	// Safely extract modifies_resource parameter (optional)
-	var modifiesResource string
-	if modVal, ok := argMap["modifies_resource"]; ok {
-		if modStr, ok := modVal.(string); ok {
-			modifiesResource = modStr
-		}
-	}
+	// Tool not found
+	return &mcpgo.CallToolResult{
+		IsError: true,
+		Content: []mcpgo.Content{
+			mcpgo.TextContent{
+				Type: "text",
+				Text: fmt.Sprintf("tool %q not found", toolName),
+			},
+		},
+	}, nil
+}
 
-	log.Info("Received tool call", "tool", name, "command", command, "modifies_resource", modifiesResource)
-
+// handleBuiltinToolCall handles calls to built-in kubectl-ai tools
+func (s *kubectlMCPServer) handleBuiltinToolCall(ctx context.Context, request mcpgo.CallToolRequest, tool tools.Tool) (*mcpgo.CallToolResult, error) {
+	// Set up context for built-in tools
 	ctx = context.WithValue(ctx, tools.KubeconfigKey, s.kubectlConfig)
 	ctx = context.WithValue(ctx, tools.WorkDirKey, s.workDir)
 
-	tool := tools.Lookup(name)
-	if tool == nil {
-		// Use utility method for error creation in v0.31.0
-		return mcp.NewToolResultError(fmt.Sprintf("Tool %s not found", name)), nil
-	}
-	// Prepare arguments map with command and optional modifies_resource
-	args := map[string]any{
-		"command": command,
+	// Convert arguments to the expected type
+	args, ok := request.Params.Arguments.(map[string]any)
+	if !ok {
+		return &mcpgo.CallToolResult{
+			IsError: true,
+			Content: []mcpgo.Content{
+				mcpgo.TextContent{
+					Type: "text",
+					Text: fmt.Sprintf("invalid arguments type: expected map[string]any, got %T", request.Params.Arguments),
+				},
+			},
+		}, nil
 	}
 
-	// Add modifies_resource if available
-	if modifiesResource != "" {
-		args["modifies_resource"] = modifiesResource
-	}
-
-	output, err := tool.Run(ctx, args)
+	// Execute the built-in tool
+	result, err := tool.Run(ctx, args)
 	if err != nil {
-		log.Error(err, "Error running tool call")
-		// Use the NewToolResultError helper method in v0.31.0
-		return mcp.NewToolResultError(fmt.Sprintf("Error running tool: %v", err)), nil
+		return &mcpgo.CallToolResult{
+			IsError: true,
+			Content: []mcpgo.Content{
+				mcpgo.TextContent{
+					Type: "text",
+					Text: err.Error(),
+				},
+			},
+		}, nil
 	}
 
-	result, err := tools.ToolResultToMap(output)
-	if err != nil {
-		log.Error(err, "Error converting tool call output to result")
-		// Use the NewToolResultError helper method in v0.31.0
-		return mcp.NewToolResultError(fmt.Sprintf("Error processing result: %v", err)), nil
+	// Convert result to string
+	var resultStr string
+	switch v := result.(type) {
+	case string:
+		resultStr = v
+	default:
+		resultStr = fmt.Sprintf("%v", v)
 	}
 
-	log.Info("Tool call output", "tool", name, "result", result)
-
-	return &mcp.CallToolResult{
-		Content: []mcp.Content{
-			mcp.TextContent{
+	return &mcpgo.CallToolResult{
+		Content: []mcpgo.Content{
+			mcpgo.TextContent{
 				Type: "text",
-				Text: fmt.Sprintf("%v", result),
+				Text: resultStr,
+			},
+		},
+	}, nil
+}
+
+// handleExternalMCPToolCall handles calls to external MCP tools
+func (s *kubectlMCPServer) handleExternalMCPToolCall(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+	toolName := request.Params.Name
+
+	// Find which server provides this tool
+	serverTools, err := s.mcpManager.ListAvailableTools(ctx)
+	if err != nil {
+		return &mcpgo.CallToolResult{
+			IsError: true,
+			Content: []mcpgo.Content{
+				mcpgo.TextContent{
+					Type: "text",
+					Text: fmt.Sprintf("failed to list available tools: %v", err),
+				},
+			},
+		}, nil
+	}
+
+	var targetServerName string
+	for serverName, tools := range serverTools {
+		for _, tool := range tools {
+			if tool.Name == toolName {
+				targetServerName = serverName
+				break
+			}
+		}
+		if targetServerName != "" {
+			break
+		}
+	}
+
+	if targetServerName == "" {
+		return &mcpgo.CallToolResult{
+			IsError: true,
+			Content: []mcpgo.Content{
+				mcpgo.TextContent{
+					Type: "text",
+					Text: fmt.Sprintf("external MCP tool %q not found", toolName),
+				},
+			},
+		}, nil
+	}
+
+	// Get the client for the target server
+	client, exists := s.mcpManager.GetClient(targetServerName)
+	if !exists {
+		return &mcpgo.CallToolResult{
+			IsError: true,
+			Content: []mcpgo.Content{
+				mcpgo.TextContent{
+					Type: "text",
+					Text: fmt.Sprintf("MCP client for server %q not found", targetServerName),
+				},
+			},
+		}, nil
+	}
+
+	// Extract arguments - handle the args wrapper for external tools
+	var toolArgs map[string]any
+	if args, ok := request.Params.Arguments.(map[string]any); ok {
+		if argsValue, hasArgs := args["args"]; hasArgs {
+			if argsMap, ok := argsValue.(map[string]any); ok {
+				toolArgs = argsMap
+			} else {
+				toolArgs = args // Fallback to using args directly
+			}
+		} else {
+			toolArgs = args // Use arguments directly if no "args" wrapper
+		}
+	} else {
+		return &mcpgo.CallToolResult{
+			IsError: true,
+			Content: []mcpgo.Content{
+				mcpgo.TextContent{
+					Type: "text",
+					Text: fmt.Sprintf("invalid arguments type: expected map[string]any, got %T", request.Params.Arguments),
+				},
+			},
+		}, nil
+	}
+
+	// Call the external MCP tool
+	result, err := client.CallTool(ctx, toolName, toolArgs)
+	if err != nil {
+		return &mcpgo.CallToolResult{
+			IsError: true,
+			Content: []mcpgo.Content{
+				mcpgo.TextContent{
+					Type: "text",
+					Text: fmt.Sprintf("error calling external MCP tool %q: %v", toolName, err),
+				},
+			},
+		}, nil
+	}
+
+	// Return successful result
+	return &mcpgo.CallToolResult{
+		Content: []mcpgo.Content{
+			mcpgo.TextContent{
+				Type: "text",
+				Text: result,
 			},
 		},
 	}, nil
