@@ -364,7 +364,7 @@ kubectl-ai --mcp-server
 
 This allows AI agents and tools to execute kubectl commands in your environment through the Model Context Protocol.
 
-📖 **For details on configuring kubectl-ai as an MCP server for use with Claude, Cursor, VS Code, and other MCP clients, see the [MCP Server Documentation](./docs/mcp.md).**
+📖 **For details on configuring kubectl-ai as an MCP server for use with Claude, Cursor, VS Code, and other MCP clients, see the [MCP Server Documentation](./docs/mcp-server.md).**
 
 ## k8s-bench
 
