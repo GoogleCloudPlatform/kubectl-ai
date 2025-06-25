@@ -219,7 +219,7 @@ func (cs *openAIChatSession) SetFunctionDefinitions(defs []*FunctionDefinition) 
 			klog.Infof("Processing function definition: %s", gollmDef.Name)
 
 			// Process function parameters
-			params, err := cs.processFunctionParameters(gollmDef)
+			params, err := cs.convertFunctionParameters(gollmDef)
 			if err != nil {
 				return fmt.Errorf("failed to process parameters for function %s: %w", gollmDef.Name, err)
 			}
@@ -242,12 +242,18 @@ func (cs *openAIChatSession) Send(ctx context.Context, contents ...any) (ChatRes
 	klog.V(1).InfoS("openAIChatSession.Send called", "model", cs.model, "history_len", len(cs.history))
 
 	// Process and append messages to history
-	if err := cs.processContentsToHistory(contents); err != nil {
+	if err := cs.addContentsToHistory(contents); err != nil {
 		return nil, err
 	}
 
 	// Prepare and send API request
-	chatReq := cs.prepareChatRequest()
+	chatReq := openai.ChatCompletionNewParams{
+		Model:    openai.ChatModel(cs.model),
+		Messages: cs.history,
+	}
+	if len(cs.tools) > 0 {
+		chatReq.Tools = cs.tools
+	}
 
 	// Call the OpenAI API
 	klog.V(1).InfoS("Sending request to OpenAI Chat API", "model", cs.model, "messages", len(chatReq.Messages), "tools", len(chatReq.Tools))
@@ -284,12 +290,18 @@ func (cs *openAIChatSession) SendStreaming(ctx context.Context, contents ...any)
 	klog.V(1).InfoS("Starting OpenAI streaming request", "model", cs.model)
 
 	// Process and append messages to history
-	if err := cs.processContentsToHistory(contents); err != nil {
+	if err := cs.addContentsToHistory(contents); err != nil {
 		return nil, err
 	}
 
 	// Prepare and send API request
-	chatReq := cs.prepareChatRequest()
+	chatReq := openai.ChatCompletionNewParams{
+		Model:    openai.ChatModel(cs.model),
+		Messages: cs.history,
+	}
+	if len(cs.tools) > 0 {
+		chatReq.Tools = cs.tools
+	}
 
 	// Start the OpenAI streaming request
 	klog.V(1).InfoS("Sending streaming request to OpenAI API",
@@ -569,8 +581,8 @@ func (p *openAIStreamPart) AsFunctionCalls() ([]FunctionCall, bool) {
 	return convertToolCallsToFunctionCalls(p.toolCalls)
 }
 
-// validateSchemaForOpenAI validates and normalizes a schema for OpenAI compatibility
-func validateSchemaForOpenAI(schema *Schema) (*Schema, error) {
+// convertSchemaForOpenAI converts and transforms a schema for OpenAI compatibility
+func convertSchemaForOpenAI(schema *Schema) (*Schema, error) {
 	if schema == nil {
 		// Return a minimal valid object schema for OpenAI
 		return &Schema{
@@ -594,7 +606,7 @@ func validateSchemaForOpenAI(schema *Schema) (*Schema, error) {
 		validated.Properties = make(map[string]*Schema)
 		if schema.Properties != nil {
 			for key, prop := range schema.Properties {
-				validatedProp, err := validateSchemaForOpenAI(prop)
+				validatedProp, err := convertSchemaForOpenAI(prop)
 				if err != nil {
 					return nil, fmt.Errorf("validating property %q: %w", key, err)
 				}
@@ -606,7 +618,7 @@ func validateSchemaForOpenAI(schema *Schema) (*Schema, error) {
 		validated.Type = TypeArray
 		// Arrays MUST have items schema for OpenAI
 		if schema.Items != nil {
-			validatedItems, err := validateSchemaForOpenAI(schema.Items)
+			validatedItems, err := convertSchemaForOpenAI(schema.Items)
 			if err != nil {
 				return nil, fmt.Errorf("validating array items: %w", err)
 			}
@@ -650,18 +662,18 @@ func validateSchemaForOpenAI(schema *Schema) (*Schema, error) {
 	return validated, nil
 }
 
-// processFunctionParameters handles the conversion of gollm parameters to OpenAI format
-func (cs *openAIChatSession) processFunctionParameters(gollmDef *FunctionDefinition) (openai.FunctionParameters, error) {
+// convertFunctionParameters handles the conversion of gollm parameters to OpenAI format
+func (cs *openAIChatSession) convertFunctionParameters(gollmDef *FunctionDefinition) (openai.FunctionParameters, error) {
 	var params openai.FunctionParameters
 
 	if gollmDef.Parameters == nil {
 		return params, nil
 	}
 
-	// Validate and convert the schema for OpenAI compatibility
-	validatedSchema, err := validateSchemaForOpenAI(gollmDef.Parameters)
+	// Convert the schema for OpenAI compatibility
+	validatedSchema, err := convertSchemaForOpenAI(gollmDef.Parameters)
 	if err != nil {
-		return params, fmt.Errorf("schema validation failed: %w", err)
+		return params, fmt.Errorf("schema conversion failed: %w", err)
 	}
 
 	// Convert to raw schema bytes
@@ -678,7 +690,7 @@ func (cs *openAIChatSession) processFunctionParameters(gollmDef *FunctionDefinit
 	return params, nil
 }
 
-// convertSchemaToBytes converts a validated schema to JSON bytes with OpenAI-specific fixes
+// convertSchemaToBytes converts a validated schema to JSON bytes
 func (cs *openAIChatSession) convertSchemaToBytes(schema *Schema, functionName string) ([]byte, error) {
 	// Convert to raw schema
 	bytes, err := schema.ToRawSchema()
@@ -688,45 +700,7 @@ func (cs *openAIChatSession) convertSchemaToBytes(schema *Schema, functionName s
 
 	klog.Infof("OpenAI schema for function %s: %s", functionName, string(bytes))
 
-	// Apply OpenAI-specific fixes
-	fixedBytes, err := cs.fixOpenAISchemaIssues(bytes, functionName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fix schema issues: %w", err)
-	}
-
-	return fixedBytes, nil
-}
-
-// fixOpenAISchemaIssues handles OpenAI-specific schema requirements
-func (cs *openAIChatSession) fixOpenAISchemaIssues(schemaBytes []byte, functionName string) ([]byte, error) {
-	var schemaMap map[string]interface{}
-	if err := json.Unmarshal(schemaBytes, &schemaMap); err != nil {
-		return schemaBytes, nil // Return original if parsing fails
-	}
-
-	// Fix object schemas without properties (OpenAI requirement)
-	if cs.isObjectSchemaWithoutProperties(schemaMap) {
-		klog.Warningf("Function %s: Fixing object schema without properties", functionName)
-		schemaMap["properties"] = map[string]interface{}{}
-
-		fixedBytes, err := json.Marshal(schemaMap)
-		if err != nil {
-			return schemaBytes, nil // Return original if marshaling fails
-		}
-
-		klog.Infof("Fixed schema for %s: %s", functionName, string(fixedBytes))
-		return fixedBytes, nil
-	}
-
-	return schemaBytes, nil
-}
-
-// isObjectSchemaWithoutProperties checks if schema is an object type missing properties
-func (cs *openAIChatSession) isObjectSchemaWithoutProperties(schema map[string]interface{}) bool {
-	schemaType, hasType := schema["type"].(string)
-	_, hasProperties := schema["properties"]
-
-	return hasType && schemaType == "object" && !hasProperties
+	return bytes, nil
 }
 
 // newOpenAIClientFactory is the factory function for creating OpenAI clients.
@@ -734,8 +708,8 @@ func newOpenAIClientFactory(ctx context.Context, opts ClientOptions) (Client, er
 	return NewOpenAIClient(ctx, opts)
 }
 
-// processContentsToHistory processes and appends user messages to chat history
-func (cs *openAIChatSession) processContentsToHistory(contents []any) error {
+// addContentsToHistory processes and appends user messages to chat history
+func (cs *openAIChatSession) addContentsToHistory(contents []any) error {
 	for _, content := range contents {
 		switch c := content.(type) {
 		case string:
@@ -756,18 +730,6 @@ func (cs *openAIChatSession) processContentsToHistory(contents []any) error {
 		}
 	}
 	return nil
-}
-
-// prepareChatRequest creates a ChatCompletionNewParams with the current session state
-func (cs *openAIChatSession) prepareChatRequest() openai.ChatCompletionNewParams {
-	chatReq := openai.ChatCompletionNewParams{
-		Model:    openai.ChatModel(cs.model),
-		Messages: cs.history,
-	}
-	if len(cs.tools) > 0 {
-		chatReq.Tools = cs.tools
-	}
-	return chatReq
 }
 
 // convertToolCallsToFunctionCalls converts OpenAI tool calls to gollm function calls
