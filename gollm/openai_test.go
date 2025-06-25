@@ -26,6 +26,7 @@ func TestConvertSchemaForOpenAI(t *testing.T) {
 		expectedError  bool
 		validateResult func(t *testing.T, result *Schema)
 	}{
+		// Core logic tests
 		{
 			name:          "nil schema",
 			inputSchema:   nil,
@@ -230,6 +231,119 @@ func TestConvertSchemaForOpenAI(t *testing.T) {
 				}
 				if result.Items.Properties["name"].Type != TypeString {
 					t.Error("expected nested string to remain string")
+				}
+			},
+		},
+
+		// Built-in tool schema tests
+		{
+			name: "kubectl tool schema",
+			inputSchema: &Schema{
+				Type: TypeObject,
+				Properties: map[string]*Schema{
+					"command": {
+						Type:        TypeString,
+						Description: "The complete kubectl command to execute",
+					},
+					"modifies_resource": {
+						Type:        TypeString,
+						Description: "Whether the command modifies a kubernetes resource",
+					},
+				},
+			},
+			expectedType:  TypeObject,
+			expectedError: false,
+			validateResult: func(t *testing.T, result *Schema) {
+				if len(result.Properties) != 2 {
+					t.Errorf("expected 2 properties, got %d", len(result.Properties))
+				}
+				if result.Properties["command"].Type != TypeString {
+					t.Error("expected command property to be string")
+				}
+				if result.Properties["modifies_resource"].Type != TypeString {
+					t.Error("expected modifies_resource property to be string")
+				}
+				// Properties should be initialized
+				if result.Properties == nil {
+					t.Error("expected properties to be initialized")
+				}
+			},
+		},
+		{
+			name: "bash tool schema",
+			inputSchema: &Schema{
+				Type: TypeObject,
+				Properties: map[string]*Schema{
+					"command": {
+						Type:        TypeString,
+						Description: "The bash command to execute",
+					},
+					"modifies_resource": {
+						Type:        TypeString,
+						Description: "Whether the command modifies a kubernetes resource",
+					},
+				},
+			},
+			expectedType:  TypeObject,
+			expectedError: false,
+			validateResult: func(t *testing.T, result *Schema) {
+				if len(result.Properties) != 2 {
+					t.Errorf("expected 2 properties, got %d", len(result.Properties))
+				}
+				// All string properties should remain strings
+				if result.Properties["command"].Type != TypeString {
+					t.Error("expected command property to remain string")
+				}
+				if result.Properties["modifies_resource"].Type != TypeString {
+					t.Error("expected modifies_resource property to remain string")
+				}
+			},
+		},
+		{
+			name: "mcp tool schema with complex nested structure",
+			inputSchema: &Schema{
+				Type: TypeObject,
+				Properties: map[string]*Schema{
+					"server_name": {
+						Type:        TypeString,
+						Description: "Name of the MCP server",
+					},
+					"method": {
+						Type:        TypeString,
+						Description: "MCP method name",
+					},
+					"params": {
+						Type: TypeObject,
+						Properties: map[string]*Schema{
+							"query": {Type: TypeString},
+							"limit": {Type: TypeInteger}, // Should convert to number
+						},
+					},
+				},
+				Required: []string{"server_name", "method"},
+			},
+			expectedType:  TypeObject,
+			expectedError: false,
+			validateResult: func(t *testing.T, result *Schema) {
+				// Check top-level properties
+				if len(result.Properties) != 3 {
+					t.Errorf("expected 3 properties, got %d", len(result.Properties))
+				}
+				// Check nested object conversion
+				params := result.Properties["params"]
+				if params.Type != TypeObject {
+					t.Error("expected params to be object type")
+				}
+				if params.Properties == nil {
+					t.Error("expected params properties to be initialized")
+				}
+				// Check nested integer conversion
+				if params.Properties["limit"].Type != TypeNumber {
+					t.Error("expected nested limit property to be converted to number")
+				}
+				// Check required fields preservation
+				if len(result.Required) != 2 {
+					t.Error("expected required fields to be preserved")
 				}
 			},
 		},
