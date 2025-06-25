@@ -15,6 +15,7 @@
 package gollm
 
 import (
+	"encoding/json"
 	"testing"
 )
 
@@ -379,5 +380,46 @@ func TestConvertSchemaForOpenAI(t *testing.T) {
 				tt.validateResult(t, result)
 			}
 		})
+	}
+}
+
+// TestConvertSchemaToBytes tests the JSON-level fix for the omitempty issue
+func TestConvertSchemaToBytes(t *testing.T) {
+	session := &openAIChatSession{}
+
+	// Test case: Object schema with empty properties map (which gets omitted by omitempty)
+	schema := &Schema{
+		Type:       TypeObject,
+		Properties: make(map[string]*Schema), // Empty map gets omitted by omitempty
+	}
+
+	bytes, err := session.convertSchemaToBytes(schema, "test_function")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+		return
+	}
+
+	// Parse the JSON to verify it has properties field
+	var schemaMap map[string]interface{}
+	if err := json.Unmarshal(bytes, &schemaMap); err != nil {
+		t.Errorf("failed to unmarshal schema: %v", err)
+		return
+	}
+
+	// Verify the schema has type: object
+	if schemaType, ok := schemaMap["type"].(string); !ok || schemaType != "object" {
+		t.Errorf("expected type 'object', got %v", schemaMap["type"])
+	}
+
+	// Verify the schema has properties field (even if empty)
+	if _, hasProperties := schemaMap["properties"]; !hasProperties {
+		t.Error("expected properties field to be present in JSON, but it was missing")
+	}
+
+	// Verify properties is an empty object
+	if props, ok := schemaMap["properties"].(map[string]interface{}); !ok {
+		t.Error("expected properties to be an object")
+	} else if len(props) != 0 {
+		t.Errorf("expected empty properties object, got %v", props)
 	}
 }

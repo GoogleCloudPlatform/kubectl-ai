@@ -582,6 +582,7 @@ func (p *openAIStreamPart) AsFunctionCalls() ([]FunctionCall, bool) {
 }
 
 // convertSchemaForOpenAI converts and transforms a schema for OpenAI compatibility
+// This function handles both gollm Schema objects and ensures the final JSON meets OpenAI requirements
 func convertSchemaForOpenAI(schema *Schema) (*Schema, error) {
 	if schema == nil {
 		// Return a minimal valid object schema for OpenAI
@@ -655,7 +656,9 @@ func convertSchemaForOpenAI(schema *Schema) (*Schema, error) {
 	}
 
 	// Final validation: Ensure object types always have properties
+	// This handles edge cases where malformed schemas might slip through
 	if validated.Type == TypeObject && validated.Properties == nil {
+		klog.Warningf("Object schema missing properties, initializing empty properties map")
 		validated.Properties = make(map[string]*Schema)
 	}
 
@@ -671,10 +674,12 @@ func (cs *openAIChatSession) convertFunctionParameters(gollmDef *FunctionDefinit
 	}
 
 	// Convert the schema for OpenAI compatibility
+	klog.V(2).Infof("Original schema for function %s: %+v", gollmDef.Name, gollmDef.Parameters)
 	validatedSchema, err := convertSchemaForOpenAI(gollmDef.Parameters)
 	if err != nil {
 		return params, fmt.Errorf("schema conversion failed: %w", err)
 	}
+	klog.V(2).Infof("Converted schema for function %s: %+v", gollmDef.Name, validatedSchema)
 
 	// Convert to raw schema bytes
 	schemaBytes, err := cs.convertSchemaToBytes(validatedSchema, gollmDef.Name)
@@ -690,10 +695,53 @@ func (cs *openAIChatSession) convertFunctionParameters(gollmDef *FunctionDefinit
 	return params, nil
 }
 
-// convertSchemaToBytes converts a validated schema to JSON bytes
+// openAISchema wraps a gollm Schema with OpenAI-specific marshaling behavior
+type openAISchema struct {
+	*Schema
+}
+
+// MarshalJSON provides OpenAI-specific JSON marshaling that ensures object schemas have properties
+func (s openAISchema) MarshalJSON() ([]byte, error) {
+	// Create a map to build the JSON representation
+	result := make(map[string]interface{})
+
+	if s.Type != "" {
+		result["type"] = s.Type
+	}
+
+	if s.Description != "" {
+		result["description"] = s.Description
+	}
+
+	if len(s.Required) > 0 {
+		result["required"] = s.Required
+	}
+
+	// For object types, always include properties (even if empty) to satisfy OpenAI
+	if s.Type == TypeObject {
+		if s.Properties != nil {
+			result["properties"] = s.Properties
+		} else {
+			result["properties"] = make(map[string]*Schema)
+		}
+	} else if s.Properties != nil && len(s.Properties) > 0 {
+		// For non-object types, only include properties if they exist and are non-empty
+		result["properties"] = s.Properties
+	}
+
+	if s.Items != nil {
+		result["items"] = s.Items
+	}
+
+	return json.Marshal(result)
+}
+
+// convertSchemaToBytes converts a validated schema to JSON bytes using OpenAI-specific marshaling
 func (cs *openAIChatSession) convertSchemaToBytes(schema *Schema, functionName string) ([]byte, error) {
-	// Convert to raw schema
-	bytes, err := schema.ToRawSchema()
+	// Wrap the schema with OpenAI-specific marshaling behavior
+	openAIWrapper := openAISchema{Schema: schema}
+
+	bytes, err := json.Marshal(openAIWrapper)
 	if err != nil {
 		return nil, fmt.Errorf("failed to convert schema: %w", err)
 	}
