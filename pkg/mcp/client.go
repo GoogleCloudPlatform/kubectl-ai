@@ -271,20 +271,12 @@ func convertMCPMapSchema(key string, schemaMap map[string]interface{}) (*gollm.S
 		gollmSchema.Description = description
 	}
 
-	// required, ok := valueSchema["required"].(bool)
-	// if !ok {
-	// 	return nil, fmt.Errorf("unexpected input schema type for %q: %T %+v", key, value, value)
-	// }
-	// switch required {
-	// case true:
-	// 	// TODO: Add required flag to gollm.Schema
-	// default:
-	// 	return nil, fmt.Errorf("unexpected input schema type for %q: %T %+v", key, value, value)
-	// }
-
 	mcpType, ok := schemaMap["type"].(string)
 	if !ok {
-		return nil, fmt.Errorf("expected type for key %q: %v", key, schemaMap)
+		// Fallback: treat any unrecognized schema as generic object
+		klog.V(2).InfoS("Unrecognized schema format, treating as object", "key", key)
+		gollmSchema.Type = gollm.TypeObject
+		return gollmSchema, nil
 	}
 	switch mcpType {
 	case "string":
