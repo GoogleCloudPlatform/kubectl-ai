@@ -18,8 +18,10 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/GoogleCloudPlatform/kubectl-ai/gollm"
+	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/mcp"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/tools"
-	"github.com/mark3labs/mcp-go/mcp"
+	mcpgo "github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"k8s.io/klog/v2"
 )
@@ -42,95 +44,138 @@ func newKubectlMCPServer(ctx context.Context, kubectlConfig string, tools tools.
 		),
 		tools: tools,
 	}
+
+	// Add built-in tools
 	for _, tool := range s.tools.AllTools() {
 		toolDefn := tool.FunctionDefinition()
 		toolInputSchema, err := toolDefn.Parameters.ToRawSchema()
 		if err != nil {
 			return nil, fmt.Errorf("converting tool schema to json.RawMessage: %w", err)
 		}
-		s.server.AddTool(mcp.NewToolWithRawSchema(
+		s.server.AddTool(mcpgo.NewToolWithRawSchema(
 			toolDefn.Name,
 			toolDefn.Description,
 			toolInputSchema,
 		), s.handleToolCall)
 	}
+
+	// Initialize MCP manager to get client tools
+	manager, err := mcp.InitializeManager()
+	if err != nil {
+		klog.Warningf("Failed to initialize MCP manager: %v", err)
+		return s, nil // Return server with just built-in tools
+	}
+
+	// Connect to MCP servers and get their tools
+	if err := manager.DiscoverAndConnectServers(ctx); err != nil {
+		klog.Warningf("Failed to connect to MCP servers: %v", err)
+		return s, nil // Return server with just built-in tools
+	}
+
+	// Get tools from all connected MCP servers
+	serverTools, err := manager.ListAvailableTools(ctx)
+	if err != nil {
+		klog.Warningf("Failed to list tools from MCP servers: %v", err)
+		return s, nil // Return server with just built-in tools
+	}
+
+	// Add tools from MCP servers
+	for _, tools := range serverTools {
+		for _, tool := range tools {
+			// Create a schema for the tool
+			schema := &gollm.FunctionDefinition{
+				Name:        tool.Name,
+				Description: tool.Description,
+				Parameters: &gollm.Schema{
+					Type: gollm.TypeObject,
+					Properties: map[string]*gollm.Schema{
+						"args": {
+							Type:        gollm.TypeObject,
+							Description: "Tool arguments",
+						},
+					},
+				},
+			}
+
+			toolInputSchema, err := schema.Parameters.ToRawSchema()
+			if err != nil {
+				klog.Warningf("Failed to convert tool schema for %s: %v", tool.Name, err)
+				continue
+			}
+
+			// Add the tool to the server
+			s.server.AddTool(mcpgo.NewToolWithRawSchema(
+				tool.Name,
+				tool.Description,
+				toolInputSchema,
+			), s.handleToolCall)
+		}
+	}
+
 	return s, nil
 }
+
 func (s *kubectlMCPServer) Serve(ctx context.Context) error {
 	return server.ServeStdio(s.server)
 }
 
-func (s *kubectlMCPServer) handleToolCall(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-
-	log := klog.FromContext(ctx)
-
-	name := request.Params.Name
-
-	// In v0.31.0, Arguments is an interface{} that needs type assertion to a map
-	argMap, ok := request.Params.Arguments.(map[string]interface{})
-	if !ok {
-		return mcp.NewToolResultError("Invalid arguments format: expected a map"), nil
-	}
-
-	// Safely extract command parameter with type checking
-	commandVal, ok := argMap["command"]
-	if !ok {
-		return mcp.NewToolResultError("Missing required parameter: command"), nil
-	}
-	command, ok := commandVal.(string)
-	if !ok {
-		return mcp.NewToolResultError("Parameter 'command' must be a string"), nil
-	}
-
-	// Safely extract modifies_resource parameter (optional)
-	var modifiesResource string
-	if modVal, ok := argMap["modifies_resource"]; ok {
-		if modStr, ok := modVal.(string); ok {
-			modifiesResource = modStr
-		}
-	}
-
-	log.Info("Received tool call", "tool", name, "command", command, "modifies_resource", modifiesResource)
-
-	ctx = context.WithValue(ctx, tools.KubeconfigKey, s.kubectlConfig)
-	ctx = context.WithValue(ctx, tools.WorkDirKey, s.workDir)
-
-	tool := tools.Lookup(name)
+func (s *kubectlMCPServer) handleToolCall(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+	// Find the tool in our tools collection
+	tool := s.tools.Lookup(request.Params.Name)
 	if tool == nil {
-		// Use utility method for error creation in v0.31.0
-		return mcp.NewToolResultError(fmt.Sprintf("Tool %s not found", name)), nil
-	}
-	// Prepare arguments map with command and optional modifies_resource
-	args := map[string]any{
-		"command": command,
-	}
-
-	// Add modifies_resource if available
-	if modifiesResource != "" {
-		args["modifies_resource"] = modifiesResource
+		return &mcpgo.CallToolResult{
+			IsError: true,
+			Content: []mcpgo.Content{
+				mcpgo.TextContent{
+					Type: "text",
+					Text: fmt.Sprintf("tool %q not found", request.Params.Name),
+				},
+			},
+		}, nil
 	}
 
-	output, err := tool.Run(ctx, args)
+	// Convert arguments to the expected type
+	args, ok := request.Params.Arguments.(map[string]any)
+	if !ok {
+		return &mcpgo.CallToolResult{
+			IsError: true,
+			Content: []mcpgo.Content{
+				mcpgo.TextContent{
+					Type: "text",
+					Text: fmt.Sprintf("invalid arguments type: expected map[string]any, got %T", request.Params.Arguments),
+				},
+			},
+		}, nil
+	}
+
+	// Execute the tool
+	result, err := tool.Run(ctx, args)
 	if err != nil {
-		log.Error(err, "Error running tool call")
-		// Use the NewToolResultError helper method in v0.31.0
-		return mcp.NewToolResultError(fmt.Sprintf("Error running tool: %v", err)), nil
+		return &mcpgo.CallToolResult{
+			IsError: true,
+			Content: []mcpgo.Content{
+				mcpgo.TextContent{
+					Type: "text",
+					Text: err.Error(),
+				},
+			},
+		}, nil
 	}
 
-	result, err := tools.ToolResultToMap(output)
-	if err != nil {
-		log.Error(err, "Error converting tool call output to result")
-		// Use the NewToolResultError helper method in v0.31.0
-		return mcp.NewToolResultError(fmt.Sprintf("Error processing result: %v", err)), nil
+	// Convert result to string
+	var resultStr string
+	switch v := result.(type) {
+	case string:
+		resultStr = v
+	default:
+		resultStr = fmt.Sprintf("%v", v)
 	}
 
-	log.Info("Tool call output", "tool", name, "result", result)
-
-	return &mcp.CallToolResult{
-		Content: []mcp.Content{
-			mcp.TextContent{
+	return &mcpgo.CallToolResult{
+		Content: []mcpgo.Content{
+			mcpgo.TextContent{
 				Type: "text",
-				Text: fmt.Sprintf("%v", result),
+				Text: resultStr,
 			},
 		},
 	}, nil
