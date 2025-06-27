@@ -12,17 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package gollm
+package sessions
 
-// We define some standard structs to allow for persistence of the LLM requests and responses.
-// This lets us store the history of the conversation for later analysis.
+import (
+	"github.com/GoogleCloudPlatform/kubectl-ai/gollm"
+)
 
-type RecordCompletionResponse struct {
-	Text string `json:"text"`
-	Raw  any    `json:"raw"`
-}
-
-type RecordChatResponse struct {
-	// TODO: Structured data?
-	Raw any `json:"raw"`
+// ChatMessageStore defines the interface for managing storage of chat messages of a session.
+type ChatMessageStore interface {
+	AddChatMessage(record *gollm.ChatMessage) error
+	SetChatMessages(newHistory []*gollm.ChatMessage) error
+	ChatMessages() []*gollm.ChatMessage
+	ClearChatMessages() error
 }

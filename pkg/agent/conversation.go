@@ -28,6 +28,7 @@ import (
 
 	"github.com/GoogleCloudPlatform/kubectl-ai/gollm"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/journal"
+	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/sessions"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/tools"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/ui"
 	"k8s.io/klog/v2"
@@ -65,6 +66,9 @@ type Conversation struct {
 	// Recorder captures events for diagnostics
 	Recorder journal.Recorder
 
+	// ChatMessageStore is the underlying session persistence layer.
+	ChatMessageStore sessions.ChatMessageStore
+
 	// doc is the document which renders the conversation
 	doc *ui.Document
 
@@ -94,8 +98,20 @@ func (s *Conversation) Init(ctx context.Context, doc *ui.Document) error {
 	}
 
 	// Start a new chat session
+	chat := s.LLM.StartChat(systemPrompt, s.Model)
+
+	if s.ChatMessageStore != nil {
+		messages := s.ChatMessageStore.ChatMessages()
+		if len(messages) > 0 {
+			if err := chat.Initialize(messages); err != nil {
+				return fmt.Errorf("loading history into chat: %w", err)
+			}
+		}
+		chat = NewChatLogger(chat, s.ChatMessageStore)
+	}
+
 	s.llmChat = gollm.NewRetryChat(
-		s.LLM.StartChat(systemPrompt, s.Model),
+		chat,
 		gollm.RetryConfig{
 			MaxAttempts:    3,
 			InitialBackoff: 10 * time.Second,

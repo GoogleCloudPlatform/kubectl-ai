@@ -430,6 +430,8 @@ func (c *GeminiChat) SendStreaming(ctx context.Context, contents ...any) (ChatRe
 		return nil, err
 	}
 
+	// incoming messages
+	// could be user entered messages or result of function calls.
 	genaiContent := &genai.Content{
 		Role:  "user",
 		Parts: parts,
@@ -457,6 +459,7 @@ func (c *GeminiChat) SendStreaming(ctx context.Context, contents ...any) (ChatRe
 				log.V(1).Info("empty response probably with STOP finishedReason")
 				return
 			}
+			// response from the LLM
 			c.history = append(c.history, content)
 			// yield only when we have a non-empty response
 			if !yield(&GeminiChatResponse{geminiResponse: geminiResponse}, err) {
@@ -481,8 +484,31 @@ func (r *GeminiChatResponse) MarshalJSON() ([]byte, error) {
 	return json.Marshal(&formatted)
 }
 
+func (r *GeminiChatResponse) UnmarshalJSON(b []byte) error {
+	var rec RecordChatResponse
+	if err := json.Unmarshal(b, &rec); err != nil {
+		return err
+	}
+
+	rawBytes, err := json.Marshal(rec.Raw)
+	if err != nil {
+		return err
+	}
+
+	var genaiResp genai.GenerateContentResponse
+	if err := json.Unmarshal(rawBytes, &genaiResp); err != nil {
+		return err
+	}
+
+	r.geminiResponse = &genaiResp
+	return nil
+}
+
 // String returns a string representation of the response.
 func (r *GeminiChatResponse) String() string {
+	if r == nil || r.geminiResponse == nil {
+		return ""
+	}
 	return r.geminiResponse.Text()
 }
 
@@ -621,6 +647,81 @@ func (c *GeminiChat) IsRetryableError(err error) bool {
 
 	// Add other error checks specific to LLM clients if needed
 	// e.g., if errors.Is(err, specificLLMRateLimitError) { return true }
-
 	return false
+}
+
+func reconstructContent(contents []any) ([]any, error) {
+	reconstructed := make([]any, 0, len(contents))
+	for _, content := range contents {
+		switch v := content.(type) {
+		case string:
+			reconstructed = append(reconstructed, v)
+		case map[string]interface{}:
+			// It could be a FunctionCallResult.
+			// Let's try to marshal and unmarshal.
+			b, err := json.Marshal(v)
+			if err != nil {
+				return nil, fmt.Errorf("failed to marshal content map: %w", err)
+			}
+			var fcr FunctionCallResult
+			// We check for name because an empty map would unmarshal without error.
+			if err := json.Unmarshal(b, &fcr); err == nil && fcr.Name != "" {
+				reconstructed = append(reconstructed, fcr)
+			} else {
+				return nil, fmt.Errorf("unexpected map in content that is not a FunctionCallResult: %v", v)
+			}
+		default:
+			// This is an unexpected type from JSON unmarshalling.
+			return nil, fmt.Errorf("unexpected type in content: %T", v)
+		}
+	}
+	return reconstructed, nil
+}
+
+// Initialize implements Chat.
+func (c *GeminiChat) Initialize(messages []*ChatMessage) error {
+	for _, record := range messages {
+		switch record.Role {
+		case "user":
+			reconstructedContent, err := reconstructContent(record.Content)
+			if err != nil {
+				return fmt.Errorf("failed to reconstruct content from history: %w", err)
+			}
+			parts, err := c.partsToGemini(reconstructedContent...)
+			if err != nil {
+				return err
+			}
+			c.history = append(c.history, &genai.Content{
+				Role:  "user",
+				Parts: parts,
+			})
+		case "model":
+			// The response is a RecordChatResponse, which needs to be unmarshaled.
+			b, err := json.Marshal(record.Response)
+			if err != nil {
+				return err
+			}
+			var resp RecordChatResponse
+			if err := json.Unmarshal(b, &resp); err != nil {
+				return err
+			}
+
+			// The raw response is a genai.GenerateContentResponse.
+			b, err = json.Marshal(resp.Raw)
+			if err != nil {
+				return err
+			}
+			var genaiResp genai.GenerateContentResponse
+			if err := json.Unmarshal(b, &genaiResp); err != nil {
+				return err
+			}
+
+			if len(genaiResp.Candidates) > 0 {
+				c.history = append(c.history, genaiResp.Candidates[0].Content)
+			}
+		default:
+			return fmt.Errorf("unknown role in history: %q", record.Role)
+		}
+	}
+	return nil
 }
