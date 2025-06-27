@@ -86,23 +86,36 @@ func newKubectlMCPServer(ctx context.Context, kubectlConfig string, tools tools.
 		}
 
 		// Add tools from MCP servers
-		for _, tools := range serverTools {
+		totalToolsRegistered := 0
+		for serverName, tools := range serverTools {
+			klog.V(2).Infof("Processing tools from MCP server %s: %d tools found", serverName, len(tools))
+
 			for _, tool := range tools {
+				// Create unique tool name to avoid conflicts between servers
+				uniqueToolName := tool.Name
+				if tool.Server != "" {
+					// If tool already has server info, use it as-is
+					uniqueToolName = tool.Name
+				} else {
+					// Add server prefix to avoid name conflicts
+					uniqueToolName = fmt.Sprintf("%s_%s", serverName, tool.Name)
+				}
+
 				// Use the actual tool schema instead of creating a generic wrapper
 				var schema *gollm.FunctionDefinition
 				if tool.InputSchema != nil {
 					// Use the real schema from the external tool
 					schema = &gollm.FunctionDefinition{
-						Name:        tool.Name,
-						Description: tool.Description,
+						Name:        uniqueToolName,
+						Description: fmt.Sprintf("%s (from %s)", tool.Description, serverName),
 						Parameters:  tool.InputSchema,
 					}
 				} else {
 					// Fallback to generic schema if no schema provided
-					klog.Warningf("External tool %s has no schema, using generic wrapper", tool.Name)
+					klog.V(2).Infof("External tool %s from %s has no schema, using generic wrapper", tool.Name, serverName)
 					schema = &gollm.FunctionDefinition{
-						Name:        tool.Name,
-						Description: tool.Description,
+						Name:        uniqueToolName,
+						Description: fmt.Sprintf("%s (from %s)", tool.Description, serverName),
 						Parameters: &gollm.Schema{
 							Type: gollm.TypeObject,
 							Properties: map[string]*gollm.Schema{
@@ -117,20 +130,23 @@ func newKubectlMCPServer(ctx context.Context, kubectlConfig string, tools tools.
 
 				toolInputSchema, err := schema.Parameters.ToRawSchema()
 				if err != nil {
-					klog.Warningf("Failed to convert tool schema for %s: %v", tool.Name, err)
+					klog.Errorf("Failed to convert tool schema for %s from %s: %v - skipping tool", tool.Name, serverName, err)
 					continue
 				}
 
 				// Add the tool to the server
 				s.server.AddTool(mcpgo.NewToolWithRawSchema(
-					tool.Name,
-					tool.Description,
+					uniqueToolName,
+					schema.Description,
 					toolInputSchema,
 				), s.handleToolCall)
+
+				totalToolsRegistered++
+				klog.V(3).Infof("Registered tool: %s from server %s", uniqueToolName, serverName)
 			}
 		}
 
-		klog.Infof("MCP server initialized with external tool discovery enabled")
+		klog.Infof("MCP server initialized with external tool discovery enabled - registered %d tools from %d servers", totalToolsRegistered, len(serverTools))
 	} else {
 		klog.Infof("MCP server initialized with external tool discovery disabled")
 	}
@@ -250,10 +266,21 @@ func (s *kubectlMCPServer) handleExternalMCPToolCall(ctx context.Context, reques
 	}
 
 	var targetServerName string
+	var originalToolName string
+
+	// Look for the tool by checking both original name and server-prefixed name
 	for serverName, tools := range serverTools {
 		for _, tool := range tools {
-			if tool.Name == toolName {
+			// Check if this matches the requested tool (either direct name or server-prefixed name)
+			uniqueToolName := tool.Name
+			if tool.Server == "" {
+				// Add server prefix to match what was registered
+				uniqueToolName = fmt.Sprintf("%s_%s", serverName, tool.Name)
+			}
+
+			if uniqueToolName == toolName || tool.Name == toolName {
 				targetServerName = serverName
+				originalToolName = tool.Name // Use the original tool name for the MCP call
 				break
 			}
 		}
@@ -315,15 +342,15 @@ func (s *kubectlMCPServer) handleExternalMCPToolCall(ctx context.Context, reques
 		}, nil
 	}
 
-	// Call the external MCP tool
-	result, err := client.CallTool(ctx, toolName, toolArgs)
+	// Call the external MCP tool using the original tool name
+	result, err := client.CallTool(ctx, originalToolName, toolArgs)
 	if err != nil {
 		return &mcpgo.CallToolResult{
 			IsError: true,
 			Content: []mcpgo.Content{
 				mcpgo.TextContent{
 					Type: "text",
-					Text: fmt.Sprintf("error calling external MCP tool %q: %v", toolName, err),
+					Text: fmt.Sprintf("error calling external MCP tool %q on server %q: %v", originalToolName, targetServerName, err),
 				},
 			},
 		}, nil
