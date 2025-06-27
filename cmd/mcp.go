@@ -88,19 +88,31 @@ func newKubectlMCPServer(ctx context.Context, kubectlConfig string, tools tools.
 		// Add tools from MCP servers
 		for _, tools := range serverTools {
 			for _, tool := range tools {
-				// Create a schema for the tool
-				schema := &gollm.FunctionDefinition{
-					Name:        tool.Name,
-					Description: tool.Description,
-					Parameters: &gollm.Schema{
-						Type: gollm.TypeObject,
-						Properties: map[string]*gollm.Schema{
-							"args": {
-								Type:        gollm.TypeObject,
-								Description: "Tool arguments",
+				// Use the actual tool schema instead of creating a generic wrapper
+				var schema *gollm.FunctionDefinition
+				if tool.InputSchema != nil {
+					// Use the real schema from the external tool
+					schema = &gollm.FunctionDefinition{
+						Name:        tool.Name,
+						Description: tool.Description,
+						Parameters:  tool.InputSchema,
+					}
+				} else {
+					// Fallback to generic schema if no schema provided
+					klog.Warningf("External tool %s has no schema, using generic wrapper", tool.Name)
+					schema = &gollm.FunctionDefinition{
+						Name:        tool.Name,
+						Description: tool.Description,
+						Parameters: &gollm.Schema{
+							Type: gollm.TypeObject,
+							Properties: map[string]*gollm.Schema{
+								"args": {
+									Type:        gollm.TypeObject,
+									Description: "Tool arguments",
+								},
 							},
 						},
-					},
+					}
 				}
 
 				toolInputSchema, err := schema.Parameters.ToRawSchema()
@@ -276,9 +288,12 @@ func (s *kubectlMCPServer) handleExternalMCPToolCall(ctx context.Context, reques
 		}, nil
 	}
 
-	// Extract arguments - handle the args wrapper for external tools
+	// Extract arguments - handle the args wrapper for external tools and empty/nil input
 	var toolArgs map[string]any
-	if args, ok := request.Params.Arguments.(map[string]any); ok {
+	if request.Params.Arguments == nil {
+		// Handle nil arguments as empty map
+		toolArgs = make(map[string]any)
+	} else if args, ok := request.Params.Arguments.(map[string]any); ok {
 		if argsValue, hasArgs := args["args"]; hasArgs {
 			if argsMap, ok := argsValue.(map[string]any); ok {
 				toolArgs = argsMap
