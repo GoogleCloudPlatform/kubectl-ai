@@ -565,6 +565,9 @@ func (s *session) repl(ctx context.Context, initialQuery string, initialBlocks [
 			if err != nil {
 				return err
 			}
+		case query == "reset-confirmation":
+			s.conversation.SkipPermissions = false
+			s.doc.AddBlock(ui.NewAgentTextBlock().WithText("Confirmation prompts have been reset."))
 		case query == "clear":
 			s.ui.ClearScreen()
 		case query == "exit" || query == "quit":
