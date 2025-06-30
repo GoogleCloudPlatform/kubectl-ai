@@ -28,7 +28,6 @@ import (
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/journal"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/ui"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/ui/html/templates"
-	"github.com/charmbracelet/glamour"
 	"k8s.io/klog/v2"
 )
 
@@ -36,9 +35,8 @@ type HTMLUserInterface struct {
 	httpServer         *http.Server
 	httpServerListener net.Listener
 
-	doc              *ui.Document
-	journal          journal.Recorder
-	markdownRenderer *glamour.TermRenderer
+	doc     *ui.Document
+	journal journal.Recorder
 }
 
 var _ ui.UI = &HTMLUserInterface{}
@@ -69,16 +67,6 @@ func NewHTMLUserInterface(doc *ui.Document, listenAddress string, journal journa
 	u.httpServer = httpServer
 
 	fmt.Fprintf(os.Stdout, "listening on http://%s\n", endpoint)
-
-	mdRenderer, err := glamour.NewTermRenderer(
-		glamour.WithAutoStyle(),
-		glamour.WithPreservedNewLines(),
-		glamour.WithEmoji(),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("error initializing the markdown renderer: %w", err)
-	}
-	u.markdownRenderer = mdRenderer
 
 	return u, nil
 }
