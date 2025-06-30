@@ -477,7 +477,7 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 		return chatSession.answerQuery(ctx, queryFromCmd)
 	}
 
-	return chatSession.repl(ctx, queryFromCmd, mcpBlocks)
+	return chatSession.replAgentNative(ctx)
 }
 
 func handleCustomTools(toolConfigPaths []string) error {
@@ -528,6 +528,68 @@ type session struct {
 	availableModels []string
 	LLM             gollm.Client
 	mcpManager      *mcp.Manager
+}
+
+// repl is a read-eval-print loop for the chat session.
+func (s *session) replAgentNative(ctx context.Context) error {
+
+	agentOutputCh := s.conversation.OutputCh
+	userInputCh := s.conversation.UserInputCh
+
+	err := s.ui.Run(ctx, agentOutputCh, userInputCh)
+	if err != nil {
+		return fmt.Errorf("running UI: %w", err)
+	}
+
+	err = s.conversation.Run(ctx)
+	if err != nil {
+		return fmt.Errorf("running conversation: %w", err)
+	}
+
+	<-ctx.Done()
+	return nil
+
+	// for {
+	// 	if query == "" {
+	// 		input := ui.NewInputTextBlock()
+	// 		input.SetEditable(true)
+	// 		s.doc.AddBlock(input)
+
+	// 		userInput, err := input.Observable().Wait()
+	// 		if err != nil {
+	// 			if err == io.EOF {
+	// 				// Use hit control-D, or was piping and we reached the end of stdin.
+	// 				// Not a "big" problem
+	// 				return nil
+	// 			}
+	// 			return fmt.Errorf("reading input: %w", err)
+	// 		}
+	// 		query = strings.TrimSpace(userInput)
+	// 	}
+
+	// 	switch {
+	// 	case query == "":
+	// 		continue
+	// 	case query == "reset":
+	// 		err := s.conversation.Init(ctx, s.doc)
+	// 		if err != nil {
+	// 			return err
+	// 		}
+	// 	case query == "clear":
+	// 		s.ui.ClearScreen()
+	// 	case query == "exit" || query == "quit":
+	// 		// s.ui.RenderOutput(ctx, "Alright...bye.\n")
+	// 		return nil
+	// 	default:
+	// 		if err := s.answerQuery(ctx, query); err != nil {
+	// 			errorBlock := &ui.ErrorBlock{}
+	// 			errorBlock.SetText(fmt.Sprintf("Error: %v\n", err))
+	// 			s.doc.AddBlock(errorBlock)
+	// 		}
+	// 	}
+	// 	// Reset query to empty string so that we prompt for input again
+	// 	query = ""
+	// }
 }
 
 // repl is a read-eval-print loop for the chat session.

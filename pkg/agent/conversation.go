@@ -36,7 +36,41 @@ import (
 //go:embed systemprompt_template_default.txt
 var defaultSystemPromptTemplate string
 
+type TextInput struct {
+	Text string
+}
+type ChoiceInput struct {
+	Choice string
+}
+
+type AgentState string
+
+const (
+	AgentStateIdle    AgentState = "idle"
+	AgentStateRunning AgentState = "running"
+	AgentStateWaiting AgentState = "waiting"
+	AgentStateDone    AgentState = "done"
+)
+
 type Conversation struct {
+	UserInputCh chan any
+	OutputCh    chan any
+
+	// tool calls that are pending execution
+	// These will typically be all the tool calls suggested by the LLM in the
+	// previous iteration of the agentic loop.
+	pendingFunctionCalls []gollm.FunctionCall
+
+	// currChatContent tracks chat content that needs to be sent
+	// to the LLM in the current iteration of the agentic loop.
+	currChatContent []any
+
+	// currIteration tracks the current iteration of the agentic loop.
+	currIteration int
+
+	// state tracks the current state of the agent.
+	state AgentState
+
 	LLM gollm.Client
 
 	// PromptTemplateFile allows specifying a custom template file
@@ -75,6 +109,21 @@ type Conversation struct {
 
 func (s *Conversation) Init(ctx context.Context, doc *ui.Document) error {
 	log := klog.FromContext(ctx)
+
+	s.UserInputCh = make(chan any, 10)
+	// TODO: this need to be probably a buffered channel because
+	// there is out multiple messages that can be sent to the output channel
+	// and we don't want to block the main loop.
+	s.OutputCh = make(chan any, 10)
+	s.currIteration = 0
+	// when we support session, we will need to initialize this with the
+	// current history of the conversation.
+	s.currChatContent = []any{}
+
+	// today, the agent always starts in idle state.
+	// in the future, we will support session, and the agent will start in
+	// the state of the previous session.
+	s.state = AgentStateIdle
 
 	// Create a temporary working directory
 	workDir, err := os.MkdirTemp("", "agent-workdir-*")
@@ -133,6 +182,278 @@ func (c *Conversation) Close() error {
 		}
 	}
 	return nil
+}
+
+func (c *Conversation) Run(ctx context.Context) error {
+	log := klog.FromContext(ctx)
+
+	log.Info("Starting agent loop")
+
+	if c.currIteration == 0 && c.state == AgentStateIdle {
+		c.OutputCh <- ui.NewAgentTextBlock().WithText("Hey there, what can I help you with today?")
+		c.OutputCh <- ui.NewInputTextBlock().SetEditable(true)
+	}
+
+	// main agent loop
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				log.Info("Agent loop done")
+				return
+			case userInput := <-c.UserInputCh:
+				log.Info("User input", "userInput", userInput)
+				switch userInput := userInput.(type) {
+				case string:
+					log.Info("Text input", "text", userInput)
+					// if we are waiting for user's choice, we treat the text input as a choice
+					if c.state == AgentStateWaiting {
+						c.state = AgentStateDone
+						c.pendingFunctionCalls = []gollm.FunctionCall{}
+						// we resume the execution of the pending function call
+						c.handleChoice(ctx, userInput)
+						continue
+					}
+
+					// if we are in idle state, we start a new iteration
+					// of the agentic loop.
+					if c.state == AgentStateIdle {
+						c.state = AgentStateRunning
+						c.currIteration = 0
+						c.currChatContent = []any{userInput}
+						c.pendingFunctionCalls = []gollm.FunctionCall{}
+					} else {
+						klog.Errorf("invalid state: %v", c.state)
+						continue
+					}
+					// we run the agentic loop for one iteration
+					stream, err := c.llmChat.SendStreaming(ctx, c.currChatContent...)
+					if err != nil {
+						log.Error(err, "error sending streaming LLM response")
+						c.state = AgentStateDone
+						c.pendingFunctionCalls = []gollm.FunctionCall{}
+						continue
+					}
+
+					// Clear our "response" now that we sent the last response
+					c.currChatContent = nil
+
+					// Process each part of the response
+					// var functionCalls []gollm.FunctionCall
+
+					for response, err := range stream {
+						if err != nil {
+							log.Error(err, "error reading streaming LLM response")
+							c.state = AgentStateDone
+							c.pendingFunctionCalls = []gollm.FunctionCall{}
+							continue
+						}
+						if response == nil {
+							// end of streaming response
+							break
+						}
+						klog.Infof("response: %+v", response)
+
+						if len(response.Candidates()) == 0 {
+							log.Error(nil, "No candidates in response")
+							c.state = AgentStateDone
+							c.pendingFunctionCalls = []gollm.FunctionCall{}
+							continue
+						}
+
+						candidate := response.Candidates()[0]
+
+						for _, part := range candidate.Parts() {
+							// Check if it's a text response
+							if text, ok := part.AsText(); ok {
+								log.Info("text response", "text", text)
+								c.OutputCh <- ui.NewAgentTextBlock().WithText(text)
+							}
+
+							// Check if it's a function call
+							if calls, ok := part.AsFunctionCalls(); ok && len(calls) > 0 {
+								log.Info("function calls", "calls", calls)
+								// functionCalls = append(functionCalls, calls...)
+								c.pendingFunctionCalls = append(c.pendingFunctionCalls, calls...)
+							}
+						}
+					}
+
+					// execute all pending function calls
+					for _, call := range c.pendingFunctionCalls {
+						toolCall, err := c.Tools.ParseToolInvocation(ctx, call.Name, call.Arguments)
+						if err != nil {
+							log.Error(err, "error building tool call")
+							c.state = AgentStateDone
+							c.pendingFunctionCalls = []gollm.FunctionCall{}
+							continue
+						}
+
+						// Check if the command is interactive using the tool's implementation
+						isInteractive, err := toolCall.GetTool().IsInteractive(call.Arguments)
+						klog.Infof("isInteractive: %t, err: %v, CallArguments: %+v", isInteractive, err, call.Arguments)
+
+						// If interactive, handle based on whether we're using tool-use shim
+						if isInteractive {
+							// Show error block for both shim enabled and disabled modes
+							errorBlock := ui.NewErrorBlock().SetText(fmt.Sprintf("  %s\n", err.Error()))
+							// c.doc.AddBlock(errorBlock)
+							c.OutputCh <- errorBlock
+
+							// For models with tool-use support (shim disabled), use proper FunctionCallResult
+							// Note: This assumes the model supports sending FunctionCallResult
+							c.currChatContent = append(c.currChatContent, gollm.FunctionCallResult{
+								ID:     call.ID,
+								Name:   call.Name,
+								Result: map[string]any{"error": err.Error()},
+							})
+							c.pendingFunctionCalls = []gollm.FunctionCall{} // reset pending function calls
+							continue                                        // Skip execution for interactive commands
+						}
+
+						// Only show "Running" message and proceed with execution for non-interactive commands
+						toolDescription := toolCall.Description()
+						functionCallRequestBlock := ui.NewFunctionCallRequestBlock().SetDescription(toolDescription)
+						// c.doc.AddBlock(functionCallRequestBlock)
+						c.OutputCh <- functionCallRequestBlock
+
+						// Ask for confirmation only if SkipPermissions is false AND the tool modifies resources.
+						// Use the tool's CheckModifiesResource method to determine if the command modifies resources
+						modifiesResourceStr := toolCall.GetTool().CheckModifiesResource(call.Arguments)
+
+						// If our code detection returned "unknown", fall back to the LLM's assessment if available
+						if modifiesResourceStr == "unknown" {
+							if llmModifies, ok := call.Arguments["modifies_resource"].(string); ok {
+								klog.Infof("Code detection returned 'unknown', falling back to LLM assessment: %s", llmModifies)
+								modifiesResourceStr = llmModifies
+							}
+						}
+
+						if !c.SkipPermissions && modifiesResourceStr != "no" {
+
+							confirmationPrompt := `  Do you want to proceed ?`
+
+							optionsBlock := ui.NewInputOptionBlock().SetPrompt(confirmationPrompt)
+							optionsBlock.AddOption("yes", "Yes", "yes", "y")
+							optionsBlock.AddOption("yes_and_dont_ask_me_again", "Yes, and don't ask me again")
+							optionsBlock.AddOption("no", "No", "no", "n")
+							// c.doc.AddBlock(optionsBlock)
+							c.OutputCh <- optionsBlock
+
+							// Request input from the user by sending a ui.InputOptionBlock on the output channel
+							// remainining part of the loop will be now resumed when we receive a choice input
+							// from the user.
+							c.state = AgentStateWaiting
+							continue
+						}
+
+						output, err := toolCall.InvokeTool(ctx, tools.InvokeToolOptions{
+							Kubeconfig: c.Kubeconfig,
+							WorkDir:    c.workDir,
+						})
+						if err != nil {
+							log.Error(err, "error executing action", "output", output)
+							c.state = AgentStateDone
+							c.pendingFunctionCalls = []gollm.FunctionCall{}
+							continue
+						}
+
+						// Handle timeout message using UI blocks
+						if execResult, ok := output.(*tools.ExecResult); ok && execResult != nil && execResult.StreamType == "timeout" {
+							infoBlock := ui.NewAgentTextBlock().WithText("\nTimeout reached after 7 seconds\n")
+							// c.doc.AddBlock(infoBlock)
+							c.OutputCh <- infoBlock
+						}
+
+						// Add the tool call result to maintain conversation flow
+						functionCallRequestBlock.SetResult(output)
+
+						// If shim is disabled, convert the result to a map and append FunctionCallResult
+						result, err := tools.ToolResultToMap(output)
+						if err != nil {
+							log.Error(err, "error converting tool result to map", "output", output)
+							c.state = AgentStateDone
+							c.pendingFunctionCalls = []gollm.FunctionCall{}
+							continue
+						}
+
+						c.currChatContent = append(c.currChatContent, gollm.FunctionCallResult{
+							ID:     c.pendingFunctionCalls[0].ID,
+							Name:   c.pendingFunctionCalls[0].Name,
+							Result: result,
+						})
+
+						// remove the first function call from the pending function calls
+						c.pendingFunctionCalls = c.pendingFunctionCalls[1:]
+					}
+
+					// If no function calls to be made, we're done
+					if len(c.pendingFunctionCalls) == 0 {
+						log.Info("No function calls to be made, so most likely the task is completed, so we're done.")
+						c.state = AgentStateDone
+						c.currChatContent = []any{}
+						c.currIteration = 0
+						c.pendingFunctionCalls = []gollm.FunctionCall{}
+						continue
+					}
+
+					c.currIteration = c.currIteration + 1
+					continue
+				case ChoiceInput:
+					if c.state == AgentStateWaiting {
+						c.state = AgentStateDone
+						c.pendingFunctionCalls = []gollm.FunctionCall{}
+						c.handleChoice(ctx, userInput.Choice)
+						continue
+					} else {
+						klog.Errorf("invalid state for choice input: %v", c.state)
+						continue
+					}
+				default:
+					klog.Errorf("invalid user input: %v", userInput)
+				}
+			}
+		}
+	}()
+
+	return nil
+}
+
+func (c *Conversation) handleChoice(ctx context.Context, choice string) {
+	log := klog.FromContext(ctx)
+	// if user input is a choice and use has declined the operation,
+	// we need to abort all pending function calls.
+	// update the currChatContent with the choice and keep the agent loop running.
+
+	// Normalize the input
+	switch choice {
+	case "yes":
+	// Proceed with the operation
+	case "yes_and_dont_ask_me_again":
+		c.SkipPermissions = true
+	case "no":
+		infoBlock := ui.NewAgentTextBlock().WithText("Operation was skipped. User declined to run this operation.")
+		// c.doc.AddBlock(infoBlock)
+		c.OutputCh <- infoBlock
+
+		c.currChatContent = append(c.currChatContent, gollm.FunctionCallResult{
+			ID:   c.pendingFunctionCalls[0].ID,
+			Name: c.pendingFunctionCalls[0].Name,
+			Result: map[string]any{
+				"error":     "User declined to run this operation.",
+				"status":    "declined",
+				"retryable": false,
+			},
+		})
+		c.pendingFunctionCalls = []gollm.FunctionCall{}
+	default:
+		// This case should technically not be reachable due to AskForConfirmation loop
+		err := fmt.Errorf("invalid confirmation choice: %q", choice)
+		log.Error(err, "Invalid choice received from AskForConfirmation")
+		// a.doc.AddBlock(ui.NewErrorBlock().SetText("Invalid choice received. Cancelling operation."))
+		c.OutputCh <- ui.NewErrorBlock().SetText("Invalid choice received. Cancelling operation.")
+		c.pendingFunctionCalls = []gollm.FunctionCall{}
+	}
 }
 
 // RunOneRound executes a chat-based agentic loop with the LLM using function calling.
@@ -213,18 +534,14 @@ func (a *Conversation) RunOneRound(ctx context.Context, query string) error {
 				// Check if it's a text response
 				if text, ok := part.AsText(); ok {
 					log.Info("text response", "text", text)
-					if agentTextBlock == nil {
-						agentTextBlock = ui.NewAgentTextBlock()
-						agentTextBlock.SetStreaming(true)
-						a.doc.AddBlock(agentTextBlock)
-					}
-					agentTextBlock.AppendText(text)
+					a.OutputCh <- ui.NewAgentTextBlock().WithText(text)
 				}
 
 				// Check if it's a function call
 				if calls, ok := part.AsFunctionCalls(); ok && len(calls) > 0 {
 					log.Info("function calls", "calls", calls)
 					functionCalls = append(functionCalls, calls...)
+					a.pendingFunctionCalls = append(a.pendingFunctionCalls, calls...)
 				}
 			}
 		}
@@ -254,6 +571,7 @@ func (a *Conversation) RunOneRound(ctx context.Context, query string) error {
 				// Show error block for both shim enabled and disabled modes
 				errorBlock := ui.NewErrorBlock().SetText(fmt.Sprintf("  %s\n", err.Error()))
 				a.doc.AddBlock(errorBlock)
+				a.OutputCh <- errorBlock
 
 				if a.EnableToolUseShim {
 					// Add the error as an observation
@@ -275,6 +593,7 @@ func (a *Conversation) RunOneRound(ctx context.Context, query string) error {
 			toolDescription := toolCall.Description()
 			functionCallRequestBlock := ui.NewFunctionCallRequestBlock().SetDescription(toolDescription)
 			a.doc.AddBlock(functionCallRequestBlock)
+			a.OutputCh <- functionCallRequestBlock
 
 			// Ask for confirmation only if SkipPermissions is false AND the tool modifies resources.
 			// Use the tool's CheckModifiesResource method to determine if the command modifies resources
@@ -312,7 +631,10 @@ func (a *Conversation) RunOneRound(ctx context.Context, query string) error {
 				case "yes_and_dont_ask_me_again":
 					a.SkipPermissions = true
 				case "no":
-					a.doc.AddBlock(ui.NewAgentTextBlock().WithText("Operation was skipped. User declined to run this operation."))
+					infoBlock := ui.NewAgentTextBlock().WithText("Operation was skipped. User declined to run this operation.")
+					a.doc.AddBlock(infoBlock)
+					a.OutputCh <- infoBlock
+
 					currChatContent = append(currChatContent, gollm.FunctionCallResult{
 						ID:   call.ID,
 						Name: call.Name,
@@ -344,7 +666,9 @@ func (a *Conversation) RunOneRound(ctx context.Context, query string) error {
 
 			// Handle timeout message using UI blocks
 			if execResult, ok := output.(*tools.ExecResult); ok && execResult != nil && execResult.StreamType == "timeout" {
-				a.doc.AddBlock(ui.NewAgentTextBlock().WithText("\nTimeout reached after 7 seconds\n"))
+				infoBlock := ui.NewAgentTextBlock().WithText("\nTimeout reached after 7 seconds\n")
+				a.doc.AddBlock(infoBlock)
+				a.OutputCh <- infoBlock
 			}
 
 			// Add the tool call result to maintain conversation flow
@@ -383,6 +707,8 @@ func (a *Conversation) RunOneRound(ctx context.Context, query string) error {
 	log.Info("Max iterations reached", "iterations", maxIterations)
 	errorBlock := ui.NewErrorBlock().SetText(fmt.Sprintf("Sorry, couldn't complete the task after %d iterations.\n", maxIterations))
 	a.doc.AddBlock(errorBlock)
+	a.OutputCh <- errorBlock
+
 	return fmt.Errorf("max iterations reached")
 }
 
