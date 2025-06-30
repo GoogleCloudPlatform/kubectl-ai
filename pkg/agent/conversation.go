@@ -55,6 +55,7 @@ const (
 type Conversation struct {
 	UserInputCh chan any
 	OutputCh    chan any
+	ResumeCh    chan any
 
 	// tool calls that are pending execution
 	// These will typically be all the tool calls suggested by the LLM in the
@@ -191,12 +192,16 @@ func (c *Conversation) Run(ctx context.Context) error {
 
 	if c.currIteration == 0 && c.state == AgentStateIdle {
 		c.OutputCh <- ui.NewAgentTextBlock().WithText("Hey there, what can I help you with today?")
-		c.OutputCh <- ui.NewInputTextBlock().SetEditable(true)
+		// c.OutputCh <- ui.NewInputTextBlock().SetEditable(true)
 	}
 
 	// main agent loop
 	go func() {
+		resumeLoop := true
 		for {
+			if c.state == AgentStateIdle || c.state == AgentStateDone {
+				c.OutputCh <- ui.NewInputTextBlock()
+			}
 			select {
 			case <-ctx.Done():
 				log.Info("Agent loop done")
@@ -206,18 +211,8 @@ func (c *Conversation) Run(ctx context.Context) error {
 				switch userInput := userInput.(type) {
 				case string:
 					log.Info("Text input", "text", userInput)
-					// if we are waiting for user's choice, we treat the text input as a choice
-					if c.state == AgentStateWaiting {
-						c.state = AgentStateDone
-						c.pendingFunctionCalls = []gollm.FunctionCall{}
-						// we resume the execution of the pending function call
-						c.handleChoice(ctx, userInput)
-						continue
-					}
 
-					// if we are in idle state, we start a new iteration
-					// of the agentic loop.
-					if c.state == AgentStateIdle {
+					if c.state == AgentStateIdle || c.state == AgentStateDone {
 						c.state = AgentStateRunning
 						c.currIteration = 0
 						c.currChatContent = []any{userInput}
@@ -226,13 +221,30 @@ func (c *Conversation) Run(ctx context.Context) error {
 						klog.Errorf("invalid state: %v", c.state)
 						continue
 					}
+					resumeLoop = true
+				case int32:
+					if c.state == AgentStateWaiting {
+						resumeLoop = c.handleChoice(ctx, userInput)
+					} else {
+						klog.Errorf("invalid state for choice input: %v", c.state)
+						continue
+					}
+				default:
+					klog.Errorf("invalid user input: %v", userInput)
+					resumeLoop = false
+				}
+				if !resumeLoop {
+					break
+				}
+
+				for c.currIteration < c.MaxIterations {
 					// we run the agentic loop for one iteration
 					stream, err := c.llmChat.SendStreaming(ctx, c.currChatContent...)
 					if err != nil {
 						log.Error(err, "error sending streaming LLM response")
 						c.state = AgentStateDone
 						c.pendingFunctionCalls = []gollm.FunctionCall{}
-						continue
+						break
 					}
 
 					// Clear our "response" now that we sent the last response
@@ -246,7 +258,7 @@ func (c *Conversation) Run(ctx context.Context) error {
 							log.Error(err, "error reading streaming LLM response")
 							c.state = AgentStateDone
 							c.pendingFunctionCalls = []gollm.FunctionCall{}
-							continue
+							break
 						}
 						if response == nil {
 							// end of streaming response
@@ -258,7 +270,7 @@ func (c *Conversation) Run(ctx context.Context) error {
 							log.Error(nil, "No candidates in response")
 							c.state = AgentStateDone
 							c.pendingFunctionCalls = []gollm.FunctionCall{}
-							continue
+							break
 						}
 
 						candidate := response.Candidates()[0]
@@ -277,6 +289,17 @@ func (c *Conversation) Run(ctx context.Context) error {
 								c.pendingFunctionCalls = append(c.pendingFunctionCalls, calls...)
 							}
 						}
+					}
+
+					// If no function calls to be made, we're done
+					if len(c.pendingFunctionCalls) == 0 {
+						log.Info("No function calls to be made, so most likely the task is completed, so we're done.")
+						c.state = AgentStateDone
+						c.currChatContent = []any{}
+						c.currIteration = 0
+						c.pendingFunctionCalls = []gollm.FunctionCall{}
+						// c.OutputCh <- ui.NewAgentTextBlock().WithText("Task completed.")
+						break
 					}
 
 					// execute all pending function calls
@@ -387,31 +410,14 @@ func (c *Conversation) Run(ctx context.Context) error {
 						c.pendingFunctionCalls = c.pendingFunctionCalls[1:]
 					}
 
-					// If no function calls to be made, we're done
-					if len(c.pendingFunctionCalls) == 0 {
-						log.Info("No function calls to be made, so most likely the task is completed, so we're done.")
-						c.state = AgentStateDone
-						c.currChatContent = []any{}
-						c.currIteration = 0
-						c.pendingFunctionCalls = []gollm.FunctionCall{}
-						continue
-					}
-
 					c.currIteration = c.currIteration + 1
-					continue
-				case ChoiceInput:
-					if c.state == AgentStateWaiting {
-						c.state = AgentStateDone
-						c.pendingFunctionCalls = []gollm.FunctionCall{}
-						c.handleChoice(ctx, userInput.Choice)
-						continue
-					} else {
-						klog.Errorf("invalid state for choice input: %v", c.state)
-						continue
-					}
-				default:
-					klog.Errorf("invalid user input: %v", userInput)
 				}
+				c.state = AgentStateDone
+				c.pendingFunctionCalls = []gollm.FunctionCall{}
+				if c.currIteration >= c.MaxIterations {
+					c.OutputCh <- ui.NewAgentTextBlock().WithText("Maximum number of iterations reached.")
+				}
+
 			}
 		}
 	}()
@@ -419,7 +425,7 @@ func (c *Conversation) Run(ctx context.Context) error {
 	return nil
 }
 
-func (c *Conversation) handleChoice(ctx context.Context, choice string) {
+func (c *Conversation) handleChoice(ctx context.Context, choice int32) (resumeLoop bool) {
 	log := klog.FromContext(ctx)
 	// if user input is a choice and use has declined the operation,
 	// we need to abort all pending function calls.
@@ -427,11 +433,12 @@ func (c *Conversation) handleChoice(ctx context.Context, choice string) {
 
 	// Normalize the input
 	switch choice {
-	case "yes":
-	// Proceed with the operation
-	case "yes_and_dont_ask_me_again":
+	case 1:
+		resumeLoop = true
+	case 2:
 		c.SkipPermissions = true
-	case "no":
+		resumeLoop = true
+	case 3:
 		infoBlock := ui.NewAgentTextBlock().WithText("Operation was skipped. User declined to run this operation.")
 		// c.doc.AddBlock(infoBlock)
 		c.OutputCh <- infoBlock
@@ -446,6 +453,7 @@ func (c *Conversation) handleChoice(ctx context.Context, choice string) {
 			},
 		})
 		c.pendingFunctionCalls = []gollm.FunctionCall{}
+		resumeLoop = true
 	default:
 		// This case should technically not be reachable due to AskForConfirmation loop
 		err := fmt.Errorf("invalid confirmation choice: %q", choice)
@@ -453,7 +461,9 @@ func (c *Conversation) handleChoice(ctx context.Context, choice string) {
 		// a.doc.AddBlock(ui.NewErrorBlock().SetText("Invalid choice received. Cancelling operation."))
 		c.OutputCh <- ui.NewErrorBlock().SetText("Invalid choice received. Cancelling operation.")
 		c.pendingFunctionCalls = []gollm.FunctionCall{}
+		resumeLoop = false
 	}
+	return resumeLoop
 }
 
 // RunOneRound executes a chat-based agentic loop with the LLM using function calling.

@@ -296,15 +296,13 @@ func (u *TerminalUI) handleBlock(block Block) {
 			for {
 				response, err := rlInstance.Readline()
 				if err != nil {
-					if err == readline.ErrInterrupt { // Handle Ctrl+C
-						block.Selection().Set("", io.EOF)
-						return
-					} else if err == io.EOF { // Handle Ctrl+D
-						block.Selection().Set("", io.EOF)
-						return
-					} else {
-						block.Selection().Set("", err)
-						return
+					switch err {
+					case readline.ErrInterrupt: // Handle Ctrl+C
+						// u.UserInputCh <- io.EOF
+					case io.EOF: // Handle Ctrl+D
+						// u.UserInputCh <- io.EOF
+					default:
+						// u.UserInputCh <- err
 					}
 				}
 
@@ -312,7 +310,12 @@ func (u *TerminalUI) handleBlock(block Block) {
 				optionKey, foundMatchingOption := inputMap[response]
 				if foundMatchingOption {
 					block.Selection().Set(optionKey, nil)
-					u.UserInputCh <- optionKey
+					choice, err := strconv.Atoi(response)
+					if err != nil {
+						klog.Errorf("error converting option key to int: %v", err)
+						return
+					}
+					u.UserInputCh <- int32(choice)
 					break // Exit loop on valid choice
 				} else {
 					fmt.Printf("\n  Invalid choice. Please enter one of: %s\n", strings.Join(allOptions, ", "))
