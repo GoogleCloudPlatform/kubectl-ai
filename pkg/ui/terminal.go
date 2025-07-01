@@ -194,7 +194,7 @@ func (u *TerminalUI) handleBlock(block Block) {
 			u.currentBlockText += text
 			text = ""
 		} else {
-			// u.currentBlockText = text
+			u.currentBlockText += text
 			text = u.currentBlockText
 			u.currentBlockText = ""
 			klog.Infof("currentBlockText: %s", u.currentBlockText)

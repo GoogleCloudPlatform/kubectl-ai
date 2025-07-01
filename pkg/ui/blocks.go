@@ -72,6 +72,11 @@ func (b *AgentTextBlock) WithText(agentText string) *AgentTextBlock {
 	return b
 }
 
+func (b *AgentTextBlock) WithStreaming(streaming bool) *AgentTextBlock {
+	b.streaming = streaming
+	return b
+}
+
 func (b *AgentTextBlock) AppendText(text string) {
 	b.text = b.text + text
 	b.doc.blockChanged(b)

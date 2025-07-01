@@ -183,7 +183,8 @@ func (c *Agent) Run(ctx context.Context) error {
 	log.Info("Starting agent loop")
 
 	if c.currIteration == 0 && c.state == AgentStateIdle {
-		c.Output <- ui.NewAgentTextBlock().WithText("Hey there, what can I help you with today?")
+		textBlock := ui.NewAgentTextBlock().WithText("Hey there, what can I help you with today?")
+		c.Output <- textBlock
 		// c.OutputCh <- ui.NewInputTextBlock().SetEditable(true)
 	}
 
@@ -236,49 +237,11 @@ func (c *Agent) Run(ctx context.Context) error {
 					}
 					dispatchToolCalls := c.handleChoice(ctx, u)
 					if dispatchToolCalls {
-						// execute all pending function calls
-						for _, call := range c.pendingFunctionCalls {
-							// Only show "Running" message and proceed with execution for non-interactive commands
-							toolDescription := call.ParsedToolCall.Description()
-							functionCallRequestBlock := ui.NewFunctionCallRequestBlock().SetDescription(toolDescription)
-							// c.doc.AddBlock(functionCallRequestBlock)
-							c.Output <- functionCallRequestBlock
-
-							output, err := call.ParsedToolCall.InvokeTool(ctx, tools.InvokeToolOptions{
-								Kubeconfig: c.Kubeconfig,
-								WorkDir:    c.workDir,
-							})
-							if err != nil {
-								log.Error(err, "error executing action", "output", output)
-								c.state = AgentStateDone
-								c.pendingFunctionCalls = []ToolCallAnalysis{}
-								continue
-							}
-
-							// Handle timeout message using UI blocks
-							if execResult, ok := output.(*tools.ExecResult); ok && execResult != nil && execResult.StreamType == "timeout" {
-								infoBlock := ui.NewAgentTextBlock().WithText("\nTimeout reached after 7 seconds\n")
-								// c.doc.AddBlock(infoBlock)
-								c.Output <- infoBlock
-							}
-
-							// Add the tool call result to maintain conversation flow
-							functionCallRequestBlock.SetResult(output)
-
-							// If shim is disabled, convert the result to a map and append FunctionCallResult
-							result, err := tools.ToolResultToMap(output)
-							if err != nil {
-								log.Error(err, "error converting tool result to map", "output", output)
-								c.state = AgentStateDone
-								c.pendingFunctionCalls = []ToolCallAnalysis{}
-								continue
-							}
-
-							c.currChatContent = append(c.currChatContent, gollm.FunctionCallResult{
-								ID:     call.FunctionCall.ID,
-								Name:   call.FunctionCall.Name,
-								Result: result,
-							})
+						if err := c.DispatchToolCalls(ctx); err != nil {
+							log.Error(err, "error dispatching tool calls")
+							c.state = AgentStateDone
+							c.pendingFunctionCalls = []ToolCallAnalysis{}
+							continue
 						}
 						// Clear pending function calls after execution
 						c.pendingFunctionCalls = []ToolCallAnalysis{}
@@ -305,8 +268,7 @@ func (c *Agent) Run(ctx context.Context) error {
 
 				// We create the agent text block here; this lets renderers render a "thinking" state
 				// before the first response arrives.
-				agentTextBlock = ui.NewAgentTextBlock()
-				agentTextBlock.SetStreaming(true)
+				agentTextBlock = ui.NewAgentTextBlock().WithStreaming(true)
 				// a.doc.AddBlock(agentTextBlock)
 				c.Output <- agentTextBlock
 
@@ -363,9 +325,7 @@ func (c *Agent) Run(ctx context.Context) error {
 						if text, ok := part.AsText(); ok {
 							log.Info("text response", "text", text)
 							streamedText += text
-							agentTextBlock = ui.NewAgentTextBlock().WithText(text)
-							agentTextBlock.SetStreaming(true)
-							c.Output <- agentTextBlock
+							c.Output <- ui.NewAgentTextBlock().WithText(text).WithStreaming(true)
 						}
 
 						// Check if it's a function call
@@ -455,57 +415,64 @@ func (c *Agent) Run(ctx context.Context) error {
 
 				// now we are in the clear to dispatch the tool calls
 
-				// execute all pending function calls
-				for _, call := range c.pendingFunctionCalls {
-					// Only show "Running" message and proceed with execution for non-interactive commands
-					toolDescription := call.ParsedToolCall.Description()
-					functionCallRequestBlock := ui.NewFunctionCallRequestBlock().SetDescription(toolDescription)
-					// c.doc.AddBlock(functionCallRequestBlock)
-					c.Output <- functionCallRequestBlock
-
-					output, err := call.ParsedToolCall.InvokeTool(ctx, tools.InvokeToolOptions{
-						Kubeconfig: c.Kubeconfig,
-						WorkDir:    c.workDir,
-					})
-					if err != nil {
-						log.Error(err, "error executing action", "output", output)
-						c.state = AgentStateDone
-						c.pendingFunctionCalls = []ToolCallAnalysis{}
-						continue
-					}
-
-					// Handle timeout message using UI blocks
-					if execResult, ok := output.(*tools.ExecResult); ok && execResult != nil && execResult.StreamType == "timeout" {
-						infoBlock := ui.NewAgentTextBlock().WithText("\nTimeout reached after 7 seconds\n")
-						// c.doc.AddBlock(infoBlock)
-						c.Output <- infoBlock
-					}
-
-					// Add the tool call result to maintain conversation flow
-					functionCallRequestBlock.SetResult(output)
-
-					// If shim is disabled, convert the result to a map and append FunctionCallResult
-					result, err := tools.ToolResultToMap(output)
-					if err != nil {
-						log.Error(err, "error converting tool result to map", "output", output)
-						c.state = AgentStateDone
-						c.pendingFunctionCalls = []ToolCallAnalysis{}
-						continue
-					}
-
-					c.currChatContent = append(c.currChatContent, gollm.FunctionCallResult{
-						ID:     call.FunctionCall.ID,
-						Name:   call.FunctionCall.Name,
-						Result: result,
-					})
+				if err := c.DispatchToolCalls(ctx); err != nil {
+					log.Error(err, "error dispatching tool calls")
+					c.state = AgentStateDone
+					c.pendingFunctionCalls = []ToolCallAnalysis{}
+					continue
 				}
-				c.pendingFunctionCalls = []ToolCallAnalysis{}
 
 				c.currIteration = c.currIteration + 1
+				c.pendingFunctionCalls = []ToolCallAnalysis{}
 			}
 		}
 	}()
 
+	return nil
+}
+
+func (c *Agent) DispatchToolCalls(ctx context.Context) error {
+	log := klog.FromContext(ctx)
+	// execute all pending function calls
+	for _, call := range c.pendingFunctionCalls {
+		// Only show "Running" message and proceed with execution for non-interactive commands
+		toolDescription := call.ParsedToolCall.Description()
+		functionCallRequestBlock := ui.NewFunctionCallRequestBlock().SetDescription(toolDescription)
+		// c.doc.AddBlock(functionCallRequestBlock)
+		c.Output <- functionCallRequestBlock
+
+		output, err := call.ParsedToolCall.InvokeTool(ctx, tools.InvokeToolOptions{
+			Kubeconfig: c.Kubeconfig,
+			WorkDir:    c.workDir,
+		})
+		if err != nil {
+			log.Error(err, "error executing action", "output", output)
+			return err
+		}
+
+		// Handle timeout message using UI blocks
+		if execResult, ok := output.(*tools.ExecResult); ok && execResult != nil && execResult.StreamType == "timeout" {
+			infoBlock := ui.NewAgentTextBlock().WithText("\nTimeout reached after 7 seconds\n")
+			// c.doc.AddBlock(infoBlock)
+			c.Output <- infoBlock
+		}
+
+		// Add the tool call result to maintain conversation flow
+		functionCallRequestBlock.SetResult(output)
+
+		// If shim is disabled, convert the result to a map and append FunctionCallResult
+		result, err := tools.ToolResultToMap(output)
+		if err != nil {
+			log.Error(err, "error converting tool result to map", "output", output)
+			return err
+		}
+
+		c.currChatContent = append(c.currChatContent, gollm.FunctionCallResult{
+			ID:     call.FunctionCall.ID,
+			Name:   call.FunctionCall.Name,
+			Result: result,
+		})
+	}
 	return nil
 }
 
