@@ -274,7 +274,18 @@ func (u *TerminalUI) handleBlock(block Block) {
 				optionKey, foundMatchingOption := inputMap[response]
 				if foundMatchingOption {
 					block.Selection().Set(optionKey, nil)
-					u.UserInputCh <- optionKey
+					var choiceIndex = -1
+					for i, opt := range block.Options {
+						if opt.Key == optionKey {
+							choiceIndex = i
+							break
+						}
+					}
+					if choiceIndex == -1 {
+						klog.Errorf("could not find option with key %q", optionKey)
+						return
+					}
+					u.UserInputCh <- int32(choiceIndex + 1)
 					break // Exit loop on valid choice
 				} else {
 					fmt.Printf("  Invalid choice. Please enter one of: %s\n", strings.Join(allOptions, ", "))
@@ -310,12 +321,18 @@ func (u *TerminalUI) handleBlock(block Block) {
 				optionKey, foundMatchingOption := inputMap[response]
 				if foundMatchingOption {
 					block.Selection().Set(optionKey, nil)
-					choice, err := strconv.Atoi(response)
-					if err != nil {
-						klog.Errorf("error converting option key to int: %v", err)
+					var choiceIndex = -1
+					for i, opt := range block.Options {
+						if opt.Key == optionKey {
+							choiceIndex = i
+							break
+						}
+					}
+					if choiceIndex == -1 {
+						klog.Errorf("could not find option with key %q", optionKey)
 						return
 					}
-					u.UserInputCh <- int32(choice)
+					u.UserInputCh <- int32(choiceIndex + 1)
 					break // Exit loop on valid choice
 				} else {
 					fmt.Printf("\n  Invalid choice. Please enter one of: %s\n", strings.Join(allOptions, ", "))
@@ -487,7 +504,18 @@ func (u *TerminalUI) DocumentChanged(doc *Document, block Block) {
 				optionKey, foundMatchingOption := inputMap[response]
 				if foundMatchingOption {
 					block.Selection().Set(optionKey, nil)
-					u.UserInputCh <- optionKey
+					var choiceIndex = -1
+					for i, opt := range block.Options {
+						if opt.Key == optionKey {
+							choiceIndex = i
+							break
+						}
+					}
+					if choiceIndex == -1 {
+						klog.Errorf("could not find option with key %q", optionKey)
+						return
+					}
+					u.UserInputCh <- int32(choiceIndex + 1)
 					break // Exit loop on valid choice
 				} else {
 					fmt.Printf("  Invalid choice. Please enter one of: %s\n", strings.Join(allOptions, ", "))
@@ -525,7 +553,18 @@ func (u *TerminalUI) DocumentChanged(doc *Document, block Block) {
 				optionKey, foundMatchingOption := inputMap[response]
 				if foundMatchingOption {
 					block.Selection().Set(optionKey, nil)
-					u.UserInputCh <- optionKey
+					var choiceIndex = -1
+					for i, opt := range block.Options {
+						if opt.Key == optionKey {
+							choiceIndex = i
+							break
+						}
+					}
+					if choiceIndex == -1 {
+						klog.Errorf("could not find option with key %q", optionKey)
+						return
+					}
+					u.UserInputCh <- int32(choiceIndex + 1)
 					break // Exit loop on valid choice
 				} else {
 					fmt.Printf("\n  Invalid choice. Please enter one of: %s\n", strings.Join(allOptions, ", "))

@@ -60,7 +60,7 @@ type Conversation struct {
 	// tool calls that are pending execution
 	// These will typically be all the tool calls suggested by the LLM in the
 	// previous iteration of the agentic loop.
-	pendingFunctionCalls []gollm.FunctionCall
+	pendingFunctionCalls []ToolCallAnalysis
 
 	// currChatContent tracks chat content that needs to be sent
 	// to the LLM in the current iteration of the agentic loop.
@@ -197,227 +197,283 @@ func (c *Conversation) Run(ctx context.Context) error {
 
 	// main agent loop
 	go func() {
-		resumeLoop := true
 		for {
+			var userInput any
 			if c.state == AgentStateIdle || c.state == AgentStateDone {
 				c.OutputCh <- ui.NewInputTextBlock()
+				select {
+				case <-ctx.Done():
+					log.Info("Agent loop done")
+					return
+				case userInput = <-c.UserInputCh:
+				}
+			} else if c.state == AgentStateWaiting {
+				select {
+				case <-ctx.Done():
+					log.Info("Agent loop done")
+					return
+				case userInput = <-c.UserInputCh:
+				}
 			}
-			select {
-			case <-ctx.Done():
-				log.Info("Agent loop done")
-				return
-			case userInput := <-c.UserInputCh:
+
+			if userInput != nil {
 				log.Info("User input", "userInput", userInput)
-				switch userInput := userInput.(type) {
+				switch u := userInput.(type) {
 				case string:
-					log.Info("Text input", "text", userInput)
+					log.Info("Text input", "text", u)
 
 					if c.state == AgentStateIdle || c.state == AgentStateDone {
 						c.state = AgentStateRunning
 						c.currIteration = 0
-						c.currChatContent = []any{userInput}
-						c.pendingFunctionCalls = []gollm.FunctionCall{}
+						c.currChatContent = []any{u}
+						c.pendingFunctionCalls = []ToolCallAnalysis{}
 					} else {
 						klog.Errorf("invalid state: %v", c.state)
 						continue
 					}
-					resumeLoop = true
 				case int32:
-					if c.state == AgentStateWaiting {
-						resumeLoop = c.handleChoice(ctx, userInput)
-					} else {
-						klog.Errorf("invalid state for choice input: %v", c.state)
+					if c.state != AgentStateWaiting {
+						klog.Errorf("invalid state for choice: %v", c.state)
 						continue
+					}
+					dispatchToolCalls := c.handleChoice(ctx, u)
+					if dispatchToolCalls {
+						// execute all pending function calls
+						for _, call := range c.pendingFunctionCalls {
+							// Only show "Running" message and proceed with execution for non-interactive commands
+							toolDescription := call.ParsedToolCall.Description()
+							functionCallRequestBlock := ui.NewFunctionCallRequestBlock().SetDescription(toolDescription)
+							// c.doc.AddBlock(functionCallRequestBlock)
+							c.OutputCh <- functionCallRequestBlock
+
+							output, err := call.ParsedToolCall.InvokeTool(ctx, tools.InvokeToolOptions{
+								Kubeconfig: c.Kubeconfig,
+								WorkDir:    c.workDir,
+							})
+							if err != nil {
+								log.Error(err, "error executing action", "output", output)
+								c.state = AgentStateDone
+								c.pendingFunctionCalls = []ToolCallAnalysis{}
+								continue
+							}
+
+							// Handle timeout message using UI blocks
+							if execResult, ok := output.(*tools.ExecResult); ok && execResult != nil && execResult.StreamType == "timeout" {
+								infoBlock := ui.NewAgentTextBlock().WithText("\nTimeout reached after 7 seconds\n")
+								// c.doc.AddBlock(infoBlock)
+								c.OutputCh <- infoBlock
+							}
+
+							// Add the tool call result to maintain conversation flow
+							functionCallRequestBlock.SetResult(output)
+
+							// If shim is disabled, convert the result to a map and append FunctionCallResult
+							result, err := tools.ToolResultToMap(output)
+							if err != nil {
+								log.Error(err, "error converting tool result to map", "output", output)
+								c.state = AgentStateDone
+								c.pendingFunctionCalls = []ToolCallAnalysis{}
+								continue
+							}
+
+							c.currChatContent = append(c.currChatContent, gollm.FunctionCallResult{
+								ID:     call.FunctionCall.ID,
+								Name:   call.FunctionCall.Name,
+								Result: result,
+							})
+						}
+						// Clear pending function calls after execution
+						c.pendingFunctionCalls = []ToolCallAnalysis{}
+						c.state = AgentStateRunning
+					} else {
+						// if user has declined, we are done with this iteration
+						c.state = AgentStateDone
 					}
 				default:
 					klog.Errorf("invalid user input: %v", userInput)
-					resumeLoop = false
 				}
-				if !resumeLoop {
-					break
-				}
+			}
 
-				for c.currIteration < c.MaxIterations {
-					// we run the agentic loop for one iteration
-					stream, err := c.llmChat.SendStreaming(ctx, c.currChatContent...)
-					if err != nil {
-						log.Error(err, "error sending streaming LLM response")
-						c.state = AgentStateDone
-						c.pendingFunctionCalls = []gollm.FunctionCall{}
-						break
-					}
-
-					// Clear our "response" now that we sent the last response
-					c.currChatContent = nil
-
-					// Process each part of the response
-					// var functionCalls []gollm.FunctionCall
-
-					for response, err := range stream {
-						if err != nil {
-							log.Error(err, "error reading streaming LLM response")
-							c.state = AgentStateDone
-							c.pendingFunctionCalls = []gollm.FunctionCall{}
-							break
-						}
-						if response == nil {
-							// end of streaming response
-							break
-						}
-						klog.Infof("response: %+v", response)
-
-						if len(response.Candidates()) == 0 {
-							log.Error(nil, "No candidates in response")
-							c.state = AgentStateDone
-							c.pendingFunctionCalls = []gollm.FunctionCall{}
-							break
-						}
-
-						candidate := response.Candidates()[0]
-
-						for _, part := range candidate.Parts() {
-							// Check if it's a text response
-							if text, ok := part.AsText(); ok {
-								log.Info("text response", "text", text)
-								c.OutputCh <- ui.NewAgentTextBlock().WithText(text)
-							}
-
-							// Check if it's a function call
-							if calls, ok := part.AsFunctionCalls(); ok && len(calls) > 0 {
-								log.Info("function calls", "calls", calls)
-								// functionCalls = append(functionCalls, calls...)
-								c.pendingFunctionCalls = append(c.pendingFunctionCalls, calls...)
-							}
-						}
-					}
-
-					// If no function calls to be made, we're done
-					if len(c.pendingFunctionCalls) == 0 {
-						log.Info("No function calls to be made, so most likely the task is completed, so we're done.")
-						c.state = AgentStateDone
-						c.currChatContent = []any{}
-						c.currIteration = 0
-						c.pendingFunctionCalls = []gollm.FunctionCall{}
-						// c.OutputCh <- ui.NewAgentTextBlock().WithText("Task completed.")
-						break
-					}
-
-					// execute all pending function calls
-					for _, call := range c.pendingFunctionCalls {
-						toolCall, err := c.Tools.ParseToolInvocation(ctx, call.Name, call.Arguments)
-						if err != nil {
-							log.Error(err, "error building tool call")
-							c.state = AgentStateDone
-							c.pendingFunctionCalls = []gollm.FunctionCall{}
-							continue
-						}
-
-						// Check if the command is interactive using the tool's implementation
-						isInteractive, err := toolCall.GetTool().IsInteractive(call.Arguments)
-						klog.Infof("isInteractive: %t, err: %v, CallArguments: %+v", isInteractive, err, call.Arguments)
-
-						// If interactive, handle based on whether we're using tool-use shim
-						if isInteractive {
-							// Show error block for both shim enabled and disabled modes
-							errorBlock := ui.NewErrorBlock().SetText(fmt.Sprintf("  %s\n", err.Error()))
-							// c.doc.AddBlock(errorBlock)
-							c.OutputCh <- errorBlock
-
-							// For models with tool-use support (shim disabled), use proper FunctionCallResult
-							// Note: This assumes the model supports sending FunctionCallResult
-							c.currChatContent = append(c.currChatContent, gollm.FunctionCallResult{
-								ID:     call.ID,
-								Name:   call.Name,
-								Result: map[string]any{"error": err.Error()},
-							})
-							c.pendingFunctionCalls = []gollm.FunctionCall{} // reset pending function calls
-							continue                                        // Skip execution for interactive commands
-						}
-
-						// Only show "Running" message and proceed with execution for non-interactive commands
-						toolDescription := toolCall.Description()
-						functionCallRequestBlock := ui.NewFunctionCallRequestBlock().SetDescription(toolDescription)
-						// c.doc.AddBlock(functionCallRequestBlock)
-						c.OutputCh <- functionCallRequestBlock
-
-						// Ask for confirmation only if SkipPermissions is false AND the tool modifies resources.
-						// Use the tool's CheckModifiesResource method to determine if the command modifies resources
-						modifiesResourceStr := toolCall.GetTool().CheckModifiesResource(call.Arguments)
-
-						// If our code detection returned "unknown", fall back to the LLM's assessment if available
-						if modifiesResourceStr == "unknown" {
-							if llmModifies, ok := call.Arguments["modifies_resource"].(string); ok {
-								klog.Infof("Code detection returned 'unknown', falling back to LLM assessment: %s", llmModifies)
-								modifiesResourceStr = llmModifies
-							}
-						}
-
-						if !c.SkipPermissions && modifiesResourceStr != "no" {
-
-							confirmationPrompt := `  Do you want to proceed ?`
-
-							optionsBlock := ui.NewInputOptionBlock().SetPrompt(confirmationPrompt)
-							optionsBlock.AddOption("yes", "Yes", "yes", "y")
-							optionsBlock.AddOption("yes_and_dont_ask_me_again", "Yes, and don't ask me again")
-							optionsBlock.AddOption("no", "No", "no", "n")
-							// c.doc.AddBlock(optionsBlock)
-							c.OutputCh <- optionsBlock
-
-							// Request input from the user by sending a ui.InputOptionBlock on the output channel
-							// remainining part of the loop will be now resumed when we receive a choice input
-							// from the user.
-							c.state = AgentStateWaiting
-							continue
-						}
-
-						output, err := toolCall.InvokeTool(ctx, tools.InvokeToolOptions{
-							Kubeconfig: c.Kubeconfig,
-							WorkDir:    c.workDir,
-						})
-						if err != nil {
-							log.Error(err, "error executing action", "output", output)
-							c.state = AgentStateDone
-							c.pendingFunctionCalls = []gollm.FunctionCall{}
-							continue
-						}
-
-						// Handle timeout message using UI blocks
-						if execResult, ok := output.(*tools.ExecResult); ok && execResult != nil && execResult.StreamType == "timeout" {
-							infoBlock := ui.NewAgentTextBlock().WithText("\nTimeout reached after 7 seconds\n")
-							// c.doc.AddBlock(infoBlock)
-							c.OutputCh <- infoBlock
-						}
-
-						// Add the tool call result to maintain conversation flow
-						functionCallRequestBlock.SetResult(output)
-
-						// If shim is disabled, convert the result to a map and append FunctionCallResult
-						result, err := tools.ToolResultToMap(output)
-						if err != nil {
-							log.Error(err, "error converting tool result to map", "output", output)
-							c.state = AgentStateDone
-							c.pendingFunctionCalls = []gollm.FunctionCall{}
-							continue
-						}
-
-						c.currChatContent = append(c.currChatContent, gollm.FunctionCallResult{
-							ID:     c.pendingFunctionCalls[0].ID,
-							Name:   c.pendingFunctionCalls[0].Name,
-							Result: result,
-						})
-
-						// remove the first function call from the pending function calls
-						c.pendingFunctionCalls = c.pendingFunctionCalls[1:]
-					}
-
-					c.currIteration = c.currIteration + 1
-				}
-				c.state = AgentStateDone
-				c.pendingFunctionCalls = []gollm.FunctionCall{}
+			if c.state == AgentStateRunning {
 				if c.currIteration >= c.MaxIterations {
 					c.OutputCh <- ui.NewAgentTextBlock().WithText("Maximum number of iterations reached.")
+					c.state = AgentStateDone
+					c.pendingFunctionCalls = []ToolCallAnalysis{}
+					continue
 				}
 
+				// we run the agentic loop for one iteration
+				stream, err := c.llmChat.SendStreaming(ctx, c.currChatContent...)
+				if err != nil {
+					log.Error(err, "error sending streaming LLM response")
+					c.state = AgentStateDone
+					c.pendingFunctionCalls = []ToolCallAnalysis{}
+					continue
+				}
+
+				// Clear our "response" now that we sent the last response
+				c.currChatContent = nil
+
+				// Process each part of the response
+				var functionCalls []gollm.FunctionCall
+
+				for response, err := range stream {
+					if err != nil {
+						log.Error(err, "error reading streaming LLM response")
+						c.state = AgentStateDone
+						c.pendingFunctionCalls = []ToolCallAnalysis{}
+						break
+					}
+					if response == nil {
+						// end of streaming response
+						break
+					}
+					klog.Infof("response: %+v", response)
+
+					if len(response.Candidates()) == 0 {
+						log.Error(nil, "No candidates in response")
+						c.state = AgentStateDone
+						c.pendingFunctionCalls = []ToolCallAnalysis{}
+						break
+					}
+
+					candidate := response.Candidates()[0]
+
+					for _, part := range candidate.Parts() {
+						// Check if it's a text response
+						if text, ok := part.AsText(); ok {
+							log.Info("text response", "text", text)
+							c.OutputCh <- ui.NewAgentTextBlock().WithText(text)
+						}
+
+						// Check if it's a function call
+						if calls, ok := part.AsFunctionCalls(); ok && len(calls) > 0 {
+							log.Info("function calls", "calls", calls)
+							functionCalls = append(functionCalls, calls...)
+						}
+					}
+				}
+				if err != nil {
+					c.state = AgentStateDone
+					continue
+				}
+
+				// If no function calls to be made, we're done
+				if len(functionCalls) == 0 {
+					log.Info("No function calls to be made, so most likely the task is completed, so we're done.")
+					c.state = AgentStateDone
+					c.currChatContent = []any{}
+					c.currIteration = 0
+					c.pendingFunctionCalls = []ToolCallAnalysis{}
+					// c.OutputCh <- ui.NewAgentTextBlock().WithText("Task completed.")
+					continue
+				}
+
+				toolCallAnalysisResults, err := c.analyzeToolCalls(ctx, functionCalls)
+				if err != nil {
+					log.Error(err, "error analyzing tool calls")
+					c.state = AgentStateDone
+					c.pendingFunctionCalls = []ToolCallAnalysis{}
+					continue
+				}
+
+				// mark the tools for dispatching
+				c.pendingFunctionCalls = toolCallAnalysisResults
+
+				interactiveToolCallIndex := -1
+				modifiesResourceToolCallIndex := -1
+				for i, result := range toolCallAnalysisResults {
+					if result.ModifiesResourceStr != "no" {
+						modifiesResourceToolCallIndex = i
+					}
+					if result.IsInteractive {
+						interactiveToolCallIndex = i
+					}
+				}
+
+				if interactiveToolCallIndex >= 0 {
+					// Show error block for both shim enabled and disabled modes
+					errorBlock := ui.NewErrorBlock().SetText(fmt.Sprintf("  %s\n", toolCallAnalysisResults[interactiveToolCallIndex].IsInteractiveError.Error()))
+					// c.doc.AddBlock(errorBlock)
+					c.OutputCh <- errorBlock
+
+					// For models with tool-use support (shim disabled), use proper FunctionCallResult
+					// Note: This assumes the model supports sending FunctionCallResult
+					c.currChatContent = append(c.currChatContent, gollm.FunctionCallResult{
+						ID:     toolCallAnalysisResults[interactiveToolCallIndex].FunctionCall.ID,
+						Name:   toolCallAnalysisResults[interactiveToolCallIndex].FunctionCall.Name,
+						Result: map[string]any{"error": toolCallAnalysisResults[interactiveToolCallIndex].IsInteractiveError.Error()},
+					})
+					c.pendingFunctionCalls = []ToolCallAnalysis{} // reset pending function calls
+					continue                                      // Skip execution for interactive commands
+				}
+
+				if !c.SkipPermissions && modifiesResourceToolCallIndex >= 0 {
+					confirmationPrompt := `  Do you want to proceed ?`
+
+					optionsBlock := ui.NewInputOptionBlock().SetPrompt(confirmationPrompt)
+					optionsBlock.AddOption("yes", "Yes", "yes", "y")
+					optionsBlock.AddOption("yes_and_dont_ask_me_again", "Yes, and don't ask me again")
+					optionsBlock.AddOption("no", "No", "no", "n")
+					// c.doc.AddBlock(optionsBlock)
+					c.OutputCh <- optionsBlock
+
+					// Request input from the user by sending a ui.InputOptionBlock on the output channel
+					// remainining part of the loop will be now resumed when we receive a choice input
+					// from the user.
+					c.state = AgentStateWaiting
+					continue
+				}
+
+				// now we are in the clear to dispatch the tool calls
+
+				// execute all pending function calls
+				for _, call := range c.pendingFunctionCalls {
+					// Only show "Running" message and proceed with execution for non-interactive commands
+					toolDescription := call.ParsedToolCall.Description()
+					functionCallRequestBlock := ui.NewFunctionCallRequestBlock().SetDescription(toolDescription)
+					// c.doc.AddBlock(functionCallRequestBlock)
+					c.OutputCh <- functionCallRequestBlock
+
+					output, err := call.ParsedToolCall.InvokeTool(ctx, tools.InvokeToolOptions{
+						Kubeconfig: c.Kubeconfig,
+						WorkDir:    c.workDir,
+					})
+					if err != nil {
+						log.Error(err, "error executing action", "output", output)
+						c.state = AgentStateDone
+						c.pendingFunctionCalls = []ToolCallAnalysis{}
+						continue
+					}
+
+					// Handle timeout message using UI blocks
+					if execResult, ok := output.(*tools.ExecResult); ok && execResult != nil && execResult.StreamType == "timeout" {
+						infoBlock := ui.NewAgentTextBlock().WithText("\nTimeout reached after 7 seconds\n")
+						// c.doc.AddBlock(infoBlock)
+						c.OutputCh <- infoBlock
+					}
+
+					// Add the tool call result to maintain conversation flow
+					functionCallRequestBlock.SetResult(output)
+
+					// If shim is disabled, convert the result to a map and append FunctionCallResult
+					result, err := tools.ToolResultToMap(output)
+					if err != nil {
+						log.Error(err, "error converting tool result to map", "output", output)
+						c.state = AgentStateDone
+						c.pendingFunctionCalls = []ToolCallAnalysis{}
+						continue
+					}
+
+					c.currChatContent = append(c.currChatContent, gollm.FunctionCallResult{
+						ID:     call.FunctionCall.ID,
+						Name:   call.FunctionCall.Name,
+						Result: result,
+					})
+				}
+				c.pendingFunctionCalls = []ToolCallAnalysis{}
+
+				c.currIteration = c.currIteration + 1
 			}
 		}
 	}()
@@ -425,7 +481,45 @@ func (c *Conversation) Run(ctx context.Context) error {
 	return nil
 }
 
-func (c *Conversation) handleChoice(ctx context.Context, choice int32) (resumeLoop bool) {
+// The key idea is to treat all tool calls to be executed atomically or not
+// If all tool calls are readonly call, it is straight forward
+// if some of the tool calls are not readonly, then the interesting question is should the permission
+// be asked for each of the tool call or only once for all the tool calls.
+// I think treating all tool calls as atomic is the right thing to do.
+
+type ToolCallAnalysis struct {
+	FunctionCall        gollm.FunctionCall
+	ParsedToolCall      *tools.ToolCall
+	IsInteractive       bool
+	IsInteractiveError  error
+	ModifiesResourceStr string
+}
+
+func (c *Conversation) analyzeToolCalls(ctx context.Context, toolCalls []gollm.FunctionCall) ([]ToolCallAnalysis, error) {
+	toolCallAnalysis := make([]ToolCallAnalysis, len(toolCalls))
+	for i, call := range toolCalls {
+		toolCallAnalysis[i].FunctionCall = call
+		toolCall, err := c.Tools.ParseToolInvocation(ctx, call.Name, call.Arguments)
+		if err != nil {
+			return nil, fmt.Errorf("error parsing tool call: %w", err)
+		}
+		toolCallAnalysis[i].IsInteractive, err = toolCall.GetTool().IsInteractive(call.Arguments)
+		if err != nil {
+			toolCallAnalysis[i].IsInteractiveError = err
+		}
+		modifiesResourceStr := toolCall.GetTool().CheckModifiesResource(call.Arguments)
+		if modifiesResourceStr == "unknown" {
+			if llmModifies, ok := call.Arguments["modifies_resource"].(string); ok {
+				modifiesResourceStr = llmModifies
+			}
+		}
+		toolCallAnalysis[i].ModifiesResourceStr = modifiesResourceStr
+		toolCallAnalysis[i].ParsedToolCall = toolCall
+	}
+	return toolCallAnalysis, nil
+}
+
+func (c *Conversation) handleChoice(ctx context.Context, choice int32) (dispatchToolCalls bool) {
 	log := klog.FromContext(ctx)
 	// if user input is a choice and use has declined the operation,
 	// we need to abort all pending function calls.
@@ -434,36 +528,36 @@ func (c *Conversation) handleChoice(ctx context.Context, choice int32) (resumeLo
 	// Normalize the input
 	switch choice {
 	case 1:
-		resumeLoop = true
+		dispatchToolCalls = true
 	case 2:
 		c.SkipPermissions = true
-		resumeLoop = true
+		dispatchToolCalls = true
 	case 3:
 		infoBlock := ui.NewAgentTextBlock().WithText("Operation was skipped. User declined to run this operation.")
 		// c.doc.AddBlock(infoBlock)
 		c.OutputCh <- infoBlock
 
 		c.currChatContent = append(c.currChatContent, gollm.FunctionCallResult{
-			ID:   c.pendingFunctionCalls[0].ID,
-			Name: c.pendingFunctionCalls[0].Name,
+			ID:   c.pendingFunctionCalls[0].FunctionCall.ID,
+			Name: c.pendingFunctionCalls[0].FunctionCall.Name,
 			Result: map[string]any{
 				"error":     "User declined to run this operation.",
 				"status":    "declined",
 				"retryable": false,
 			},
 		})
-		c.pendingFunctionCalls = []gollm.FunctionCall{}
-		resumeLoop = true
+		c.pendingFunctionCalls = []ToolCallAnalysis{}
+		dispatchToolCalls = false
 	default:
 		// This case should technically not be reachable due to AskForConfirmation loop
 		err := fmt.Errorf("invalid confirmation choice: %q", choice)
 		log.Error(err, "Invalid choice received from AskForConfirmation")
 		// a.doc.AddBlock(ui.NewErrorBlock().SetText("Invalid choice received. Cancelling operation."))
 		c.OutputCh <- ui.NewErrorBlock().SetText("Invalid choice received. Cancelling operation.")
-		c.pendingFunctionCalls = []gollm.FunctionCall{}
-		resumeLoop = false
+		c.pendingFunctionCalls = []ToolCallAnalysis{}
+		dispatchToolCalls = false
 	}
-	return resumeLoop
+	return dispatchToolCalls
 }
 
 // RunOneRound executes a chat-based agentic loop with the LLM using function calling.
@@ -551,7 +645,11 @@ func (a *Conversation) RunOneRound(ctx context.Context, query string) error {
 				if calls, ok := part.AsFunctionCalls(); ok && len(calls) > 0 {
 					log.Info("function calls", "calls", calls)
 					functionCalls = append(functionCalls, calls...)
-					a.pendingFunctionCalls = append(a.pendingFunctionCalls, calls...)
+					toolCallAnalysisResults, err := a.analyzeToolCalls(ctx, calls)
+					if err != nil {
+						return fmt.Errorf("error analyzing tool calls: %w", err)
+					}
+					a.pendingFunctionCalls = append(a.pendingFunctionCalls, toolCallAnalysisResults...)
 				}
 			}
 		}
