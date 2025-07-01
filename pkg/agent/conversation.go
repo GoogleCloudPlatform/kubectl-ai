@@ -409,6 +409,13 @@ func (c *Conversation) Run(ctx context.Context) error {
 				}
 
 				if !c.SkipPermissions && modifiesResourceToolCallIndex >= 0 {
+					var commandDescriptions []string
+					for _, call := range c.pendingFunctionCalls {
+						commandDescriptions = append(commandDescriptions, call.ParsedToolCall.Description())
+					}
+					c.OutputCh <- ui.NewAgentTextBlock().WithText(
+						"The following commands require your approval to run:\n* " + strings.Join(commandDescriptions, "\n* "),
+					)
 					confirmationPrompt := `  Do you want to proceed ?`
 
 					optionsBlock := ui.NewInputOptionBlock().SetPrompt(confirmationPrompt)
