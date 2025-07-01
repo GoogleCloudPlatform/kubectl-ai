@@ -426,7 +426,7 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 		return fmt.Errorf("user-interface mode %q is not known", opt.UserInterface)
 	}
 
-	conversation := &agent.Conversation{
+	k8sAgent := &agent.Agent{
 		Model:              opt.ModelID,
 		Kubeconfig:         opt.KubeConfigPath,
 		LLM:                llmClient,
@@ -441,19 +441,19 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 		MCPClientEnabled:   opt.MCPClient,
 	}
 
-	err = conversation.Init(ctx, doc)
+	err = k8sAgent.Init(ctx, doc)
 	if err != nil {
-		return fmt.Errorf("starting conversation: %w", err)
+		return fmt.Errorf("starting k8s agent: %w", err)
 	}
-	defer conversation.Close()
+	defer k8sAgent.Close()
 
 	chatSession := session{
-		model:        opt.ModelID,
-		doc:          doc,
-		ui:           userInterface,
-		conversation: conversation,
-		LLM:          llmClient,
-		mcpManager:   mcpManager,
+		model:      opt.ModelID,
+		doc:        doc,
+		ui:         userInterface,
+		agent:      k8sAgent,
+		LLM:        llmClient,
+		mcpManager: mcpManager,
 	}
 
 	// Prepare MCP server status blocks only when MCP client is enabled
@@ -524,7 +524,7 @@ type session struct {
 	model           string
 	ui              ui.UI
 	doc             *ui.Document
-	conversation    *agent.Conversation
+	agent           *agent.Agent
 	availableModels []string
 	LLM             gollm.Client
 	mcpManager      *mcp.Manager
@@ -533,15 +533,15 @@ type session struct {
 // repl is a read-eval-print loop for the chat session.
 func (s *session) replAgentNative(ctx context.Context) error {
 
-	agentOutputCh := s.conversation.OutputCh
-	userInputCh := s.conversation.UserInputCh
+	agentOutputCh := s.agent.Output
+	userInputCh := s.agent.Input
 
 	err := s.ui.Run(ctx, agentOutputCh, userInputCh)
 	if err != nil {
 		return fmt.Errorf("running UI: %w", err)
 	}
 
-	err = s.conversation.Run(ctx)
+	err = s.agent.Run(ctx)
 	if err != nil {
 		return fmt.Errorf("running conversation: %w", err)
 	}
@@ -623,7 +623,7 @@ func (s *session) repl(ctx context.Context, initialQuery string, initialBlocks [
 		case query == "":
 			continue
 		case query == "reset":
-			err := s.conversation.Init(ctx, s.doc)
+			err := s.agent.Init(ctx, s.doc)
 			if err != nil {
 				return err
 			}
@@ -678,16 +678,16 @@ func (s *session) answerQuery(ctx context.Context, query string) error {
 		s.doc.AddBlock(infoBlock)
 
 	case query == "tools":
-		if s.conversation == nil {
+		if s.agent == nil {
 			return fmt.Errorf("listing tols: conversation is not initialized")
 		}
 		infoBlock := &ui.AgentTextBlock{}
 		infoBlock.AppendText("\n  Available tools:\n")
-		infoBlock.AppendText(strings.Join(s.conversation.Tools.Names(), "\n"))
+		infoBlock.AppendText(strings.Join(s.agent.Tools.Names(), "\n"))
 		s.doc.AddBlock(infoBlock)
 
 	default:
-		return s.conversation.RunOneRound(ctx, query)
+		return s.agent.RunOneRound(ctx, query)
 	}
 	return nil
 }

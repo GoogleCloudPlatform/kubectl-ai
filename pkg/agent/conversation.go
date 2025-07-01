@@ -36,13 +36,6 @@ import (
 //go:embed systemprompt_template_default.txt
 var defaultSystemPromptTemplate string
 
-type TextInput struct {
-	Text string
-}
-type ChoiceInput struct {
-	Choice string
-}
-
 type AgentState string
 
 const (
@@ -52,10 +45,9 @@ const (
 	AgentStateDone    AgentState = "done"
 )
 
-type Conversation struct {
-	UserInputCh chan any
-	OutputCh    chan any
-	ResumeCh    chan any
+type Agent struct {
+	Input  chan any
+	Output chan any
 
 	// tool calls that are pending execution
 	// These will typically be all the tool calls suggested by the LLM in the
@@ -108,14 +100,14 @@ type Conversation struct {
 	workDir string
 }
 
-func (s *Conversation) Init(ctx context.Context, doc *ui.Document) error {
+func (s *Agent) Init(ctx context.Context, doc *ui.Document) error {
 	log := klog.FromContext(ctx)
 
-	s.UserInputCh = make(chan any, 10)
+	s.Input = make(chan any, 10)
 	// TODO: this need to be probably a buffered channel because
 	// there is out multiple messages that can be sent to the output channel
 	// and we don't want to block the main loop.
-	s.OutputCh = make(chan any, 10)
+	s.Output = make(chan any, 10)
 	s.currIteration = 0
 	// when we support session, we will need to initialize this with the
 	// current history of the conversation.
@@ -174,7 +166,7 @@ func (s *Conversation) Init(ctx context.Context, doc *ui.Document) error {
 	return nil
 }
 
-func (c *Conversation) Close() error {
+func (c *Agent) Close() error {
 	if c.workDir != "" {
 		if c.RemoveWorkDir {
 			if err := os.RemoveAll(c.workDir); err != nil {
@@ -185,13 +177,13 @@ func (c *Conversation) Close() error {
 	return nil
 }
 
-func (c *Conversation) Run(ctx context.Context) error {
+func (c *Agent) Run(ctx context.Context) error {
 	log := klog.FromContext(ctx)
 
 	log.Info("Starting agent loop")
 
 	if c.currIteration == 0 && c.state == AgentStateIdle {
-		c.OutputCh <- ui.NewAgentTextBlock().WithText("Hey there, what can I help you with today?")
+		c.Output <- ui.NewAgentTextBlock().WithText("Hey there, what can I help you with today?")
 		// c.OutputCh <- ui.NewInputTextBlock().SetEditable(true)
 	}
 
@@ -199,21 +191,27 @@ func (c *Conversation) Run(ctx context.Context) error {
 	go func() {
 		for {
 			var userInput any
-			if c.state == AgentStateIdle || c.state == AgentStateDone {
-				c.OutputCh <- ui.NewInputTextBlock()
+			switch c.state {
+			case AgentStateIdle, AgentStateDone:
+				c.Output <- ui.NewInputTextBlock()
 				select {
 				case <-ctx.Done():
 					log.Info("Agent loop done")
 					return
-				case userInput = <-c.UserInputCh:
+				case userInput = <-c.Input:
 				}
-			} else if c.state == AgentStateWaiting {
+			case AgentStateWaiting:
 				select {
 				case <-ctx.Done():
 					log.Info("Agent loop done")
 					return
-				case userInput = <-c.UserInputCh:
+				case userInput = <-c.Input:
 				}
+			}
+
+			if userInput == io.EOF {
+				log.Info("Agent loop done")
+				return
 			}
 
 			if userInput != nil {
@@ -244,7 +242,7 @@ func (c *Conversation) Run(ctx context.Context) error {
 							toolDescription := call.ParsedToolCall.Description()
 							functionCallRequestBlock := ui.NewFunctionCallRequestBlock().SetDescription(toolDescription)
 							// c.doc.AddBlock(functionCallRequestBlock)
-							c.OutputCh <- functionCallRequestBlock
+							c.Output <- functionCallRequestBlock
 
 							output, err := call.ParsedToolCall.InvokeTool(ctx, tools.InvokeToolOptions{
 								Kubeconfig: c.Kubeconfig,
@@ -261,7 +259,7 @@ func (c *Conversation) Run(ctx context.Context) error {
 							if execResult, ok := output.(*tools.ExecResult); ok && execResult != nil && execResult.StreamType == "timeout" {
 								infoBlock := ui.NewAgentTextBlock().WithText("\nTimeout reached after 7 seconds\n")
 								// c.doc.AddBlock(infoBlock)
-								c.OutputCh <- infoBlock
+								c.Output <- infoBlock
 							}
 
 							// Add the tool call result to maintain conversation flow
@@ -285,6 +283,7 @@ func (c *Conversation) Run(ctx context.Context) error {
 						// Clear pending function calls after execution
 						c.pendingFunctionCalls = []ToolCallAnalysis{}
 						c.state = AgentStateRunning
+						c.currIteration = c.currIteration + 1
 					} else {
 						// if user has declined, we are done with this iteration
 						c.state = AgentStateDone
@@ -296,11 +295,20 @@ func (c *Conversation) Run(ctx context.Context) error {
 
 			if c.state == AgentStateRunning {
 				if c.currIteration >= c.MaxIterations {
-					c.OutputCh <- ui.NewAgentTextBlock().WithText("Maximum number of iterations reached.")
+					c.Output <- ui.NewAgentTextBlock().WithText("Maximum number of iterations reached.")
 					c.state = AgentStateDone
 					c.pendingFunctionCalls = []ToolCallAnalysis{}
 					continue
 				}
+
+				var agentTextBlock *ui.AgentTextBlock
+
+				// We create the agent text block here; this lets renderers render a "thinking" state
+				// before the first response arrives.
+				agentTextBlock = ui.NewAgentTextBlock()
+				agentTextBlock.SetStreaming(true)
+				// a.doc.AddBlock(agentTextBlock)
+				c.Output <- agentTextBlock
 
 				// we run the agentic loop for one iteration
 				stream, err := c.llmChat.SendStreaming(ctx, c.currChatContent...)
@@ -314,8 +322,19 @@ func (c *Conversation) Run(ctx context.Context) error {
 				// Clear our "response" now that we sent the last response
 				c.currChatContent = nil
 
+				if c.EnableToolUseShim {
+					// convert the candidate response into a gollm.ChatResponse
+					stream, err = candidateToShimCandidate(stream)
+					if err != nil {
+						c.state = AgentStateDone
+						c.pendingFunctionCalls = []ToolCallAnalysis{}
+						continue
+					}
+				}
 				// Process each part of the response
 				var functionCalls []gollm.FunctionCall
+
+				var streamedText string
 
 				for response, err := range stream {
 					if err != nil {
@@ -328,7 +347,7 @@ func (c *Conversation) Run(ctx context.Context) error {
 						// end of streaming response
 						break
 					}
-					klog.Infof("response: %+v", response)
+					// klog.Infof("response: %+v", response)
 
 					if len(response.Candidates()) == 0 {
 						log.Error(nil, "No candidates in response")
@@ -343,7 +362,10 @@ func (c *Conversation) Run(ctx context.Context) error {
 						// Check if it's a text response
 						if text, ok := part.AsText(); ok {
 							log.Info("text response", "text", text)
-							c.OutputCh <- ui.NewAgentTextBlock().WithText(text)
+							streamedText += text
+							agentTextBlock = ui.NewAgentTextBlock().WithText(text)
+							agentTextBlock.SetStreaming(true)
+							c.Output <- agentTextBlock
 						}
 
 						// Check if it's a function call
@@ -353,10 +375,11 @@ func (c *Conversation) Run(ctx context.Context) error {
 						}
 					}
 				}
-				if err != nil {
-					c.state = AgentStateDone
-					continue
+				if agentTextBlock != nil {
+					agentTextBlock.SetStreaming(false)
+					c.Output <- agentTextBlock
 				}
+				log.Info("streamedText", "streamedText", streamedText)
 
 				// If no function calls to be made, we're done
 				if len(functionCalls) == 0 {
@@ -395,7 +418,7 @@ func (c *Conversation) Run(ctx context.Context) error {
 					// Show error block for both shim enabled and disabled modes
 					errorBlock := ui.NewErrorBlock().SetText(fmt.Sprintf("  %s\n", toolCallAnalysisResults[interactiveToolCallIndex].IsInteractiveError.Error()))
 					// c.doc.AddBlock(errorBlock)
-					c.OutputCh <- errorBlock
+					c.Output <- errorBlock
 
 					// For models with tool-use support (shim disabled), use proper FunctionCallResult
 					// Note: This assumes the model supports sending FunctionCallResult
@@ -413,17 +436,15 @@ func (c *Conversation) Run(ctx context.Context) error {
 					for _, call := range c.pendingFunctionCalls {
 						commandDescriptions = append(commandDescriptions, call.ParsedToolCall.Description())
 					}
-					c.OutputCh <- ui.NewAgentTextBlock().WithText(
-						"The following commands require your approval to run:\n* " + strings.Join(commandDescriptions, "\n* "),
-					)
-					confirmationPrompt := `  Do you want to proceed ?`
+					confirmationPrompt := "The following commands require your approval to run:\n* " + strings.Join(commandDescriptions, "\n* ")
+					confirmationPrompt += "\nDo you want to proceed ?"
 
 					optionsBlock := ui.NewInputOptionBlock().SetPrompt(confirmationPrompt)
 					optionsBlock.AddOption("yes", "Yes", "yes", "y")
 					optionsBlock.AddOption("yes_and_dont_ask_me_again", "Yes, and don't ask me again")
 					optionsBlock.AddOption("no", "No", "no", "n")
 					// c.doc.AddBlock(optionsBlock)
-					c.OutputCh <- optionsBlock
+					c.Output <- optionsBlock
 
 					// Request input from the user by sending a ui.InputOptionBlock on the output channel
 					// remainining part of the loop will be now resumed when we receive a choice input
@@ -440,7 +461,7 @@ func (c *Conversation) Run(ctx context.Context) error {
 					toolDescription := call.ParsedToolCall.Description()
 					functionCallRequestBlock := ui.NewFunctionCallRequestBlock().SetDescription(toolDescription)
 					// c.doc.AddBlock(functionCallRequestBlock)
-					c.OutputCh <- functionCallRequestBlock
+					c.Output <- functionCallRequestBlock
 
 					output, err := call.ParsedToolCall.InvokeTool(ctx, tools.InvokeToolOptions{
 						Kubeconfig: c.Kubeconfig,
@@ -457,7 +478,7 @@ func (c *Conversation) Run(ctx context.Context) error {
 					if execResult, ok := output.(*tools.ExecResult); ok && execResult != nil && execResult.StreamType == "timeout" {
 						infoBlock := ui.NewAgentTextBlock().WithText("\nTimeout reached after 7 seconds\n")
 						// c.doc.AddBlock(infoBlock)
-						c.OutputCh <- infoBlock
+						c.Output <- infoBlock
 					}
 
 					// Add the tool call result to maintain conversation flow
@@ -502,7 +523,7 @@ type ToolCallAnalysis struct {
 	ModifiesResourceStr string
 }
 
-func (c *Conversation) analyzeToolCalls(ctx context.Context, toolCalls []gollm.FunctionCall) ([]ToolCallAnalysis, error) {
+func (c *Agent) analyzeToolCalls(ctx context.Context, toolCalls []gollm.FunctionCall) ([]ToolCallAnalysis, error) {
 	toolCallAnalysis := make([]ToolCallAnalysis, len(toolCalls))
 	for i, call := range toolCalls {
 		toolCallAnalysis[i].FunctionCall = call
@@ -526,7 +547,7 @@ func (c *Conversation) analyzeToolCalls(ctx context.Context, toolCalls []gollm.F
 	return toolCallAnalysis, nil
 }
 
-func (c *Conversation) handleChoice(ctx context.Context, choice int32) (dispatchToolCalls bool) {
+func (c *Agent) handleChoice(ctx context.Context, choice int32) (dispatchToolCalls bool) {
 	log := klog.FromContext(ctx)
 	// if user input is a choice and use has declined the operation,
 	// we need to abort all pending function calls.
@@ -542,7 +563,7 @@ func (c *Conversation) handleChoice(ctx context.Context, choice int32) (dispatch
 	case 3:
 		infoBlock := ui.NewAgentTextBlock().WithText("Operation was skipped. User declined to run this operation.")
 		// c.doc.AddBlock(infoBlock)
-		c.OutputCh <- infoBlock
+		c.Output <- infoBlock
 
 		c.currChatContent = append(c.currChatContent, gollm.FunctionCallResult{
 			ID:   c.pendingFunctionCalls[0].FunctionCall.ID,
@@ -560,7 +581,7 @@ func (c *Conversation) handleChoice(ctx context.Context, choice int32) (dispatch
 		err := fmt.Errorf("invalid confirmation choice: %q", choice)
 		log.Error(err, "Invalid choice received from AskForConfirmation")
 		// a.doc.AddBlock(ui.NewErrorBlock().SetText("Invalid choice received. Cancelling operation."))
-		c.OutputCh <- ui.NewErrorBlock().SetText("Invalid choice received. Cancelling operation.")
+		c.Output <- ui.NewErrorBlock().SetText("Invalid choice received. Cancelling operation.")
 		c.pendingFunctionCalls = []ToolCallAnalysis{}
 		dispatchToolCalls = false
 	}
@@ -568,7 +589,7 @@ func (c *Conversation) handleChoice(ctx context.Context, choice int32) (dispatch
 }
 
 // RunOneRound executes a chat-based agentic loop with the LLM using function calling.
-func (a *Conversation) RunOneRound(ctx context.Context, query string) error {
+func (a *Agent) RunOneRound(ctx context.Context, query string) error {
 	log := klog.FromContext(ctx)
 	log.Info("Starting chat loop for query:", "query", query)
 
@@ -645,7 +666,7 @@ func (a *Conversation) RunOneRound(ctx context.Context, query string) error {
 				// Check if it's a text response
 				if text, ok := part.AsText(); ok {
 					log.Info("text response", "text", text)
-					a.OutputCh <- ui.NewAgentTextBlock().WithText(text)
+					a.Output <- ui.NewAgentTextBlock().WithText(text)
 				}
 
 				// Check if it's a function call
@@ -686,7 +707,7 @@ func (a *Conversation) RunOneRound(ctx context.Context, query string) error {
 				// Show error block for both shim enabled and disabled modes
 				errorBlock := ui.NewErrorBlock().SetText(fmt.Sprintf("  %s\n", err.Error()))
 				a.doc.AddBlock(errorBlock)
-				a.OutputCh <- errorBlock
+				a.Output <- errorBlock
 
 				if a.EnableToolUseShim {
 					// Add the error as an observation
@@ -708,7 +729,7 @@ func (a *Conversation) RunOneRound(ctx context.Context, query string) error {
 			toolDescription := toolCall.Description()
 			functionCallRequestBlock := ui.NewFunctionCallRequestBlock().SetDescription(toolDescription)
 			a.doc.AddBlock(functionCallRequestBlock)
-			a.OutputCh <- functionCallRequestBlock
+			a.Output <- functionCallRequestBlock
 
 			// Ask for confirmation only if SkipPermissions is false AND the tool modifies resources.
 			// Use the tool's CheckModifiesResource method to determine if the command modifies resources
@@ -748,7 +769,7 @@ func (a *Conversation) RunOneRound(ctx context.Context, query string) error {
 				case "no":
 					infoBlock := ui.NewAgentTextBlock().WithText("Operation was skipped. User declined to run this operation.")
 					a.doc.AddBlock(infoBlock)
-					a.OutputCh <- infoBlock
+					a.Output <- infoBlock
 
 					currChatContent = append(currChatContent, gollm.FunctionCallResult{
 						ID:   call.ID,
@@ -783,7 +804,7 @@ func (a *Conversation) RunOneRound(ctx context.Context, query string) error {
 			if execResult, ok := output.(*tools.ExecResult); ok && execResult != nil && execResult.StreamType == "timeout" {
 				infoBlock := ui.NewAgentTextBlock().WithText("\nTimeout reached after 7 seconds\n")
 				a.doc.AddBlock(infoBlock)
-				a.OutputCh <- infoBlock
+				a.Output <- infoBlock
 			}
 
 			// Add the tool call result to maintain conversation flow
@@ -822,13 +843,13 @@ func (a *Conversation) RunOneRound(ctx context.Context, query string) error {
 	log.Info("Max iterations reached", "iterations", maxIterations)
 	errorBlock := ui.NewErrorBlock().SetText(fmt.Sprintf("Sorry, couldn't complete the task after %d iterations.\n", maxIterations))
 	a.doc.AddBlock(errorBlock)
-	a.OutputCh <- errorBlock
+	a.Output <- errorBlock
 
 	return fmt.Errorf("max iterations reached")
 }
 
 // generateFromTemplate generates a prompt for LLM. It uses the prompt from the provides template file or default.
-func (a *Conversation) generatePrompt(_ context.Context, defaultPromptTemplate string, data PromptData) (string, error) {
+func (a *Agent) generatePrompt(_ context.Context, defaultPromptTemplate string, data PromptData) (string, error) {
 	promptTemplate := defaultPromptTemplate
 	if a.PromptTemplateFile != "" {
 		content, err := os.ReadFile(a.PromptTemplateFile)

@@ -47,6 +47,8 @@ type TerminalUI struct {
 	// currentBlockText is text of the currentBlock that we have already rendered to the screen
 	currentBlockText string
 
+	currBlockStreaming bool
+
 	// This is useful in cases where stdin is already been used for providing the input to the agent (caller in this case)
 	// in such cases, stdin is already consumed and closed and reading input results in IO error.
 	// In such cases, we open /dev/tty and use it for taking input.
@@ -169,14 +171,6 @@ func (u *TerminalUI) Close() error {
 
 func (u *TerminalUI) handleBlock(block Block) {
 
-	if u.currentBlock != block {
-		u.currentBlock = block
-		if u.currentBlockText != "" {
-			fmt.Printf("\n")
-		}
-		u.currentBlockText = ""
-	}
-
 	text := ""
 	streaming := false
 
@@ -195,6 +189,16 @@ func (u *TerminalUI) handleBlock(block Block) {
 		}
 		text = block.Text()
 		streaming = block.Streaming()
+
+		if streaming {
+			u.currentBlockText += text
+			text = ""
+		} else {
+			// u.currentBlockText = text
+			text = u.currentBlockText
+			u.currentBlockText = ""
+			klog.Infof("currentBlockText: %s", u.currentBlockText)
+		}
 	case *InputTextBlock:
 		var query string
 		if u.useTTYForInput {
@@ -235,7 +239,17 @@ func (u *TerminalUI) handleBlock(block Block) {
 		return
 
 	case *InputOptionBlock:
-		fmt.Printf("%s\n", block.Prompt) // Print initial prompt text
+		if block.Prompt != "" {
+			fmt.Printf("%s\n", block.Prompt) // Print initial prompt text
+			markdown, err := u.markdownRenderer.Render(block.Prompt)
+			if err != nil {
+				klog.Errorf("Error rendering markdown: %v", err)
+			} else {
+				fmt.Printf("%s\n", markdown)
+			}
+		} else {
+			fmt.Printf("\n")
+		}
 		for i, option := range block.Options {
 			fmt.Printf("  %d) %s\n", i+1, option.Message)
 		}
@@ -304,6 +318,7 @@ func (u *TerminalUI) handleBlock(block Block) {
 			// Ensure original prompt is restored even if errors occur
 			defer rlInstance.SetPrompt(originalPrompt)
 
+			countCTRL_D := 0
 			for {
 				response, err := rlInstance.Readline()
 				if err != nil {
@@ -311,6 +326,11 @@ func (u *TerminalUI) handleBlock(block Block) {
 					case readline.ErrInterrupt: // Handle Ctrl+C
 						// u.UserInputCh <- io.EOF
 					case io.EOF: // Handle Ctrl+D
+						countCTRL_D++
+						if countCTRL_D > 1 {
+							u.UserInputCh <- io.EOF
+							return
+						}
 						// u.UserInputCh <- io.EOF
 					default:
 						// u.UserInputCh <- err
@@ -347,12 +367,6 @@ func (u *TerminalUI) handleBlock(block Block) {
 		opt(computedStyle)
 	}
 
-	if streaming && computedStyle.RenderMarkdown {
-		// Because we can't render markdown incrementally,
-		// we "hold back" the text if we are streaming markdown until streaming is done
-		text = ""
-	}
-
 	printText := text
 
 	if computedStyle.RenderMarkdown && printText != "" {
@@ -363,15 +377,6 @@ func (u *TerminalUI) handleBlock(block Block) {
 			printText = out
 		}
 	}
-
-	if u.currentBlockText != "" {
-		if strings.HasPrefix(text, u.currentBlockText) {
-			printText = strings.TrimPrefix(printText, u.currentBlockText)
-		} else {
-			klog.Warningf("text did not match text already rendered; text %q; currentBlockText %q", text, u.currentBlockText)
-		}
-	}
-	u.currentBlockText = text
 
 	reset := ""
 	switch computedStyle.Foreground {
