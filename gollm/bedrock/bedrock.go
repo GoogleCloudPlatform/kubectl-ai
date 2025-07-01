@@ -526,7 +526,7 @@ func (cs *bedrockChatSession) parseConverseOutput(output *types.ConverseOutput) 
 
 func (cs *bedrockChatSession) createStreamingIterator(output *bedrockruntime.ConverseStreamOutput) gollm.ChatResponseIterator {
 	return func(yield func(gollm.ChatResponse, error) bool) {
-		// ✅ Fix: Safety check for nil output or stream
+		//Fix: Safety check for nil output or stream
 		if output == nil || output.GetStream() == nil {
 			yield(nil, fmt.Errorf("streaming output or stream is nil"))
 			return
