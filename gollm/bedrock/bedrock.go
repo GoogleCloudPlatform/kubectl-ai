@@ -84,7 +84,7 @@ func (c *BedrockClient) StartChat(systemPrompt, model string) gollm.Chat {
 		return &bedrockChatSession{
 			client:       c,
 			systemPrompt: systemPrompt,
-			model:        c.options.Model, // ✅ Fix: Fallback to default model
+			model:        c.options.Model,
 			history:      make([]types.Message, 0),
 			functionDefs: make([]*gollm.FunctionDefinition, 0),
 		}
@@ -261,6 +261,7 @@ func (cs *bedrockChatSession) formatToolResult(result gollm.FunctionCallResult) 
 
 	return string(resultJSON)
 }
+
 func (cs *bedrockChatSession) addMessage(role types.ConversationRole, contentBlocks ...types.ContentBlock) {
 	if len(contentBlocks) == 0 {
 		klog.V(3).Infof("Skipping empty message for role: %s", role)
@@ -273,38 +274,8 @@ func (cs *bedrockChatSession) addMessage(role types.ConversationRole, contentBlo
 	}
 
 	cs.history = append(cs.history, message)
-	cs.logMessageAddition(role, contentBlocks)
 }
-func (cs *bedrockChatSession) logMessageAddition(role types.ConversationRole, contentBlocks []types.ContentBlock) {
-	textBlocks := 0
-	toolUseBlocks := 0
-	toolResultBlocks := 0
 
-	for _, block := range contentBlocks {
-		switch block.(type) {
-		case *types.ContentBlockMemberText:
-			textBlocks++
-		case *types.ContentBlockMemberToolUse:
-			toolUseBlocks++
-		case *types.ContentBlockMemberToolResult:
-			toolResultBlocks++
-		}
-	}
-
-	var logParts []string
-	if textBlocks > 0 {
-		logParts = append(logParts, fmt.Sprintf("%d text", textBlocks))
-	}
-	if toolUseBlocks > 0 {
-		logParts = append(logParts, fmt.Sprintf("%d tool calls", toolUseBlocks))
-	}
-	if toolResultBlocks > 0 {
-		logParts = append(logParts, fmt.Sprintf("%d tool results", toolResultBlocks))
-	}
-
-	klog.V(3).Infof("Added %s message to history: %s (total blocks: %d)",
-		role, strings.Join(logParts, ", "), len(contentBlocks))
-}
 func (cs *bedrockChatSession) addTextMessage(role types.ConversationRole, content string) {
 	if content == "" {
 		return
@@ -312,11 +283,13 @@ func (cs *bedrockChatSession) addTextMessage(role types.ConversationRole, conten
 	textBlock := &types.ContentBlockMemberText{Value: content}
 	cs.addMessage(role, textBlock)
 }
+
 func (cs *bedrockChatSession) addToolResults(toolResults []types.ContentBlock) {
 	if len(toolResults) > 0 {
 		cs.addMessage(types.ConversationRoleUser, toolResults...)
 	}
 }
+
 func (cs *bedrockChatSession) addAssistantResponse(response *bedrockChatResponse) {
 	var contentBlocks []types.ContentBlock
 
@@ -334,6 +307,7 @@ func (cs *bedrockChatSession) addAssistantResponse(response *bedrockChatResponse
 		cs.addMessage(types.ConversationRoleAssistant, contentBlocks...)
 	}
 }
+
 func (cs *bedrockChatSession) createToolUseBlock(toolCall gollm.FunctionCall) *types.ContentBlockMemberToolUse {
 	toolUseBlock := &types.ContentBlockMemberToolUse{
 		Value: types.ToolUseBlock{
@@ -382,7 +356,6 @@ func (cs *bedrockChatSession) buildConverseInput() *bedrockruntime.ConverseInput
 		}
 	}
 	if len(cs.functionDefs) > 0 {
-		klog.V(1).Infof("Processing %d function definitions", len(cs.functionDefs))
 		tools := cs.buildTools()
 		if len(tools) > 0 {
 			input.ToolConfig = &types.ToolConfiguration{
@@ -391,7 +364,6 @@ func (cs *bedrockChatSession) buildConverseInput() *bedrockruntime.ConverseInput
 					Value: types.AutoToolChoice{},
 				},
 			}
-			klog.V(1).Infof("Added ToolConfig with %d tools to Converse request", len(tools))
 		}
 	}
 
@@ -454,7 +426,6 @@ func (cs *bedrockChatSession) buildTools() []types.Tool {
 				toolSpec.InputSchema = &types.ToolInputSchemaMemberJson{
 					Value: schemaDoc,
 				}
-				klog.V(2).Infof("Created tool %s with schema support", funcDef.Name)
 			}
 		}
 		tool := &types.ToolMemberToolSpec{
@@ -462,12 +433,11 @@ func (cs *bedrockChatSession) buildTools() []types.Tool {
 		}
 
 		tools = append(tools, tool)
-		klog.V(2).Infof("Added tool: %s - %s", funcDef.Name, funcDef.Description)
 	}
 
-	klog.V(1).Infof("Built %d tools for Bedrock session", len(tools))
 	return tools
 }
+
 func convertSchemaToMap(schema *gollm.Schema) map[string]any {
 	if schema == nil {
 		return nil
@@ -542,7 +512,6 @@ func (cs *bedrockChatSession) parseConverseOutput(output *types.ConverseOutput) 
 					}
 
 					response.toolCalls = append(response.toolCalls, toolCall)
-					klog.V(3).Infof("Parsed tool call: %s", toolCall.Name)
 				}
 			}
 			response.content = strings.Join(contentParts, "\n")
@@ -552,8 +521,6 @@ func (cs *bedrockChatSession) parseConverseOutput(output *types.ConverseOutput) 
 		response.content = "Error: Unable to parse response"
 	}
 
-	klog.V(3).Infof("Parsed response - Content: %d chars, Tools: %d",
-		len(response.content), len(response.toolCalls))
 	return response
 }
 

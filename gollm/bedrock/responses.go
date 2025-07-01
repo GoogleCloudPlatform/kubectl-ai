@@ -19,7 +19,6 @@ func (r *bedrockChatResponse) UsageMetadata() any {
 	return r.usage
 }
 
-// Candidates returns the response candidates (Bedrock typically returns 1)
 func (r *bedrockChatResponse) Candidates() []gollm.Candidate {
 	return []gollm.Candidate{
 		&bedrockCandidate{
@@ -88,8 +87,6 @@ func (r *simpleBedrockCompletionResponse) UsageMetadata() any {
 	return r.usage
 }
 
-// extractTextFromResponse extracts text content from a chat response
-// This is a helper function for processing responses consistently
 func extractTextFromResponse(response gollm.ChatResponse) string {
 	if response == nil {
 		return ""
