@@ -27,9 +27,11 @@ import (
 	"time"
 
 	"github.com/GoogleCloudPlatform/kubectl-ai/gollm"
+	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/api"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/journal"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/tools"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/ui"
+	"github.com/google/uuid"
 	"k8s.io/klog/v2"
 )
 
@@ -98,6 +100,8 @@ type Agent struct {
 	llmChat gollm.Chat
 
 	workDir string
+
+	session *api.Session
 }
 
 func (s *Agent) Init(ctx context.Context, doc *ui.Document) error {
@@ -117,6 +121,16 @@ func (s *Agent) Init(ctx context.Context, doc *ui.Document) error {
 	// in the future, we will support session, and the agent will start in
 	// the state of the previous session.
 	s.state = AgentStateIdle
+
+	// TODO: this is ephemeral for now, but in the future, we will support
+	// session persistence.
+	s.session = &api.Session{
+		ID:           uuid.New().String(),
+		Messages:     []*api.Message{},
+		AgentState:   api.AgentStateIdle,
+		CreatedAt:    time.Now(),
+		LastModified: time.Now(),
+	}
 
 	// Create a temporary working directory
 	workDir, err := os.MkdirTemp("", "agent-workdir-*")
@@ -183,8 +197,20 @@ func (c *Agent) Run(ctx context.Context) error {
 	log.Info("Starting agent loop")
 
 	if c.currIteration == 0 && c.state == AgentStateIdle {
-		textBlock := ui.NewAgentTextBlock().WithText("Hey there, what can I help you with today?")
-		c.Output <- textBlock
+
+		greetingMessage := "Hey there, what can I help you with today?"
+		message := &api.Message{
+			ID:        uuid.New().String(),
+			Source:    api.MessageSourceAgent,
+			Type:      api.MessageTypeText,
+			Payload:   greetingMessage,
+			Timestamp: time.Now(),
+		}
+		c.session.Messages = append(c.session.Messages, message)
+		c.session.AgentState = api.AgentStateIdle
+		c.session.LastModified = time.Now()
+
+		c.Output <- message
 		// c.OutputCh <- ui.NewInputTextBlock().SetEditable(true)
 	}
 
@@ -194,7 +220,14 @@ func (c *Agent) Run(ctx context.Context) error {
 			var userInput any
 			switch c.state {
 			case AgentStateIdle, AgentStateDone:
-				c.Output <- ui.NewInputTextBlock()
+				message := &api.Message{
+					ID:        uuid.New().String(),
+					Source:    api.MessageSourceAgent,
+					Type:      api.MessageTypeUserInputRequest,
+					Payload:   ">>>",
+					Timestamp: time.Now(),
+				}
+				c.Output <- message
 				select {
 				case <-ctx.Done():
 					log.Info("Agent loop done")
@@ -258,19 +291,28 @@ func (c *Agent) Run(ctx context.Context) error {
 
 			if c.state == AgentStateRunning {
 				if c.currIteration >= c.MaxIterations {
-					c.Output <- ui.NewAgentTextBlock().WithText("Maximum number of iterations reached.")
+					message := &api.Message{
+						ID:        uuid.New().String(),
+						Source:    api.MessageSourceAgent,
+						Type:      api.MessageTypeText,
+						Payload:   "Maximum number of iterations reached.",
+						Timestamp: time.Now(),
+					}
+					c.session.Messages = append(c.session.Messages, message)
+					c.session.LastModified = time.Now()
+					c.Output <- message
 					c.state = AgentStateDone
 					c.pendingFunctionCalls = []ToolCallAnalysis{}
 					continue
 				}
 
-				var agentTextBlock *ui.AgentTextBlock
+				// var agentTextBlock *ui.AgentTextBlock
 
 				// We create the agent text block here; this lets renderers render a "thinking" state
 				// before the first response arrives.
-				agentTextBlock = ui.NewAgentTextBlock().WithStreaming(true)
+				// agentTextBlock = ui.NewAgentTextBlock().WithStreaming(true)
 				// a.doc.AddBlock(agentTextBlock)
-				c.Output <- agentTextBlock
+				// c.Output <- agentTextBlock
 
 				// we run the agentic loop for one iteration
 				stream, err := c.llmChat.SendStreaming(ctx, c.currChatContent...)
@@ -325,7 +367,7 @@ func (c *Agent) Run(ctx context.Context) error {
 						if text, ok := part.AsText(); ok {
 							log.Info("text response", "text", text)
 							streamedText += text
-							c.Output <- ui.NewAgentTextBlock().WithText(text).WithStreaming(true)
+							// c.Output <- ui.NewAgentTextBlock().WithText(text).WithStreaming(true)
 						}
 
 						// Check if it's a function call
@@ -335,11 +377,22 @@ func (c *Agent) Run(ctx context.Context) error {
 						}
 					}
 				}
-				if agentTextBlock != nil {
-					agentTextBlock.SetStreaming(false)
-					c.Output <- agentTextBlock
-				}
+				// if agentTextBlock != nil {
+				// 	agentTextBlock.SetStreaming(false)
+				// 	c.Output <- agentTextBlock
+				// }
 				log.Info("streamedText", "streamedText", streamedText)
+
+				message := &api.Message{
+					ID:        uuid.New().String(),
+					Source:    api.MessageSourceModel,
+					Type:      api.MessageTypeText,
+					Payload:   streamedText,
+					Timestamp: time.Now(),
+				}
+				c.session.Messages = append(c.session.Messages, message)
+				c.session.LastModified = time.Now()
+				c.Output <- message
 
 				// If no function calls to be made, we're done
 				if len(functionCalls) == 0 {
@@ -348,6 +401,7 @@ func (c *Agent) Run(ctx context.Context) error {
 					c.currChatContent = []any{}
 					c.currIteration = 0
 					c.pendingFunctionCalls = []ToolCallAnalysis{}
+					c.session.AgentState = api.AgentStateDone
 					// c.OutputCh <- ui.NewAgentTextBlock().WithText("Task completed.")
 					continue
 				}
@@ -357,6 +411,7 @@ func (c *Agent) Run(ctx context.Context) error {
 					log.Error(err, "error analyzing tool calls")
 					c.state = AgentStateDone
 					c.pendingFunctionCalls = []ToolCallAnalysis{}
+					c.session.AgentState = api.AgentStateDone
 					continue
 				}
 
@@ -376,9 +431,18 @@ func (c *Agent) Run(ctx context.Context) error {
 
 				if interactiveToolCallIndex >= 0 {
 					// Show error block for both shim enabled and disabled modes
-					errorBlock := ui.NewErrorBlock().SetText(fmt.Sprintf("  %s\n", toolCallAnalysisResults[interactiveToolCallIndex].IsInteractiveError.Error()))
+					errorMessage := fmt.Sprintf("  %s\n", toolCallAnalysisResults[interactiveToolCallIndex].IsInteractiveError.Error())
 					// c.doc.AddBlock(errorBlock)
-					c.Output <- errorBlock
+					message := &api.Message{
+						ID:        uuid.New().String(),
+						Source:    api.MessageSourceAgent,
+						Type:      api.MessageTypeError,
+						Payload:   errorMessage,
+						Timestamp: time.Now(),
+					}
+					c.session.Messages = append(c.session.Messages, message)
+					c.session.LastModified = time.Now()
+					c.Output <- message
 
 					// For models with tool-use support (shim disabled), use proper FunctionCallResult
 					// Note: This assumes the model supports sending FunctionCallResult
@@ -399,12 +463,30 @@ func (c *Agent) Run(ctx context.Context) error {
 					confirmationPrompt := "The following commands require your approval to run:\n* " + strings.Join(commandDescriptions, "\n* ")
 					confirmationPrompt += "\nDo you want to proceed ?"
 
-					optionsBlock := ui.NewInputOptionBlock().SetPrompt(confirmationPrompt)
-					optionsBlock.AddOption("yes", "Yes", "yes", "y")
-					optionsBlock.AddOption("yes_and_dont_ask_me_again", "Yes, and don't ask me again")
-					optionsBlock.AddOption("no", "No", "no", "n")
-					// c.doc.AddBlock(optionsBlock)
-					c.Output <- optionsBlock
+					message = &api.Message{
+						ID:     uuid.New().String(),
+						Source: api.MessageSourceAgent,
+						Type:   api.MessageTypeUserChoiceRequest,
+						Payload: &api.UserChoiceRequest{
+							Prompt: confirmationPrompt,
+							Options: []api.UserChoiceOption{
+								{Key: "yes", Value: "Yes"},
+								{Key: "yes_and_dont_ask_me_again", Value: "Yes, and don't ask me again"},
+								{Key: "no", Value: "No"},
+							},
+						},
+						Timestamp: time.Now(),
+					}
+					c.session.Messages = append(c.session.Messages, message)
+					c.session.LastModified = time.Now()
+					c.Output <- message
+
+					// optionsBlock := ui.NewInputOptionBlock().SetPrompt(confirmationPrompt)
+					// optionsBlock.AddOption("yes", "Yes", "yes", "y")
+					// optionsBlock.AddOption("yes_and_dont_ask_me_again", "Yes, and don't ask me again")
+					// optionsBlock.AddOption("no", "No", "no", "n")
+					// // c.doc.AddBlock(optionsBlock)
+					// c.Output <- optionsBlock
 
 					// Request input from the user by sending a ui.InputOptionBlock on the output channel
 					// remainining part of the loop will be now resumed when we receive a choice input
@@ -437,9 +519,17 @@ func (c *Agent) DispatchToolCalls(ctx context.Context) error {
 	for _, call := range c.pendingFunctionCalls {
 		// Only show "Running" message and proceed with execution for non-interactive commands
 		toolDescription := call.ParsedToolCall.Description()
-		functionCallRequestBlock := ui.NewFunctionCallRequestBlock().SetDescription(toolDescription)
-		// c.doc.AddBlock(functionCallRequestBlock)
-		c.Output <- functionCallRequestBlock
+
+		message := &api.Message{
+			ID:        uuid.New().String(),
+			Source:    api.MessageSourceModel,
+			Type:      api.MessageTypeToolCallRequest,
+			Payload:   toolDescription,
+			Timestamp: time.Now(),
+		}
+		c.session.Messages = append(c.session.Messages, message)
+		c.session.LastModified = time.Now()
+		c.Output <- message
 
 		output, err := call.ParsedToolCall.InvokeTool(ctx, tools.InvokeToolOptions{
 			Kubeconfig: c.Kubeconfig,
@@ -452,13 +542,17 @@ func (c *Agent) DispatchToolCalls(ctx context.Context) error {
 
 		// Handle timeout message using UI blocks
 		if execResult, ok := output.(*tools.ExecResult); ok && execResult != nil && execResult.StreamType == "timeout" {
-			infoBlock := ui.NewAgentTextBlock().WithText("\nTimeout reached after 7 seconds\n")
-			// c.doc.AddBlock(infoBlock)
-			c.Output <- infoBlock
+			message := &api.Message{
+				ID:        uuid.New().String(),
+				Source:    api.MessageSourceAgent,
+				Type:      api.MessageTypeError,
+				Payload:   "\nTimeout reached after 7 seconds\n",
+				Timestamp: time.Now(),
+			}
+			c.session.Messages = append(c.session.Messages, message)
+			c.session.LastModified = time.Now()
+			c.Output <- message
 		}
-
-		// Add the tool call result to maintain conversation flow
-		functionCallRequestBlock.SetResult(output)
 
 		// If shim is disabled, convert the result to a map and append FunctionCallResult
 		result, err := tools.ToolResultToMap(output)
@@ -466,6 +560,18 @@ func (c *Agent) DispatchToolCalls(ctx context.Context) error {
 			log.Error(err, "error converting tool result to map", "output", output)
 			return err
 		}
+
+		// Add the tool call result to maintain conversation flow
+		message = &api.Message{
+			ID:        uuid.New().String(),
+			Source:    api.MessageSourceAgent,
+			Type:      api.MessageTypeToolCallResponse,
+			Payload:   result,
+			Timestamp: time.Now(),
+		}
+		c.session.Messages = append(c.session.Messages, message)
+		c.session.LastModified = time.Now()
+		c.Output <- message
 
 		c.currChatContent = append(c.currChatContent, gollm.FunctionCallResult{
 			ID:     call.FunctionCall.ID,
