@@ -176,15 +176,14 @@ func (u *TerminalUI) handleMessage(msg *api.Message) {
 
 	switch msg.Type {
 	case api.MessageTypeText:
+		text = msg.Payload.(string)
 		switch msg.Source {
 		case api.MessageSourceUser:
 			styleOptions = append(styleOptions, Foreground(ColorWhite))
 		case api.MessageSourceAgent:
-			styleOptions = append(styleOptions, Foreground(ColorGreen))
-			text = msg.Payload.(string)
+			styleOptions = append(styleOptions, RenderMarkdown(), Foreground(ColorGreen))
 		case api.MessageSourceModel:
 			styleOptions = append(styleOptions, RenderMarkdown())
-			text = msg.Payload.(string)
 		}
 	case api.MessageTypeError:
 		styleOptions = append(styleOptions, Foreground(ColorRed))
@@ -336,6 +335,9 @@ func (u *TerminalUI) handleMessage(msg *api.Message) {
 			}
 		}
 		return
+	default:
+		klog.Warningf("unsupported message type: %v", msg.Type)
+		return
 	}
 
 	computedStyle := &ComputedStyle{}
@@ -353,7 +355,6 @@ func (u *TerminalUI) handleMessage(msg *api.Message) {
 			printText = out
 		}
 	}
-
 	reset := ""
 	switch computedStyle.Foreground {
 	case ColorRed:

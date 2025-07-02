@@ -197,8 +197,7 @@ func (c *Agent) Run(ctx context.Context) error {
 	log.Info("Starting agent loop")
 
 	if c.currIteration == 0 && c.state == AgentStateIdle {
-
-		greetingMessage := "Hey there, what can I help you with today?"
+		greetingMessage := "Hey there, what can I help you with today ?"
 		message := &api.Message{
 			ID:        uuid.New().String(),
 			Source:    api.MessageSourceAgent,
@@ -206,12 +205,9 @@ func (c *Agent) Run(ctx context.Context) error {
 			Payload:   greetingMessage,
 			Timestamp: time.Now(),
 		}
-		c.session.Messages = append(c.session.Messages, message)
 		c.session.AgentState = api.AgentStateIdle
 		c.session.LastModified = time.Now()
-
 		c.Output <- message
-		// c.OutputCh <- ui.NewInputTextBlock().SetEditable(true)
 	}
 
 	// main agent loop
