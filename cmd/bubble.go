@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 	"k8s.io/klog/v2"
 )
@@ -189,7 +190,7 @@ func (m model) renderedMessages() []string {
 	allMessages := m.agent.Session().AllMessages()
 	messages := make([]string, len(allMessages))
 	for i, message := range allMessages {
-		messages[i] = renderMessage(message)
+		messages[i] = m.renderMessage(message)
 	}
 	return messages
 }
@@ -203,18 +204,43 @@ func (m model) View() string {
 	)
 }
 
-func renderMessage(message *api.Message) string {
+func (m model) renderMessage(message *api.Message) string {
+	text := m.senderStyle.Render(fmt.Sprintf("%s: ", message.Source))
+	const glamourGutter = 2
+	glamourRenderWidth := m.viewport.Width - m.viewport.Style.GetHorizontalFrameSize() - glamourGutter
+
+	renderer, err := glamour.NewTermRenderer(
+		glamour.WithAutoStyle(),
+		glamour.WithWordWrap(glamourRenderWidth),
+	)
+	if err != nil {
+		return fmt.Sprintf("Error rendering message: %v", err)
+	}
+
+	var renderedText string
 	switch message.Type {
 	case api.MessageTypeText:
-		return message.Payload.(string)
+		renderedText, err = renderer.Render(message.Payload.(string))
+		if err != nil {
+			return fmt.Sprintf("Error rendering message: %v", err)
+		}
 	case api.MessageTypeError:
-		return fmt.Sprintf("  Error: %s\n", message.Payload.(string))
+		renderedText, err = renderer.Render(fmt.Sprintf("  Error: %s\n", message.Payload.(string)))
+		if err != nil {
+			return fmt.Sprintf("Error rendering message: %v", err)
+		}
 	case api.MessageTypeToolCallRequest:
-		return fmt.Sprintf("  Running: %s\n", message.Payload.(string))
+		renderedText, err = renderer.Render(fmt.Sprintf("  Running: %s\n", message.Payload.(string)))
+		if err != nil {
+			return fmt.Sprintf("Error rendering message: %v", err)
+		}
 	case api.MessageTypeToolCallResponse:
-		return fmt.Sprintf("  Output : %s\n", "(...)")
+		renderedText, err = renderer.Render(fmt.Sprintf("  Output : %s\n", "(...)"))
+		if err != nil {
+			return fmt.Sprintf("Error rendering message: %v", err)
+		}
 	}
-	return ""
+	return text + renderedText
 }
 
 // func (m model) View() string {
