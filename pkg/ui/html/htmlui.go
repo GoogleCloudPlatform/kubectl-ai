@@ -83,7 +83,7 @@ func NewHTMLUserInterface(doc *ui.Document, listenAddress string, journal journa
 	return u, nil
 }
 
-func (u *HTMLUserInterface) Run(ctx context.Context, agentOutputCh chan any, userInputCh chan any) error {
+func (u *HTMLUserInterface) Run(ctx context.Context) error {
 
 	return nil
 }

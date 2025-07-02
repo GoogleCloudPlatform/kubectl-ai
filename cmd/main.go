@@ -120,6 +120,7 @@ type UserInterface string
 const (
 	UserInterfaceTerminal UserInterface = "terminal"
 	UserInterfaceHTML     UserInterface = "html"
+	UserInterfaceBubble   UserInterface = "bubble"
 )
 
 // Implement pflag.Value for UserInterface
@@ -393,6 +394,27 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 
 	doc := ui.NewDocument()
 
+	k8sAgent := &agent.Agent{
+		Model:              opt.ModelID,
+		Kubeconfig:         opt.KubeConfigPath,
+		LLM:                llmClient,
+		MaxIterations:      opt.MaxIterations,
+		PromptTemplateFile: opt.PromptTemplateFilePath,
+		ExtraPromptPaths:   opt.ExtraPromptPaths,
+		Tools:              tools.Default(),
+		Recorder:           recorder,
+		RemoveWorkDir:      opt.RemoveWorkDir,
+		SkipPermissions:    opt.SkipPermissions,
+		EnableToolUseShim:  opt.EnableToolUseShim,
+		MCPClientEnabled:   opt.MCPClient,
+	}
+
+	err = k8sAgent.Init(ctx, doc)
+	if err != nil {
+		return fmt.Errorf("starting k8s agent: %w", err)
+	}
+	defer k8sAgent.Close()
+
 	var userInterface ui.UI
 	switch opt.UserInterface {
 	case UserInterfaceTerminal:
@@ -400,7 +422,7 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 		useTTYForInput := hasInputData
 
 		var u ui.UI
-		u, err = ui.NewTerminalUI(doc, recorder, useTTYForInput)
+		u, err = ui.NewTerminalUI(doc, recorder, useTTYForInput, k8sAgent.Output, k8sAgent.Input)
 		if err != nil {
 			return err
 		}
@@ -422,30 +444,12 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 		}
 		userInterface = u
 
+	case UserInterfaceBubble:
+		userInterface = NewBubbleUI(k8sAgent)
+
 	default:
 		return fmt.Errorf("user-interface mode %q is not known", opt.UserInterface)
 	}
-
-	k8sAgent := &agent.Agent{
-		Model:              opt.ModelID,
-		Kubeconfig:         opt.KubeConfigPath,
-		LLM:                llmClient,
-		MaxIterations:      opt.MaxIterations,
-		PromptTemplateFile: opt.PromptTemplateFilePath,
-		ExtraPromptPaths:   opt.ExtraPromptPaths,
-		Tools:              tools.Default(),
-		Recorder:           recorder,
-		RemoveWorkDir:      opt.RemoveWorkDir,
-		SkipPermissions:    opt.SkipPermissions,
-		EnableToolUseShim:  opt.EnableToolUseShim,
-		MCPClientEnabled:   opt.MCPClient,
-	}
-
-	err = k8sAgent.Init(ctx, doc)
-	if err != nil {
-		return fmt.Errorf("starting k8s agent: %w", err)
-	}
-	defer k8sAgent.Close()
 
 	chatSession := session{
 		model:      opt.ModelID,
@@ -533,10 +537,7 @@ type session struct {
 // repl is a read-eval-print loop for the chat session.
 func (s *session) replAgentNative(ctx context.Context) error {
 
-	agentOutputCh := s.agent.Output
-	userInputCh := s.agent.Input
-
-	err := s.ui.Run(ctx, agentOutputCh, userInputCh)
+	err := s.ui.Run(ctx)
 	if err != nil {
 		return fmt.Errorf("running UI: %w", err)
 	}

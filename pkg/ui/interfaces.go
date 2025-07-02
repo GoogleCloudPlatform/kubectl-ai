@@ -24,7 +24,7 @@ type UI interface {
 	ClearScreen()
 
 	// Run starts the UI and blocks until the context is done.
-	Run(ctx context.Context, agentOutputCh chan any, userInputCh chan any) error
+	Run(ctx context.Context) error
 }
 
 type ComputedStyle struct {

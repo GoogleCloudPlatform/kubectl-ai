@@ -65,7 +65,7 @@ type TerminalUI struct {
 
 var _ UI = &TerminalUI{}
 
-func NewTerminalUI(doc *Document, journal journal.Recorder, useTTYForInput bool) (*TerminalUI, error) {
+func NewTerminalUI(doc *Document, journal journal.Recorder, useTTYForInput bool, agentOutputCh chan any, userInputCh chan any) (*TerminalUI, error) {
 	mdRenderer, err := glamour.NewTermRenderer(
 		glamour.WithAutoStyle(),
 		glamour.WithPreservedNewLines(),
@@ -79,6 +79,8 @@ func NewTerminalUI(doc *Document, journal journal.Recorder, useTTYForInput bool)
 		markdownRenderer: mdRenderer,
 		journal:          journal,
 		useTTYForInput:   useTTYForInput, // Store this flag
+		AgentOutputCh:    agentOutputCh,
+		UserInputCh:      userInputCh,
 	}
 
 	subscription := doc.AddSubscription(u)
@@ -87,15 +89,13 @@ func NewTerminalUI(doc *Document, journal journal.Recorder, useTTYForInput bool)
 	return u, nil
 }
 
-func (u *TerminalUI) Run(ctx context.Context, agentOutputCh chan any, userInputCh chan any) error {
-	u.AgentOutputCh = agentOutputCh
-	u.UserInputCh = userInputCh
+func (u *TerminalUI) Run(ctx context.Context) error {
 	go func() {
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case msg, ok := <-agentOutputCh:
+			case msg, ok := <-u.AgentOutputCh:
 				if !ok {
 					return
 				}
