@@ -100,7 +100,7 @@ func (u *TerminalUI) Run(ctx context.Context, agentOutputCh chan any, userInputC
 					return
 				}
 				klog.Infof("agent output: %+v", msg)
-				u.handleBlock(msg.(*api.Message))
+				u.handleMessage(msg.(*api.Message))
 			}
 		}
 	}()
@@ -170,50 +170,48 @@ func (u *TerminalUI) Close() error {
 	return errors.Join(errs...)
 }
 
-func (u *TerminalUI) handleBlock(block *api.Message) {
+func (u *TerminalUI) handleMessage(msg *api.Message) {
 	text := ""
 	var styleOptions []StyleOption
 
-	switch block.Type {
+	switch msg.Type {
 	case api.MessageTypeText:
-		switch block.Source {
+		switch msg.Source {
 		case api.MessageSourceUser:
 			styleOptions = append(styleOptions, Foreground(ColorWhite))
 		case api.MessageSourceAgent:
 			styleOptions = append(styleOptions, Foreground(ColorGreen))
-			text = block.Payload.(string)
+			text = msg.Payload.(string)
 		case api.MessageSourceModel:
 			styleOptions = append(styleOptions, RenderMarkdown())
-			text = block.Payload.(string)
+			text = msg.Payload.(string)
 		}
 	case api.MessageTypeError:
 		styleOptions = append(styleOptions, Foreground(ColorRed))
-		text = block.Payload.(string)
+		text = msg.Payload.(string)
 	case api.MessageTypeToolCallRequest:
 		styleOptions = append(styleOptions, Foreground(ColorGreen))
-		text = fmt.Sprintf("  Running: %s\n", block.Payload.(string))
+		text = fmt.Sprintf("  Running: %s\n", msg.Payload.(string))
 	case api.MessageTypeToolCallResponse:
 		styleOptions = append(styleOptions, Foreground(ColorGreen))
-		// payload := block.Payload.(map[string]any)
+		// payload := msg.Payload.(map[string]any)
 		// toolCallResult := payload["result"].(map[string]any)
 		// toolCallResultString := fmt.Sprintf("%+v", toolCallResult)
 		// text = fmt.Sprintf("  %s\n", toolCallResultString)
-		text = fmt.Sprintf("  Output : %s\n", "(coming soon)")
+		text = fmt.Sprintf("  Output : %s\n", "(...)")
 	case api.MessageTypeUserInputRequest:
-		text = block.Payload.(string)
+		text = msg.Payload.(string)
 		var query string
 		if u.useTTYForInput {
 			tReader, err := u.ttyReader()
 			if err != nil {
-				// block.Observable().Set("", fmt.Errorf("TTY reader not initialized"))
 				return
 			}
 			fmt.Print("\n>>> ") // Print prompt manually
 			query, err = tReader.ReadString('\n')
 			if err != nil {
-				// block.Observable().Set("", err) // Set error (includes io.EOF)
-			} else {
-				// block.Observable().Set(query, nil)
+				u.UserInputCh <- fmt.Errorf("error reading from TTY: %w", err)
+				return
 			}
 			u.UserInputCh <- query
 		} else {
@@ -239,7 +237,7 @@ func (u *TerminalUI) handleBlock(block *api.Message) {
 		}
 		return
 	case api.MessageTypeUserChoiceRequest:
-		choiceRequest := block.Payload.(*api.UserChoiceRequest)
+		choiceRequest := msg.Payload.(*api.UserChoiceRequest)
 		styleOptions = append(styleOptions, Foreground(ColorWhite))
 		// text = fmt.Sprintf("  %s\n", choiceRequest.Prompt)
 		if choiceRequest.Prompt != "" {
@@ -261,7 +259,7 @@ func (u *TerminalUI) handleBlock(block *api.Message) {
 		if u.useTTYForInput {
 			tReader, err := u.ttyReader()
 			if err != nil {
-				// block.Selection().Set("", fmt.Errorf("TTY reader not initialized"))
+				u.UserInputCh <- fmt.Errorf("error reading from TTY: %w", err)
 				return
 			}
 			for {
@@ -269,7 +267,7 @@ func (u *TerminalUI) handleBlock(block *api.Message) {
 				fmt.Printf("  Enter your choice (%s): ", strings.Join(choiceNumbers, ","))
 				response, err := tReader.ReadString('\n')
 				if err != nil {
-					// block.Selection().Set("", err)
+					u.UserInputCh <- err
 					return
 				}
 				response = strings.TrimSpace(response)
@@ -280,7 +278,6 @@ func (u *TerminalUI) handleBlock(block *api.Message) {
 				}
 				optionKey := choiceRequest.Options[choiceIndex].Key
 				if optionKey != "" {
-					// block.Selection().Set(optionKey, nil)
 					if choiceIndex == -1 {
 						klog.Errorf("could not find option with key %q", optionKey)
 						return
@@ -294,7 +291,7 @@ func (u *TerminalUI) handleBlock(block *api.Message) {
 		} else {
 			rlInstance, err := u.readlineInstance()
 			if err != nil {
-				// block.Selection().Set("", fmt.Errorf("readline instance not initialized: %w", err))
+				u.UserInputCh <- fmt.Errorf("error creating readline instance: %w", err)
 				return
 			}
 			// Temporarily change prompt for option selection
@@ -311,16 +308,15 @@ func (u *TerminalUI) handleBlock(block *api.Message) {
 				if err != nil {
 					switch err {
 					case readline.ErrInterrupt: // Handle Ctrl+C
-						// u.UserInputCh <- io.EOF
+						u.UserInputCh <- io.EOF
 					case io.EOF: // Handle Ctrl+D
 						countCTRL_D++
 						if countCTRL_D > 1 {
 							u.UserInputCh <- io.EOF
 							return
 						}
-						// u.UserInputCh <- io.EOF
 					default:
-						// u.UserInputCh <- err
+						u.UserInputCh <- err
 					}
 				}
 
@@ -328,7 +324,6 @@ func (u *TerminalUI) handleBlock(block *api.Message) {
 				choiceIndex, err := strconv.Atoi(response)
 				if err != nil {
 					klog.Errorf("invalid choice: %v", err)
-					// return
 					continue
 				}
 				optionKey := choiceRequest.Options[choiceIndex-1].Key
@@ -342,130 +337,6 @@ func (u *TerminalUI) handleBlock(block *api.Message) {
 		}
 		return
 	}
-
-	// case *InputOptionBlock: // TODO: remove this block
-	// 	if block.Prompt != "" {
-	// 		fmt.Printf("%s\n", block.Prompt) // Print initial prompt text
-	// 		markdown, err := u.markdownRenderer.Render(block.Prompt)
-	// 		if err != nil {
-	// 			klog.Errorf("Error rendering markdown: %v", err)
-	// 		} else {
-	// 			fmt.Printf("%s\n", markdown)
-	// 		}
-	// 	} else {
-	// 		fmt.Printf("\n")
-	// 	}
-	// 	for i, option := range block.Options {
-	// 		fmt.Printf("  %d) %s\n", i+1, option.Message)
-	// 	}
-
-	// 	var choiceNumbers []string
-	// 	var allOptions []string
-	// 	inputMap := make(map[string]string)
-	// 	for i, option := range block.Options {
-	// 		choiceNumber := strconv.Itoa(i + 1)
-	// 		choiceNumbers = append(choiceNumbers, choiceNumber)
-
-	// 		allOptions = append(allOptions, choiceNumber)
-	// 		inputMap[choiceNumber] = option.Key
-
-	// 		for _, alias := range option.Aliases {
-	// 			allOptions = append(allOptions, alias)
-	// 			inputMap[alias] = option.Key
-	// 		}
-	// 	}
-	// 	fmt.Printf("  Enter your choice (%s): ", strings.Join(choiceNumbers, ","))
-
-	// 	if u.useTTYForInput {
-	// 		tReader, err := u.ttyReader()
-	// 		if err != nil {
-	// 			block.Selection().Set("", fmt.Errorf("TTY reader not initialized"))
-	// 			return
-	// 		}
-	// 		for {
-	// 			fmt.Printf("  Enter your choice (%s): ", strings.Join(choiceNumbers, ",")) // Print loop prompt manually
-	// 			response, err := tReader.ReadString('\n')
-	// 			if err != nil {
-	// 				block.Selection().Set("", err)
-	// 				return
-	// 			}
-	// 			response = strings.TrimSpace(response)
-	// 			optionKey, foundMatchingOption := inputMap[response]
-	// 			if foundMatchingOption {
-	// 				block.Selection().Set(optionKey, nil)
-	// 				var choiceIndex = -1
-	// 				for i, opt := range block.Options {
-	// 					if opt.Key == optionKey {
-	// 						choiceIndex = i
-	// 						break
-	// 					}
-	// 				}
-	// 				if choiceIndex == -1 {
-	// 					klog.Errorf("could not find option with key %q", optionKey)
-	// 					return
-	// 				}
-	// 				u.UserInputCh <- int32(choiceIndex + 1)
-	// 				break // Exit loop on valid choice
-	// 			} else {
-	// 				fmt.Printf("  Invalid choice. Please enter one of: %s\n", strings.Join(allOptions, ", "))
-	// 			}
-	// 		}
-	// 	} else {
-	// 		rlInstance, err := u.readlineInstance()
-	// 		if err != nil {
-	// 			block.Selection().Set("", fmt.Errorf("readline instance not initialized: %w", err))
-	// 			return
-	// 		}
-	// 		// Temporarily change prompt for option selection
-	// 		originalPrompt := rlInstance.Config.Prompt
-	// 		choicePrompt := "  Enter your choice (1,2,3): "
-	// 		rlInstance.SetPrompt(choicePrompt)
-	// 		// Ensure original prompt is restored even if errors occur
-	// 		defer rlInstance.SetPrompt(originalPrompt)
-
-	// 		countCTRL_D := 0
-	// 		for {
-	// 			response, err := rlInstance.Readline()
-	// 			if err != nil {
-	// 				switch err {
-	// 				case readline.ErrInterrupt: // Handle Ctrl+C
-	// 					// u.UserInputCh <- io.EOF
-	// 				case io.EOF: // Handle Ctrl+D
-	// 					countCTRL_D++
-	// 					if countCTRL_D > 1 {
-	// 						u.UserInputCh <- io.EOF
-	// 						return
-	// 					}
-	// 					// u.UserInputCh <- io.EOF
-	// 				default:
-	// 					// u.UserInputCh <- err
-	// 				}
-	// 			}
-
-	// 			response = strings.TrimSpace(response)
-	// 			optionKey, foundMatchingOption := inputMap[response]
-	// 			if foundMatchingOption {
-	// 				block.Selection().Set(optionKey, nil)
-	// 				var choiceIndex = -1
-	// 				for i, opt := range block.Options {
-	// 					if opt.Key == optionKey {
-	// 						choiceIndex = i
-	// 						break
-	// 					}
-	// 				}
-	// 				if choiceIndex == -1 {
-	// 					klog.Errorf("could not find option with key %q", optionKey)
-	// 					return
-	// 				}
-	// 				u.UserInputCh <- int32(choiceIndex + 1)
-	// 				break // Exit loop on valid choice
-	// 			} else {
-	// 				fmt.Printf("\n  Invalid choice. Please enter one of: %s\n", strings.Join(allOptions, ", "))
-	// 			}
-	// 		}
-	// 	}
-	// 	return
-	// }
 
 	computedStyle := &ComputedStyle{}
 	for _, opt := range styleOptions {
