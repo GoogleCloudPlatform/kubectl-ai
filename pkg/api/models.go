@@ -62,3 +62,7 @@ type UserChoiceOption struct {
 type UserChoiceResponse struct {
 	Choice int
 }
+
+func (s *Session) AllMessages() []*Message {
+	return s.Messages
+}

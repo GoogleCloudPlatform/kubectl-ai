@@ -104,6 +104,10 @@ type Agent struct {
 	session *api.Session
 }
 
+func (s *Agent) Session() *api.Session {
+	return s.session
+}
+
 func (s *Agent) Init(ctx context.Context, doc *ui.Document) error {
 	log := klog.FromContext(ctx)
 
@@ -205,6 +209,7 @@ func (c *Agent) Run(ctx context.Context) error {
 			Payload:   greetingMessage,
 			Timestamp: time.Now(),
 		}
+		c.session.Messages = append(c.session.Messages, message)
 		c.session.AgentState = api.AgentStateIdle
 		c.session.LastModified = time.Now()
 		c.Output <- message
@@ -250,6 +255,16 @@ func (c *Agent) Run(ctx context.Context) error {
 				case string:
 					log.Info("Text input", "text", u)
 
+					message := &api.Message{
+						ID:        uuid.New().String(),
+						Source:    api.MessageSourceUser,
+						Type:      api.MessageTypeText,
+						Payload:   u,
+						Timestamp: time.Now(),
+					}
+					c.session.Messages = append(c.session.Messages, message)
+					c.session.LastModified = time.Now()
+					c.Output <- message
 					if c.state == AgentStateIdle || c.state == AgentStateDone {
 						c.state = AgentStateRunning
 						c.currIteration = 0

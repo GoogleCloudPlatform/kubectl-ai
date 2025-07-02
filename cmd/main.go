@@ -126,7 +126,7 @@ const (
 // Implement pflag.Value for UserInterface
 func (u *UserInterface) Set(s string) error {
 	switch s {
-	case "terminal", "html":
+	case "terminal", "html", "bubble":
 		*u = UserInterface(s)
 		return nil
 	default:
@@ -537,17 +537,18 @@ type session struct {
 // repl is a read-eval-print loop for the chat session.
 func (s *session) replAgentNative(ctx context.Context) error {
 
-	err := s.ui.Run(ctx)
+	// Start the agent (non-blocking, starts internal goroutine)
+	err := s.agent.Run(ctx)
+	if err != nil {
+		return fmt.Errorf("running agent: %w", err)
+	}
+
+	// Now start the UI (this will block until the program exits)
+	err = s.ui.Run(ctx)
 	if err != nil {
 		return fmt.Errorf("running UI: %w", err)
 	}
 
-	err = s.agent.Run(ctx)
-	if err != nil {
-		return fmt.Errorf("running conversation: %w", err)
-	}
-
-	<-ctx.Done()
 	return nil
 
 	// for {
