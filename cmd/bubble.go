@@ -78,7 +78,7 @@ type BubbleUI struct {
 
 func NewBubbleUI(agent *agent.Agent) *BubbleUI {
 	return &BubbleUI{
-		program: tea.NewProgram(newModel(agent)),
+		program: tea.NewProgram(newModel(agent), tea.WithAltScreen()),
 		agent:   agent,
 	}
 }
