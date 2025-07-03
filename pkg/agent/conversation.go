@@ -490,6 +490,8 @@ func (c *Agent) Run(ctx context.Context) error {
 					}
 					c.session.Messages = append(c.session.Messages, message)
 					c.session.LastModified = time.Now()
+					c.state = AgentStateWaiting
+					c.session.AgentState = api.AgentStateWaitingForInput
 					c.Output <- message
 
 					// optionsBlock := ui.NewInputOptionBlock().SetPrompt(confirmationPrompt)
@@ -502,7 +504,6 @@ func (c *Agent) Run(ctx context.Context) error {
 					// Request input from the user by sending a ui.InputOptionBlock on the output channel
 					// remainining part of the loop will be now resumed when we receive a choice input
 					// from the user.
-					c.state = AgentStateWaiting
 					continue
 				}
 

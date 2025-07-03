@@ -6,11 +6,13 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/agent"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/api"
+	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -27,6 +29,45 @@ var (
 	durationStyle = dotStyle
 	appStyle      = lipgloss.NewStyle().Margin(1, 2, 0, 2)
 )
+
+const listHeight = 5
+
+var (
+	titleStyle        = lipgloss.NewStyle().MarginLeft(2)
+	listStyle         = lipgloss.NewStyle().MarginBottom(2)
+	itemStyle         = lipgloss.NewStyle().PaddingLeft(4)
+	selectedItemStyle = lipgloss.NewStyle().PaddingLeft(2).Foreground(lipgloss.Color("170"))
+	paginationStyle   = list.DefaultStyles().PaginationStyle.PaddingLeft(4)
+	// helpStyle         = list.DefaultStyles().HelpStyle.PaddingLeft(4).PaddingBottom(1)
+	quitTextStyle = lipgloss.NewStyle().Margin(1, 0, 2, 4)
+)
+
+type item string
+
+func (i item) FilterValue() string { return "" }
+
+type itemDelegate struct{}
+
+func (d itemDelegate) Height() int                             { return 1 }
+func (d itemDelegate) Spacing() int                            { return 0 }
+func (d itemDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd { return nil }
+func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list.Item) {
+	i, ok := listItem.(item)
+	if !ok {
+		return
+	}
+
+	str := fmt.Sprintf("%d. %s", index+1, i)
+
+	fn := itemStyle.Render
+	if index == m.Index() {
+		fn = func(s ...string) string {
+			return selectedItemStyle.Render("> " + strings.Join(s, " "))
+		}
+	}
+
+	fmt.Fprint(w, fn(str))
+}
 
 const gap = "\n\n"
 
@@ -92,12 +133,15 @@ type model struct {
 	results  []resultMsg
 	messages []*api.Message
 	quitting bool
+
+	list   list.Model
+	choice string
 }
 
 func newModel(agent *agent.Agent) model {
-	const numLastResults = 5
-	s := spinner.New()
-	s.Style = spinnerStyle
+	// const numLastResults = 5
+	// s := spinner.New()
+	// s.Style = spinnerStyle
 
 	ta := textarea.New()
 	ta.Placeholder = "Send a message..."
@@ -107,12 +151,31 @@ func newModel(agent *agent.Agent) model {
 	ta.CharLimit = 280
 
 	ta.SetWidth(30)
-	ta.SetHeight(3)
+	ta.SetHeight(5)
 
 	// Remove cursor line styling
 	ta.FocusedStyle.CursorLine = lipgloss.NewStyle()
 
 	ta.ShowLineNumbers = false
+
+	items := []list.Item{
+		item("Yes"),
+		item("Yes, and don't ask me again"),
+		item("No"),
+	}
+
+	const defaultWidth = 30
+
+	l := list.New(items, itemDelegate{}, defaultWidth, listHeight)
+	l.Title = "Do you want to proceed ?"
+	l.SetShowStatusBar(false)
+	l.SetFilteringEnabled(false)
+	l.SetShowHelp(false)
+	l.SetShowPagination(false)
+	l.Styles.Title = titleStyle
+	// = listStyle
+	// l.Styles.PaginationStyle = paginationStyle
+	// l.Styles.HelpStyle = helpStyle
 
 	vp := viewport.New(30, 5)
 	vp.SetContent(`Welcome to the chat room!
@@ -121,13 +184,14 @@ Type a message and press Enter to send.`)
 	ta.KeyMap.InsertNewline.SetEnabled(false)
 
 	return model{
-		agent:       agent,
-		spinner:     s,
+		agent: agent,
+		// spinner:     s,
 		textarea:    ta,
 		viewport:    vp,
+		list:        l,
 		senderStyle: lipgloss.NewStyle().Foreground(lipgloss.Color("5")),
-		results:     make([]resultMsg, numLastResults),
-		err:         nil,
+		// results:     make([]resultMsg, numLastResults),
+		err: nil,
 	}
 }
 
@@ -138,19 +202,27 @@ func (m model) Init() tea.Cmd {
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	var (
-		tiCmd tea.Cmd
-		vpCmd tea.Cmd
+		tiCmd   tea.Cmd
+		vpCmd   tea.Cmd
+		listCmd tea.Cmd
 	)
 
 	m.textarea, tiCmd = m.textarea.Update(msg)
 	m.viewport, vpCmd = m.viewport.Update(msg)
+	m.list, listCmd = m.list.Update(msg)
 
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.viewport.Width = msg.Width
 		m.textarea.SetWidth(msg.Width)
-		m.viewport.Height = msg.Height - m.textarea.Height() - lipgloss.Height(gap)
-
+		if m.agent.Session().AgentState == api.AgentStateWaitingForInput {
+			m.list.SetWidth(msg.Width)
+			// m.viewport.Height = msg.Height - m.list.Height() - lipgloss.Height(gap)
+			// TODO: keeping the height of the viewport the same as the height of the textarea for now to avoid jerky UI
+			m.viewport.Height = msg.Height - m.textarea.Height() - lipgloss.Height(gap)
+		} else {
+			m.viewport.Height = msg.Height - m.textarea.Height() - lipgloss.Height(gap)
+		}
 		if len(m.renderedMessages()) > 0 {
 			// Wrap content before setting it.
 			m.viewport.SetContent(lipgloss.NewStyle().Width(m.viewport.Width).Render(strings.Join(m.renderedMessages(), "\n")))
@@ -162,11 +234,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			fmt.Println(m.textarea.Value())
 			return m, tea.Quit
 		case tea.KeyEnter:
-			m.agent.Input <- m.textarea.Value()
-
+			if m.agent.Session().AgentState == api.AgentStateWaitingForInput {
+				i := m.list.Index()
+				if i != -1 {
+					m.agent.Input <- int32(i + 1)
+				}
+				return m, nil
+			} else {
+				m.agent.Input <- m.textarea.Value()
+				m.textarea.Reset()
+			}
 			// m.messages = append(m.messages, m.senderStyle.Render("You: ")+m.textarea.Value())
 			// m.viewport.SetContent(lipgloss.NewStyle().Width(m.viewport.Width).Render(strings.Join(m.messages, "\n")))
-			m.textarea.Reset()
 			m.viewport.GotoBottom()
 		}
 	case *api.Message:
@@ -182,7 +261,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	return m, tea.Batch(tiCmd, vpCmd)
+	return m, tea.Batch(tiCmd, vpCmd, listCmd)
 
 }
 
@@ -196,12 +275,17 @@ func (m model) renderedMessages() []string {
 }
 
 func (m model) View() string {
-	return fmt.Sprintf(
-		"%s%s%s",
+	mainView := fmt.Sprintf(
+		"%s%s",
 		m.viewport.View(),
 		gap,
-		m.textarea.View(),
 	)
+	if m.agent.Session().AgentState == api.AgentStateWaitingForInput {
+		mainView += listStyle.Render(m.list.View())
+	} else {
+		mainView += m.textarea.View()
+	}
+	return mainView
 }
 
 func (m model) renderMessage(message *api.Message) string {
@@ -236,6 +320,11 @@ func (m model) renderMessage(message *api.Message) string {
 		}
 	case api.MessageTypeToolCallResponse:
 		renderedText, err = renderer.Render(fmt.Sprintf("  Output : %s\n", "(...)"))
+		if err != nil {
+			return fmt.Sprintf("Error rendering message: %v", err)
+		}
+	case api.MessageTypeUserChoiceRequest:
+		renderedText, err = renderer.Render(message.Payload.(*api.UserChoiceRequest).Prompt)
 		if err != nil {
 			return fmt.Sprintf("Error rendering message: %v", err)
 		}
