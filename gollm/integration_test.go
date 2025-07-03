@@ -398,3 +398,38 @@ func TestBedrockClientTimeoutFix(t *testing.T) {
 		}
 	})
 }
+
+// Mock implementation for testing - shared across integration tests
+type mockUsageExtractor struct{}
+
+func (e *mockUsageExtractor) ExtractUsage(rawUsage any, model string, provider string) *Usage {
+	if rawUsage == nil {
+		return nil
+	}
+
+	// Mock extraction logic
+	if data, ok := rawUsage.(map[string]interface{}); ok {
+		usage := &Usage{
+			Model:     model,
+			Provider:  provider,
+			Timestamp: time.Now(),
+		}
+
+		if inputTokens, exists := data["input_tokens"]; exists {
+			if tokens, ok := inputTokens.(int); ok {
+				usage.InputTokens = tokens
+			}
+		}
+
+		if outputTokens, exists := data["output_tokens"]; exists {
+			if tokens, ok := outputTokens.(int); ok {
+				usage.OutputTokens = tokens
+			}
+		}
+
+		usage.TotalTokens = usage.InputTokens + usage.OutputTokens
+		return usage
+	}
+
+	return nil
+}

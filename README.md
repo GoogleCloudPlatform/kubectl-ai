@@ -144,6 +144,17 @@ export OPENAI_API_KEY=your_openai_api_key_here
 export OPENAI_ENDPOINT=https://dashscope.aliyuncs.com/compatible-mode/v1
 kubectl-ai --llm-provider=openai --model=qwen-plus
 ```
+
+#### Using AWS Bedrock
+
+You can use AWS Bedrock models by setting up your AWS credentials:
+
+```bash
+aws configure
+kubectl-ai --llm-provider=bedrock --model=us.anthropic.claude-sonnet-4-20250514-v1:0
+```
+
+📖 **For detailed setup instructions, model availability by region, and troubleshooting, see the [AWS Bedrock Integration Guide](./docs/bedrock.md).**
 </details>
 
 Run interactively:

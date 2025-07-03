@@ -53,28 +53,94 @@ var DefaultOptions = &BedrockOptions{
 	MaxRetries:  10,
 }
 
-// isModelSupported checks if the given model is supported
+// supportedModelsByRegion defines the available models for each AWS region
+// This allows for region-specific model availability and easier maintenance
+var supportedModelsByRegion = map[string][]string{
+	"us-east-1": {
+		"us.anthropic.claude-sonnet-4-20250514-v1:0",
+		"us.anthropic.claude-3-7-sonnet-20250219-v1:0",
+		"us.amazon.nova-pro-v1:0",
+		"us.amazon.nova-lite-v1:0",
+		"us.amazon.nova-micro-v1:0",
+		"anthropic.claude-v2:1",
+		"anthropic.claude-instant-v1",
+		"amazon.nova-pro-v1:0",
+		"mistral.mistral-large-2402-v1:0",
+	},
+	"us-west-2": {
+		"us.anthropic.claude-sonnet-4-20250514-v1:0",
+		"us.anthropic.claude-3-7-sonnet-20250219-v1:0",
+		"us.amazon.nova-pro-v1:0",
+		"us.amazon.nova-lite-v1:0",
+		"us.amazon.nova-micro-v1:0",
+		"anthropic.claude-v2:1",
+		"amazon.nova-pro-v1:0",
+		"stability.sd3-large-v1:0",
+	},
+	"eu-west-1": {
+		"anthropic.claude-v2:1",
+		"anthropic.claude-instant-v1",
+		"amazon.nova-pro-v1:0",
+		"amazon.nova-lite-v1:0",
+		"amazon.nova-micro-v1:0",
+	},
+	"eu-central-1": {
+		"anthropic.claude-v2:1",
+		"anthropic.claude-instant-v1",
+		"amazon.nova-pro-v1:0",
+		"amazon.nova-lite-v1:0",
+		"amazon.nova-micro-v1:0",
+	},
+	"ap-southeast-1": {
+		"anthropic.claude-v2:1",
+		"anthropic.claude-instant-v1",
+		"amazon.nova-pro-v1:0",
+		"amazon.nova-lite-v1:0",
+		"amazon.nova-micro-v1:0",
+	},
+	"ap-northeast-1": {
+		"anthropic.claude-v2:1",
+		"anthropic.claude-instant-v1",
+		"amazon.nova-pro-v1:0",
+		"amazon.nova-lite-v1:0",
+		"amazon.nova-micro-v1:0",
+	},
+}
+
+// isModelSupported checks if the given model is supported in the specified region
 func isModelSupported(model string) bool {
+	return isModelSupportedInRegion(model, "")
+}
+
+// isModelSupportedInRegion checks if the given model is supported in the specified region
+func isModelSupportedInRegion(model, region string) bool {
 	if model == "" {
 		return false
 	}
 
 	modelLower := strings.ToLower(model)
 
-	supportedModels := []string{
-		"us.anthropic.claude-sonnet-4-20250514-v1:0",
-		"us.anthropic.claude-3-7-sonnet-20250219-v1:0",
-		"us.amazon.nova-pro-v1:0",
-		"us.amazon.nova-lite-v1:0",
-		"us.amazon.nova-micro-v1:0",
-	}
-
-	for _, supported := range supportedModels {
-		if modelLower == strings.ToLower(supported) {
-			return true
+	// If region is specified, check region-specific models first
+	if region != "" {
+		if models, exists := supportedModelsByRegion[region]; exists {
+			for _, supported := range models {
+				if modelLower == strings.ToLower(supported) {
+					return true
+				}
+			}
 		}
 	}
 
+	// Fallback: check all regions if no region specified or model not found in specified region
+	for _, models := range supportedModelsByRegion {
+		for _, supported := range models {
+			if modelLower == strings.ToLower(supported) {
+				return true
+			}
+		}
+	}
+
+	// Handle special cases (ARNs and inference profiles)
 	if strings.Contains(modelLower, "arn:aws:bedrock") {
 		if strings.Contains(modelLower, "inference-profile") {
 			if strings.Contains(modelLower, "anthropic") || strings.Contains(modelLower, "claude") {
@@ -92,7 +158,7 @@ func isModelSupported(model string) bool {
 			parts := strings.Split(model, "/")
 			if len(parts) > 0 {
 				extractedModel := parts[len(parts)-1]
-				return isModelSupported(extractedModel)
+				return isModelSupportedInRegion(extractedModel, region)
 			}
 		}
 	}
@@ -100,12 +166,36 @@ func isModelSupported(model string) bool {
 	return false
 }
 
+// getSupportedModels returns all supported models across all regions
 func getSupportedModels() []string {
-	return []string{
-		"us.anthropic.claude-sonnet-4-20250514-v1:0",
-		"us.anthropic.claude-3-7-sonnet-20250219-v1:0",
-		"us.amazon.nova-pro-v1:0",
-		"us.amazon.nova-lite-v1:0",
-		"us.amazon.nova-micro-v1:0",
+	return getSupportedModelsForRegion("")
+}
+
+// getSupportedModelsForRegion returns supported models for the specified region
+// If region is empty, returns all models across all regions
+func getSupportedModelsForRegion(region string) []string {
+	if region != "" {
+		if models, exists := supportedModelsByRegion[region]; exists {
+			// Return a copy to avoid external modification
+			result := make([]string, len(models))
+			copy(result, models)
+			return result
+		}
+		return []string{} // Return empty slice if region not found
 	}
+
+	// Return all models across all regions (with deduplication)
+	modelSet := make(map[string]bool)
+	for _, models := range supportedModelsByRegion {
+		for _, model := range models {
+			modelSet[model] = true
+		}
+	}
+
+	var result []string
+	for model := range modelSet {
+		result = append(result, model)
+	}
+
+	return result
 }
