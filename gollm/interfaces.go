@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"iter"
+	"time"
 )
 
 // Client is a client for a language model.
@@ -166,4 +167,208 @@ type Part interface {
 	// AsFunctionCalls returns the function calls of the part.
 	// if the part is not a function call, it returns (nil, false)
 	AsFunctionCalls() ([]FunctionCall, bool)
+}
+
+// Usage represents standardized token usage and cost information across providers.
+// This provides a structured format for usage metrics while maintaining backwards
+// compatibility with the existing UsageMetadata() any interface for raw provider data.
+type Usage struct {
+	// Token usage information
+	InputTokens  int `json:"inputTokens,omitempty"`
+	OutputTokens int `json:"outputTokens,omitempty"`
+	TotalTokens  int `json:"totalTokens,omitempty"`
+
+	// Cost information (in USD)
+	InputCost  float64 `json:"inputCost,omitempty"`
+	OutputCost float64 `json:"outputCost,omitempty"`
+	TotalCost  float64 `json:"totalCost,omitempty"`
+
+	// Metadata
+	Model     string    `json:"model,omitempty"`
+	Provider  string    `json:"provider,omitempty"`
+	Timestamp time.Time `json:"timestamp,omitempty"`
+}
+
+// MarshalJSON implements json.Marshaler interface for Usage.
+func (u Usage) MarshalJSON() ([]byte, error) {
+	// Create a map to handle omitempty behavior properly
+	result := make(map[string]interface{})
+
+	if u.InputTokens != 0 {
+		result["inputTokens"] = u.InputTokens
+	}
+	if u.OutputTokens != 0 {
+		result["outputTokens"] = u.OutputTokens
+	}
+	if u.TotalTokens != 0 {
+		result["totalTokens"] = u.TotalTokens
+	}
+	if u.InputCost != 0 {
+		result["inputCost"] = u.InputCost
+	}
+	if u.OutputCost != 0 {
+		result["outputCost"] = u.OutputCost
+	}
+	if u.TotalCost != 0 {
+		result["totalCost"] = u.TotalCost
+	}
+	if u.Model != "" {
+		result["model"] = u.Model
+	}
+	if u.Provider != "" {
+		result["provider"] = u.Provider
+	}
+	if !u.Timestamp.IsZero() {
+		result["timestamp"] = u.Timestamp
+	}
+
+	return json.Marshal(result)
+}
+
+// UnmarshalJSON implements json.Unmarshaler interface for Usage.
+func (u *Usage) UnmarshalJSON(data []byte) error {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	if v, ok := raw["inputTokens"]; ok {
+		if tokens, ok := v.(float64); ok {
+			u.InputTokens = int(tokens)
+		}
+	}
+	if v, ok := raw["outputTokens"]; ok {
+		if tokens, ok := v.(float64); ok {
+			u.OutputTokens = int(tokens)
+		}
+	}
+	if v, ok := raw["totalTokens"]; ok {
+		if tokens, ok := v.(float64); ok {
+			u.TotalTokens = int(tokens)
+		}
+	}
+	if v, ok := raw["inputCost"]; ok {
+		if cost, ok := v.(float64); ok {
+			u.InputCost = cost
+		}
+	}
+	if v, ok := raw["outputCost"]; ok {
+		if cost, ok := v.(float64); ok {
+			u.OutputCost = cost
+		}
+	}
+	if v, ok := raw["totalCost"]; ok {
+		if cost, ok := v.(float64); ok {
+			u.TotalCost = cost
+		}
+	}
+	if v, ok := raw["model"]; ok {
+		if model, ok := v.(string); ok {
+			u.Model = model
+		}
+	}
+	if v, ok := raw["provider"]; ok {
+		if provider, ok := v.(string); ok {
+			u.Provider = provider
+		}
+	}
+	if v, ok := raw["timestamp"]; ok {
+		if timestamp, ok := v.(string); ok {
+			if t, err := time.Parse(time.RFC3339, timestamp); err == nil {
+				u.Timestamp = t
+			}
+		}
+	}
+
+	return nil
+}
+
+// IsValid validates that Usage has minimum required fields.
+func (u Usage) IsValid() bool {
+	// Provider is required for proper usage tracking
+	return u.Provider != ""
+}
+
+// InferenceConfig provides standardized inference parameters across providers.
+// This allows passing configuration to providers in a consistent way while
+// each provider can extract relevant parameters for their specific implementation.
+type InferenceConfig struct {
+	// Model configuration
+	Model  string `json:"model,omitempty" yaml:"model,omitempty"`
+	Region string `json:"region,omitempty" yaml:"region,omitempty"`
+
+	// Generation parameters
+	Temperature float32 `json:"temperature,omitempty" yaml:"temperature,omitempty"`
+	MaxTokens   int32   `json:"maxTokens,omitempty" yaml:"maxTokens,omitempty"`
+	TopP        float32 `json:"topP,omitempty" yaml:"topP,omitempty"`
+	TopK        int32   `json:"topK,omitempty" yaml:"topK,omitempty"`
+
+	// Retry configuration
+	MaxRetries int `json:"maxRetries,omitempty" yaml:"maxRetries,omitempty"`
+}
+
+// MarshalYAML implements yaml.Marshaler interface for InferenceConfig.
+func (c InferenceConfig) MarshalYAML() (interface{}, error) {
+	// Create a map to handle omitempty behavior
+	result := make(map[string]interface{})
+
+	if c.Model != "" {
+		result["model"] = c.Model
+	}
+	if c.Region != "" {
+		result["region"] = c.Region
+	}
+	if c.Temperature != 0 {
+		result["temperature"] = c.Temperature
+	}
+	if c.MaxTokens != 0 {
+		result["maxTokens"] = c.MaxTokens
+	}
+	if c.TopP != 0 {
+		result["topP"] = c.TopP
+	}
+	if c.TopK != 0 {
+		result["topK"] = c.TopK
+	}
+	if c.MaxRetries != 0 {
+		result["maxRetries"] = c.MaxRetries
+	}
+
+	return result, nil
+}
+
+// IsValid validates that InferenceConfig has reasonable parameter values.
+func (c InferenceConfig) IsValid() bool {
+	// Check parameter ranges
+	if c.Temperature < 0 || c.Temperature > 2.0 {
+		return false
+	}
+	if c.MaxTokens < 0 {
+		return false
+	}
+	if c.TopP < 0 || c.TopP > 1.0 {
+		return false
+	}
+	if c.TopK < 0 {
+		return false
+	}
+	if c.MaxRetries < 0 {
+		return false
+	}
+
+	return true
+}
+
+// UsageCallback is called when structured usage data is available.
+// This allows upstream applications to collect usage metrics, calculate costs,
+// and aggregate statistics across multiple model calls.
+type UsageCallback func(providerName string, model string, usage Usage)
+
+// UsageExtractor provides a way to convert raw provider-specific usage data
+// into standardized Usage structs. Each provider can implement their own
+// extractor to handle their specific usage data format.
+type UsageExtractor interface {
+	// ExtractUsage converts raw provider usage data to standardized Usage.
+	// Returns nil if the raw usage data cannot be processed.
+	ExtractUsage(rawUsage any, model string, provider string) *Usage
 }
