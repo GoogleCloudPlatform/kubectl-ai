@@ -478,7 +478,8 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 		if queryFromCmd == "" {
 			return fmt.Errorf("quiet mode requires a query to be provided as a positional argument")
 		}
-		return chatSession.answerQuery(ctx, queryFromCmd)
+		// TODO: repl won't work for non-interactive mode, we need to fix this.
+		return chatSession.repl(ctx, queryFromCmd, mcpBlocks)
 	}
 
 	return chatSession.repl(ctx, queryFromCmd, mcpBlocks)
@@ -556,54 +557,6 @@ func (s *session) repl(ctx context.Context, initialQuery string, initialBlocks [
 		return fmt.Errorf("running UI: %w", err)
 	}
 
-	return nil
-}
-
-func (s *session) listModels(ctx context.Context) ([]string, error) {
-	if s.availableModels == nil {
-		modelNames, err := s.LLM.ListModels(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("listing models: %w", err)
-		}
-		s.availableModels = modelNames
-	}
-	return s.availableModels, nil
-}
-
-func (s *session) answerQuery(ctx context.Context, query string) error {
-	switch {
-	case query == "model":
-		infoBlock := &ui.AgentTextBlock{}
-		infoBlock.AppendText(fmt.Sprintf("Current model is `%s`\n", s.model))
-		s.doc.AddBlock(infoBlock)
-
-	case query == "version":
-		infoBlock := &ui.AgentTextBlock{}
-		infoBlock.AppendText(fmt.Sprintf("Version: `%s`\n", version))
-		s.doc.AddBlock(infoBlock)
-
-	case query == "models":
-		models, err := s.listModels(ctx)
-		if err != nil {
-			return fmt.Errorf("listing models: %w", err)
-		}
-		infoBlock := &ui.AgentTextBlock{}
-		infoBlock.AppendText("\n  Available models:\n")
-		infoBlock.AppendText(strings.Join(models, "\n"))
-		s.doc.AddBlock(infoBlock)
-
-	case query == "tools":
-		if s.agent == nil {
-			return fmt.Errorf("listing tols: conversation is not initialized")
-		}
-		infoBlock := &ui.AgentTextBlock{}
-		infoBlock.AppendText("\n  Available tools:\n")
-		infoBlock.AppendText(strings.Join(s.agent.Tools.Names(), "\n"))
-		s.doc.AddBlock(infoBlock)
-
-		// default:
-		// 	return s.agent.RunOneRound(ctx, query)
-	}
 	return nil
 }
 
