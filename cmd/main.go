@@ -120,13 +120,13 @@ type UserInterface string
 const (
 	UserInterfaceTerminal UserInterface = "terminal"
 	UserInterfaceHTML     UserInterface = "html"
-	UserInterfaceBubble   UserInterface = "bubble"
+	UserInterfaceTUI      UserInterface = "tui"
 )
 
 // Implement pflag.Value for UserInterface
 func (u *UserInterface) Set(s string) error {
 	switch s {
-	case "terminal", "html", "bubble":
+	case "terminal", "html", "tui":
 		*u = UserInterface(s)
 		return nil
 	default:
@@ -444,7 +444,7 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 		}
 		userInterface = u
 
-	case UserInterfaceBubble:
+	case UserInterfaceTUI:
 		userInterface = NewBubbleUI(k8sAgent)
 
 	default:
