@@ -25,6 +25,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/agent"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/api"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/journal"
 	"github.com/charmbracelet/glamour"
@@ -36,36 +37,22 @@ type TerminalUI struct {
 	journal          journal.Recorder
 	markdownRenderer *glamour.TermRenderer
 
-	subscription io.Closer
-
 	// Input handling fields (initialized once)
 	rlInstance        *readline.Instance // For readline input
 	ttyFile           *os.File           // For TTY input
 	ttyReaderInstance *bufio.Reader      // For TTY input
-
-	// currentBlock is the block we are rendering
-	currentBlock Block
-	// currentBlockText is text of the currentBlock that we have already rendered to the screen
-	currentBlockText string
-
-	currBlockStreaming bool
 
 	// This is useful in cases where stdin is already been used for providing the input to the agent (caller in this case)
 	// in such cases, stdin is already consumed and closed and reading input results in IO error.
 	// In such cases, we open /dev/tty and use it for taking input.
 	useTTYForInput bool
 
-	// agentOutputCh is the channel that will be used to listen for agent output
-	// and display it on the screen.
-	AgentOutputCh chan any
-	// UserInputCh is the channel that will be used to listen for user input
-	// and send it to the agent.
-	UserInputCh chan any
+	agent *agent.Agent
 }
 
 var _ UI = &TerminalUI{}
 
-func NewTerminalUI(doc *Document, journal journal.Recorder, useTTYForInput bool, agentOutputCh chan any, userInputCh chan any) (*TerminalUI, error) {
+func NewTerminalUI(journal journal.Recorder, useTTYForInput bool, agent *agent.Agent) (*TerminalUI, error) {
 	mdRenderer, err := glamour.NewTermRenderer(
 		glamour.WithAutoStyle(),
 		glamour.WithPreservedNewLines(),
@@ -79,12 +66,8 @@ func NewTerminalUI(doc *Document, journal journal.Recorder, useTTYForInput bool,
 		markdownRenderer: mdRenderer,
 		journal:          journal,
 		useTTYForInput:   useTTYForInput, // Store this flag
-		AgentOutputCh:    agentOutputCh,
-		UserInputCh:      userInputCh,
+		agent:            agent,
 	}
-
-	subscription := doc.AddSubscription(u)
-	u.subscription = subscription
 
 	return u, nil
 }
@@ -95,7 +78,7 @@ func (u *TerminalUI) Run(ctx context.Context) error {
 			select {
 			case <-ctx.Done():
 				return
-			case msg, ok := <-u.AgentOutputCh:
+			case msg, ok := <-u.agent.Output:
 				if !ok {
 					return
 				}
@@ -105,6 +88,8 @@ func (u *TerminalUI) Run(ctx context.Context) error {
 		}
 	}()
 
+	// Block until context is cancelled
+	<-ctx.Done()
 	return nil
 }
 
@@ -149,13 +134,7 @@ func (u *TerminalUI) readlineInstance() (*readline.Instance, error) {
 
 func (u *TerminalUI) Close() error {
 	var errs []error
-	if u.subscription != nil {
-		if err := u.subscription.Close(); err != nil {
-			errs = append(errs, err)
-		} else {
-			u.subscription = nil
-		}
-	}
+
 	// Close the initialized input handler
 	if u.rlInstance != nil {
 		if err := u.rlInstance.Close(); err != nil {
@@ -179,7 +158,9 @@ func (u *TerminalUI) handleMessage(msg *api.Message) {
 		text = msg.Payload.(string)
 		switch msg.Source {
 		case api.MessageSourceUser:
-			styleOptions = append(styleOptions, Foreground(ColorWhite))
+			// styleOptions = append(styleOptions, Foreground(ColorWhite))
+			// since we print the message as user types, we don't need to print it again
+			return
 		case api.MessageSourceAgent:
 			styleOptions = append(styleOptions, RenderMarkdown(), Foreground(ColorGreen))
 		case api.MessageSourceModel:
@@ -192,46 +173,56 @@ func (u *TerminalUI) handleMessage(msg *api.Message) {
 		styleOptions = append(styleOptions, Foreground(ColorGreen))
 		text = fmt.Sprintf("  Running: %s\n", msg.Payload.(string))
 	case api.MessageTypeToolCallResponse:
-		styleOptions = append(styleOptions, Foreground(ColorGreen))
-		// payload := msg.Payload.(map[string]any)
-		// toolCallResult := payload["result"].(map[string]any)
-		// toolCallResultString := fmt.Sprintf("%+v", toolCallResult)
-		// text = fmt.Sprintf("  %s\n", toolCallResultString)
-		text = fmt.Sprintf("  Output : %s\n", "(...)")
+		// TODO: we should print the tool call result here
+		return
 	case api.MessageTypeUserInputRequest:
 		text = msg.Payload.(string)
+		klog.Infof("Received user input request with payload: %q", text)
+
+		// If this is the greeting message, just display it and don't prompt for input
+		if text == "Hey there, what can I help you with today ?" {
+			fmt.Printf("\n %s\n\n", text)
+			return
+		}
+
 		var query string
 		if u.useTTYForInput {
 			tReader, err := u.ttyReader()
 			if err != nil {
+				klog.Errorf("Failed to get TTY reader: %v", err)
 				return
 			}
 			fmt.Print("\n>>> ") // Print prompt manually
 			query, err = tReader.ReadString('\n')
 			if err != nil {
-				u.UserInputCh <- fmt.Errorf("error reading from TTY: %w", err)
+				klog.Errorf("Error reading from TTY: %v", err)
+				u.agent.Input <- fmt.Errorf("error reading from TTY: %w", err)
 				return
 			}
-			u.UserInputCh <- query
+			klog.Infof("Sending TTY input to agent: %q", query)
+			u.agent.Input <- query
 		} else {
 			rlInstance, err := u.readlineInstance()
 			if err != nil {
-				u.UserInputCh <- fmt.Errorf("error creating readline instance: %w", err)
+				klog.Errorf("Failed to create readline instance: %v", err)
+				u.agent.Input <- fmt.Errorf("error creating readline instance: %w", err)
 				return
 			}
 			rlInstance.SetPrompt(">>> ") // Ensure correct prompt
 			query, err = rlInstance.Readline()
 			if err != nil {
+				klog.Infof("Readline error: %v", err)
 				switch err {
 				case readline.ErrInterrupt: // Handle Ctrl+C
-					u.UserInputCh <- io.EOF
+					u.agent.Input <- io.EOF
 				case io.EOF: // Handle Ctrl+D
-					u.UserInputCh <- io.EOF
+					u.agent.Input <- io.EOF
 				default:
-					u.UserInputCh <- err
+					u.agent.Input <- err
 				}
 			} else {
-				u.UserInputCh <- query
+				klog.Infof("Sending readline input to agent: %q", query)
+				u.agent.Input <- query
 			}
 		}
 		return
@@ -258,7 +249,7 @@ func (u *TerminalUI) handleMessage(msg *api.Message) {
 		if u.useTTYForInput {
 			tReader, err := u.ttyReader()
 			if err != nil {
-				u.UserInputCh <- fmt.Errorf("error reading from TTY: %w", err)
+				u.agent.Input <- fmt.Errorf("error reading from TTY: %w", err)
 				return
 			}
 			for {
@@ -266,7 +257,7 @@ func (u *TerminalUI) handleMessage(msg *api.Message) {
 				fmt.Printf("  Enter your choice (%s): ", strings.Join(choiceNumbers, ","))
 				response, err := tReader.ReadString('\n')
 				if err != nil {
-					u.UserInputCh <- err
+					u.agent.Input <- err
 					return
 				}
 				response = strings.TrimSpace(response)
@@ -281,7 +272,7 @@ func (u *TerminalUI) handleMessage(msg *api.Message) {
 						klog.Errorf("could not find option with key %q", optionKey)
 						return
 					}
-					u.UserInputCh <- int32(choiceIndex + 1)
+					u.agent.Input <- int32(choiceIndex + 1)
 					break // Exit loop on valid choice
 				} else {
 					fmt.Printf("  Invalid choice. Please enter one of: %s\n", strings.Join(choiceNumbers, ", "))
@@ -290,7 +281,7 @@ func (u *TerminalUI) handleMessage(msg *api.Message) {
 		} else {
 			rlInstance, err := u.readlineInstance()
 			if err != nil {
-				u.UserInputCh <- fmt.Errorf("error creating readline instance: %w", err)
+				u.agent.Input <- fmt.Errorf("error creating readline instance: %w", err)
 				return
 			}
 			// Temporarily change prompt for option selection
@@ -307,15 +298,15 @@ func (u *TerminalUI) handleMessage(msg *api.Message) {
 				if err != nil {
 					switch err {
 					case readline.ErrInterrupt: // Handle Ctrl+C
-						u.UserInputCh <- io.EOF
+						u.agent.Input <- io.EOF
 					case io.EOF: // Handle Ctrl+D
 						countCTRL_D++
 						if countCTRL_D > 1 {
-							u.UserInputCh <- io.EOF
+							u.agent.Input <- io.EOF
 							return
 						}
 					default:
-						u.UserInputCh <- err
+						u.agent.Input <- err
 					}
 				}
 
@@ -327,7 +318,7 @@ func (u *TerminalUI) handleMessage(msg *api.Message) {
 				}
 				optionKey := choiceRequest.Options[choiceIndex-1].Key
 				if optionKey != "" {
-					u.UserInputCh <- int32(choiceIndex + 1)
+					u.agent.Input <- int32(choiceIndex + 1)
 					break // Exit loop on valid choice
 				} else {
 					fmt.Printf("\n  Invalid choice. Please enter one of: %s\n", strings.Join(choiceNumbers, ", "))
@@ -355,238 +346,6 @@ func (u *TerminalUI) handleMessage(msg *api.Message) {
 			printText = out
 		}
 	}
-	reset := ""
-	switch computedStyle.Foreground {
-	case ColorRed:
-		fmt.Printf("\033[31m")
-		reset += "\033[0m"
-	case ColorGreen:
-		fmt.Printf("\033[32m")
-		reset += "\033[0m"
-	case ColorWhite:
-		fmt.Printf("\033[37m")
-		reset += "\033[0m"
-
-	case "":
-	default:
-		klog.Info("foreground color not supported by TerminalUI", "color", computedStyle.Foreground)
-	}
-
-	fmt.Printf("%s%s", printText, reset)
-}
-
-func (u *TerminalUI) DocumentChanged(doc *Document, block Block) {
-	blockIndex := doc.IndexOf(block)
-
-	if blockIndex != doc.NumBlocks()-1 {
-		klog.Warningf("update to blocks other than the last block is not supported in terminal mode")
-		return
-	}
-
-	if u.currentBlock != block {
-		u.currentBlock = block
-		if u.currentBlockText != "" {
-			fmt.Printf("\n")
-		}
-		u.currentBlockText = ""
-	}
-
-	text := ""
-	streaming := false
-
-	var styleOptions []StyleOption
-	switch block := block.(type) {
-	case *ErrorBlock:
-		styleOptions = append(styleOptions, Foreground(ColorRed))
-		text = block.Text()
-	case *FunctionCallRequestBlock:
-		styleOptions = append(styleOptions, Foreground(ColorGreen))
-		text = fmt.Sprintf("  Running: %s\n", block.Description())
-	case *AgentTextBlock:
-		styleOptions = append(styleOptions, RenderMarkdown())
-		if block.Color != "" {
-			styleOptions = append(styleOptions, Foreground(block.Color))
-		}
-		text = block.Text()
-		streaming = block.Streaming()
-	case *InputTextBlock:
-		var query string
-		if u.useTTYForInput {
-			tReader, err := u.ttyReader()
-			if err != nil {
-				block.Observable().Set("", fmt.Errorf("TTY reader not initialized"))
-				return
-			}
-			fmt.Print("\n>>> ") // Print prompt manually
-			query, err = tReader.ReadString('\n')
-			if err != nil {
-				block.Observable().Set("", err) // Set error (includes io.EOF)
-			} else {
-				block.Observable().Set(query, nil)
-			}
-		} else {
-			rlInstance, err := u.readlineInstance()
-			if err != nil {
-				block.Observable().Set("", fmt.Errorf("error creating readline instance: %w", err))
-				return
-			}
-			rlInstance.SetPrompt(">>> ") // Ensure correct prompt
-			query, err = rlInstance.Readline()
-			if err != nil {
-				if err == readline.ErrInterrupt { // Handle Ctrl+C
-					block.Observable().Set("", io.EOF)
-				} else if err == io.EOF { // Handle Ctrl+D
-					block.Observable().Set("", io.EOF)
-				} else {
-					block.Observable().Set("", err)
-				}
-			} else {
-				block.Observable().Set(query, nil)
-			}
-		}
-		return
-
-	case *InputOptionBlock:
-		fmt.Printf("%s\n", block.Prompt) // Print initial prompt text
-		for i, option := range block.Options {
-			fmt.Printf("  %d) %s\n", i+1, option.Message)
-		}
-
-		var choiceNumbers []string
-		var allOptions []string
-		inputMap := make(map[string]string)
-		for i, option := range block.Options {
-			choiceNumber := strconv.Itoa(i + 1)
-			choiceNumbers = append(choiceNumbers, choiceNumber)
-
-			allOptions = append(allOptions, choiceNumber)
-			inputMap[choiceNumber] = option.Key
-
-			for _, alias := range option.Aliases {
-				allOptions = append(allOptions, alias)
-				inputMap[alias] = option.Key
-			}
-		}
-		fmt.Printf("  Enter your choice (%s): ", strings.Join(choiceNumbers, ","))
-
-		if u.useTTYForInput {
-			tReader, err := u.ttyReader()
-			if err != nil {
-				block.Selection().Set("", fmt.Errorf("TTY reader not initialized"))
-				return
-			}
-			for {
-				fmt.Printf("  Enter your choice (%s): ", strings.Join(choiceNumbers, ",")) // Print loop prompt manually
-				response, err := tReader.ReadString('\n')
-				if err != nil {
-					block.Selection().Set("", err)
-					return
-				}
-				response = strings.TrimSpace(response)
-				optionKey, foundMatchingOption := inputMap[response]
-				if foundMatchingOption {
-					block.Selection().Set(optionKey, nil)
-					var choiceIndex = -1
-					for i, opt := range block.Options {
-						if opt.Key == optionKey {
-							choiceIndex = i
-							break
-						}
-					}
-					if choiceIndex == -1 {
-						klog.Errorf("could not find option with key %q", optionKey)
-						return
-					}
-					u.UserInputCh <- int32(choiceIndex + 1)
-					break // Exit loop on valid choice
-				} else {
-					fmt.Printf("  Invalid choice. Please enter one of: %s\n", strings.Join(allOptions, ", "))
-				}
-			}
-		} else {
-			rlInstance, err := u.readlineInstance()
-			if err != nil {
-				block.Selection().Set("", fmt.Errorf("readline instance not initialized: %w", err))
-				return
-			}
-			// Temporarily change prompt for option selection
-			originalPrompt := rlInstance.Config.Prompt
-			choicePrompt := "  Enter your choice (1,2,3): "
-			rlInstance.SetPrompt(choicePrompt)
-			// Ensure original prompt is restored even if errors occur
-			defer rlInstance.SetPrompt(originalPrompt)
-
-			for {
-				response, err := rlInstance.Readline()
-				if err != nil {
-					if err == readline.ErrInterrupt { // Handle Ctrl+C
-						block.Selection().Set("", io.EOF)
-						return
-					} else if err == io.EOF { // Handle Ctrl+D
-						block.Selection().Set("", io.EOF)
-						return
-					} else {
-						block.Selection().Set("", err)
-						return
-					}
-				}
-
-				response = strings.TrimSpace(response)
-				optionKey, foundMatchingOption := inputMap[response]
-				if foundMatchingOption {
-					block.Selection().Set(optionKey, nil)
-					var choiceIndex = -1
-					for i, opt := range block.Options {
-						if opt.Key == optionKey {
-							choiceIndex = i
-							break
-						}
-					}
-					if choiceIndex == -1 {
-						klog.Errorf("could not find option with key %q", optionKey)
-						return
-					}
-					u.UserInputCh <- int32(choiceIndex + 1)
-					break // Exit loop on valid choice
-				} else {
-					fmt.Printf("\n  Invalid choice. Please enter one of: %s\n", strings.Join(allOptions, ", "))
-				}
-			}
-		}
-		return
-	}
-
-	computedStyle := &ComputedStyle{}
-	for _, opt := range styleOptions {
-		opt(computedStyle)
-	}
-
-	if streaming && computedStyle.RenderMarkdown {
-		// Because we can't render markdown incrementally,
-		// we "hold back" the text if we are streaming markdown until streaming is done
-		text = ""
-	}
-
-	printText := text
-
-	if computedStyle.RenderMarkdown && printText != "" {
-		out, err := u.markdownRenderer.Render(printText)
-		if err != nil {
-			klog.Errorf("Error rendering markdown: %v", err)
-		} else {
-			printText = out
-		}
-	}
-
-	if u.currentBlockText != "" {
-		if strings.HasPrefix(text, u.currentBlockText) {
-			printText = strings.TrimPrefix(printText, u.currentBlockText)
-		} else {
-			klog.Warningf("text did not match text already rendered; text %q; currentBlockText %q", text, u.currentBlockText)
-		}
-	}
-	u.currentBlockText = text
-
 	reset := ""
 	switch computedStyle.Foreground {
 	case ColorRed:

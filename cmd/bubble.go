@@ -326,7 +326,7 @@ func (m model) renderMessage(message *api.Message) string {
 
 	var renderedText string
 	switch message.Type {
-	case api.MessageTypeText:
+	case api.MessageTypeText, api.MessageTypeUserInputRequest:
 		renderedText, err = renderer.Render(message.Payload.(string))
 		if err != nil {
 			return fmt.Sprintf("Error rendering message: %v", err)

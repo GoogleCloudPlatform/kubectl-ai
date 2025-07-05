@@ -409,7 +409,7 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 		MCPClientEnabled:   opt.MCPClient,
 	}
 
-	err = k8sAgent.Init(ctx, doc)
+	err = k8sAgent.Init(ctx)
 	if err != nil {
 		return fmt.Errorf("starting k8s agent: %w", err)
 	}
@@ -422,7 +422,7 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 		useTTYForInput := hasInputData
 
 		var u ui.UI
-		u, err = ui.NewTerminalUI(doc, recorder, useTTYForInput, k8sAgent.Output, k8sAgent.Input)
+		u, err = ui.NewTerminalUI(recorder, useTTYForInput, k8sAgent)
 		if err != nil {
 			return err
 		}
@@ -625,7 +625,7 @@ func (s *session) repl(ctx context.Context, initialQuery string, initialBlocks [
 		case query == "":
 			continue
 		case query == "reset":
-			err := s.agent.Init(ctx, s.doc)
+			err := s.agent.Init(ctx)
 			if err != nil {
 				return err
 			}
@@ -688,8 +688,8 @@ func (s *session) answerQuery(ctx context.Context, query string) error {
 		infoBlock.AppendText(strings.Join(s.agent.Tools.Names(), "\n"))
 		s.doc.AddBlock(infoBlock)
 
-	default:
-		return s.agent.RunOneRound(ctx, query)
+		// default:
+		// 	return s.agent.RunOneRound(ctx, query)
 	}
 	return nil
 }
