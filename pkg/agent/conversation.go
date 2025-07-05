@@ -98,6 +98,8 @@ type Agent struct {
 	workDir string
 
 	session *api.Session
+
+	availableModels []string
 }
 
 func (s *Agent) Session() *api.Session {
@@ -249,25 +251,62 @@ func (c *Agent) Run(ctx context.Context) error {
 
 			if userInput != nil {
 				log.Info("User input received", "userInput", userInput, "type", fmt.Sprintf("%T", userInput))
-				switch u := userInput.(type) {
+				switch query := userInput.(type) {
 				case string:
-					log.Info("Text input", "text", u)
+					log.Info("Text input", "text", query)
 
 					message := &api.Message{
 						ID:        uuid.New().String(),
 						Source:    api.MessageSourceUser,
 						Type:      api.MessageTypeText,
-						Payload:   u,
+						Payload:   query,
 						Timestamp: time.Now(),
 					}
 					c.session.Messages = append(c.session.Messages, message)
 					c.session.LastModified = time.Now()
 					c.Output <- message
 					if c.state == AgentStateIdle || c.state == AgentStateDone {
-						log.Info("Transitioning to running state", "fromState", c.state, "input", u)
+						log.Info("Transitioning to running state", "fromState", c.state, "input", query)
+
+						// we don't need the agentic loop for meta queries
+						// for ex. model, tools, etc.
+						answer, err := c.handleMetaQuery(ctx, query)
+						if err != nil {
+							log.Error(err, "error handling meta query")
+							message := &api.Message{
+								ID:        uuid.New().String(),
+								Source:    api.MessageSourceAgent,
+								Type:      api.MessageTypeError,
+								Payload:   "Error: " + err.Error(),
+								Timestamp: time.Now(),
+							}
+							c.session.Messages = append(c.session.Messages, message)
+							c.session.LastModified = time.Now()
+							c.Output <- message
+							c.state = AgentStateDone
+							c.pendingFunctionCalls = []ToolCallAnalysis{}
+							continue
+						}
+						if answer != "" {
+							// we handled the meta query, so we don't need to run the agentic loop
+							message := &api.Message{
+								ID:        uuid.New().String(),
+								Source:    api.MessageSourceAgent,
+								Type:      api.MessageTypeText,
+								Payload:   answer,
+								Timestamp: time.Now(),
+							}
+							c.session.Messages = append(c.session.Messages, message)
+							c.session.LastModified = time.Now()
+							c.state = AgentStateDone
+							c.pendingFunctionCalls = []ToolCallAnalysis{}
+							c.Output <- message
+							continue
+						}
+
 						c.state = AgentStateRunning
 						c.currIteration = 0
-						c.currChatContent = []any{u}
+						c.currChatContent = []any{query}
 						c.pendingFunctionCalls = []ToolCallAnalysis{}
 					} else {
 						klog.Errorf("invalid state: %v", c.state)
@@ -278,7 +317,7 @@ func (c *Agent) Run(ctx context.Context) error {
 						klog.Errorf("invalid state for choice: %v", c.state)
 						continue
 					}
-					dispatchToolCalls := c.handleChoice(ctx, u)
+					dispatchToolCalls := c.handleChoice(ctx, query)
 					if dispatchToolCalls {
 						if err := c.DispatchToolCalls(ctx); err != nil {
 							log.Error(err, "error dispatching tool calls")
@@ -300,6 +339,7 @@ func (c *Agent) Run(ctx context.Context) error {
 			}
 
 			if c.state == AgentStateRunning {
+
 				if c.currIteration >= c.MaxIterations {
 					message := &api.Message{
 						ID:        uuid.New().String(),
@@ -378,10 +418,6 @@ func (c *Agent) Run(ctx context.Context) error {
 						}
 					}
 				}
-				// if agentTextBlock != nil {
-				// 	agentTextBlock.SetStreaming(false)
-				// 	c.Output <- agentTextBlock
-				// }
 				log.Info("streamedText", "streamedText", streamedText)
 
 				if streamedText != "" {
@@ -523,6 +559,34 @@ func (c *Agent) Run(ctx context.Context) error {
 	}()
 
 	return nil
+}
+
+func (c *Agent) handleMetaQuery(ctx context.Context, query string) (answer string, err error) {
+	switch query {
+	case "model":
+		return "Current model is `" + c.Model + "`", nil
+	case "models":
+		models, err := c.listModels(ctx)
+		if err != nil {
+			return "", fmt.Errorf("listing models: %w", err)
+		}
+		return "Available models:\n\n  - " + strings.Join(models, "\n  - ") + "\n\n", nil
+	case "tools":
+		return "Available tools:\n\n  - " + strings.Join(c.Tools.Names(), "\n  - ") + "\n\n", nil
+	}
+
+	return "", nil
+}
+
+func (c *Agent) listModels(ctx context.Context) ([]string, error) {
+	if c.availableModels == nil {
+		modelNames, err := c.LLM.ListModels(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("listing models: %w", err)
+		}
+		c.availableModels = modelNames
+	}
+	return c.availableModels, nil
 }
 
 func (c *Agent) DispatchToolCalls(ctx context.Context) error {
