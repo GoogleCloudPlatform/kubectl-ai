@@ -7,6 +7,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
+	"os/user"
 	"strings"
 	"time"
 
@@ -22,17 +24,14 @@ import (
 	"k8s.io/klog/v2"
 )
 
-var (
-	spinnerStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("63"))
-	helpStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Margin(1, 0)
-	dotStyle      = helpStyle.UnsetMargins()
-	durationStyle = dotStyle
-	appStyle      = lipgloss.NewStyle().Margin(1, 2, 0, 2)
-)
-
 const listHeight = 5
 
 var (
+	spinnerStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("63"))
+	helpStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Margin(1, 0)
+	dotStyle          = helpStyle.UnsetMargins()
+	durationStyle     = dotStyle
+	appStyle          = lipgloss.NewStyle().Margin(1, 2, 0, 2)
 	titleStyle        = lipgloss.NewStyle().MarginLeft(2)
 	listStyle         = lipgloss.NewStyle().MarginBottom(2)
 	itemStyle         = lipgloss.NewStyle().PaddingLeft(4)
@@ -70,6 +69,19 @@ func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 }
 
 const gap = "\n\n"
+
+// getCurrentUsername returns the current user's username, caching it to avoid repeated calls
+func getCurrentUsername() string {
+	currentUser, err := user.Current()
+	if err != nil {
+		// Fallback to environment variable or default
+		if username := os.Getenv("USER"); username != "" {
+			return username
+		}
+		return "You"
+	}
+	return currentUser.Username
+}
 
 type BubbleUI struct {
 	program *tea.Program
@@ -134,8 +146,9 @@ type model struct {
 	messages []*api.Message
 	quitting bool
 
-	list   list.Model
-	choice string
+	list     list.Model
+	choice   string
+	username string // cached username
 }
 
 func newModel(agent *agent.Agent) model {
@@ -191,7 +204,8 @@ Type a message and press Enter to send.`)
 		list:        l,
 		senderStyle: lipgloss.NewStyle().Foreground(lipgloss.Color("5")),
 		// results:     make([]resultMsg, numLastResults),
-		err: nil,
+		username: getCurrentUsername(),
+		err:      nil,
 	}
 }
 
@@ -289,7 +303,16 @@ func (m model) View() string {
 }
 
 func (m model) renderMessage(message *api.Message) string {
-	text := m.senderStyle.Render(fmt.Sprintf("%s: ", message.Source))
+	sourceDisplayName := ""
+	switch message.Source {
+	case api.MessageSourceUser:
+		sourceDisplayName = m.username
+	case api.MessageSourceModel:
+		sourceDisplayName = "AI"
+	default:
+		sourceDisplayName = "AI"
+	}
+	text := m.senderStyle.Render(fmt.Sprintf("%s: ", sourceDisplayName))
 	const glamourGutter = 2
 	glamourRenderWidth := m.viewport.Width - m.viewport.Style.GetHorizontalFrameSize() - glamourGutter
 
@@ -314,7 +337,8 @@ func (m model) renderMessage(message *api.Message) string {
 			return fmt.Sprintf("Error rendering message: %v", err)
 		}
 	case api.MessageTypeToolCallRequest:
-		renderedText, err = renderer.Render(fmt.Sprintf("  Running: %s\n", message.Payload.(string)))
+		renderedText, err = renderer.Render(fmt.Sprintf("  Running: `%s`\n", message.Payload.(string)))
+		// renderedText = toolCallStyle.Render(renderedText)
 		if err != nil {
 			return fmt.Sprintf("Error rendering message: %v", err)
 		}
@@ -323,6 +347,10 @@ func (m model) renderMessage(message *api.Message) string {
 		if err != nil {
 			return fmt.Sprintf("Error rendering message: %v", err)
 		}
+		// TODO: figure out a way to render output of the tool call.
+		// It can get noisy if we always output the entire output of the tool call.
+		// by default, show the preview of the output and have a command line flag to show the entire output.
+		return ""
 	case api.MessageTypeUserChoiceRequest:
 		renderedText, err = renderer.Render(message.Payload.(*api.UserChoiceRequest).Prompt)
 		if err != nil {

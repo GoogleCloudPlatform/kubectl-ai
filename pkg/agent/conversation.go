@@ -394,16 +394,18 @@ func (c *Agent) Run(ctx context.Context) error {
 				// }
 				log.Info("streamedText", "streamedText", streamedText)
 
-				message := &api.Message{
-					ID:        uuid.New().String(),
-					Source:    api.MessageSourceModel,
-					Type:      api.MessageTypeText,
-					Payload:   streamedText,
-					Timestamp: time.Now(),
+				if streamedText != "" {
+					message := &api.Message{
+						ID:        uuid.New().String(),
+						Source:    api.MessageSourceModel,
+						Type:      api.MessageTypeText,
+						Payload:   streamedText,
+						Timestamp: time.Now(),
+					}
+					c.session.Messages = append(c.session.Messages, message)
+					c.session.LastModified = time.Now()
+					c.Output <- message
 				}
-				c.session.Messages = append(c.session.Messages, message)
-				c.session.LastModified = time.Now()
-				c.Output <- message
 
 				// If no function calls to be made, we're done
 				if len(functionCalls) == 0 {
@@ -474,7 +476,7 @@ func (c *Agent) Run(ctx context.Context) error {
 					confirmationPrompt := "The following commands require your approval to run:\n* " + strings.Join(commandDescriptions, "\n* ")
 					confirmationPrompt += "\nDo you want to proceed ?"
 
-					message = &api.Message{
+					message := &api.Message{
 						ID:     uuid.New().String(),
 						Source: api.MessageSourceAgent,
 						Type:   api.MessageTypeUserChoiceRequest,
