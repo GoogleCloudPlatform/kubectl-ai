@@ -15,12 +15,16 @@
 package ui
 
 import (
+	"bytes"
+	"context"
 	"html/template"
+
+	"k8s.io/klog/v2"
 )
 
 // AgentTextBlock is used to render agent textual responses
 type AgentTextBlock struct {
-	doc *Document
+	blockBase
 
 	// text is populated with the agent text output
 	text string
@@ -30,22 +34,43 @@ type AgentTextBlock struct {
 
 	// streaming is true if we are still streaming results in
 	streaming bool
+
+	// html is populated with the rendered HTML
+	// This is populated lazily, only when HTML() is called.
+	html *template.HTML
 }
 
 func NewAgentTextBlock() *AgentTextBlock {
 	return &AgentTextBlock{}
 }
 
-func (b *AgentTextBlock) attached(doc *Document) {
-	b.doc = doc
-}
-
-func (b *AgentTextBlock) Document() *Document {
-	return b.doc
-}
-
 func (b *AgentTextBlock) Text() string {
 	return b.text
+}
+
+func (b *AgentTextBlock) HTML() template.HTML {
+	log := klog.FromContext(context.Background())
+
+	cached := b.html
+	if cached != nil {
+		return *cached
+	}
+	text := b.text
+	if b.doc != nil {
+		htmlRenderer := b.doc.MarkdownHTMLRenderer()
+		if htmlRenderer != nil {
+			var buf bytes.Buffer
+			if err := htmlRenderer.Convert([]byte(text), &buf); err != nil {
+				log.Error(err, "Error rendering markdown to HTML")
+			} else {
+				v := template.HTML(buf.String())
+				b.html = &v
+				return v
+			}
+		}
+	}
+
+	return template.HTML(template.HTMLEscapeString(b.text))
 }
 
 func (b *AgentTextBlock) Streaming() bool {
@@ -74,12 +99,13 @@ func (b *AgentTextBlock) WithText(agentText string) *AgentTextBlock {
 
 func (b *AgentTextBlock) AppendText(text string) {
 	b.text = b.text + text
+	b.html = nil
 	b.doc.blockChanged(b)
 }
 
 // FunctionCallRequestBlock is used to render the LLM's request to invoke a function
 type FunctionCallRequestBlock struct {
-	doc *Document
+	blockBase
 
 	// description describes the function call
 	description string
@@ -90,14 +116,6 @@ type FunctionCallRequestBlock struct {
 
 func NewFunctionCallRequestBlock() *FunctionCallRequestBlock {
 	return &FunctionCallRequestBlock{}
-}
-
-func (b *FunctionCallRequestBlock) attached(doc *Document) {
-	b.doc = doc
-}
-
-func (b *FunctionCallRequestBlock) Document() *Document {
-	return b.doc
 }
 
 func (b *FunctionCallRequestBlock) Description() string {
@@ -131,7 +149,7 @@ func (b *FunctionCallRequestBlock) SetResult(result any) *FunctionCallRequestBlo
 
 // ErrorBlock is used to render an error condition
 type ErrorBlock struct {
-	doc *Document
+	blockBase
 
 	// text is populated if this is agent text output
 	text string
@@ -139,14 +157,6 @@ type ErrorBlock struct {
 
 func NewErrorBlock() *ErrorBlock {
 	return &ErrorBlock{}
-}
-
-func (b *ErrorBlock) attached(doc *Document) {
-	b.doc = doc
-}
-
-func (b *ErrorBlock) Document() *Document {
-	return b.doc
 }
 
 func (b *ErrorBlock) Text() string {
@@ -161,7 +171,7 @@ func (b *ErrorBlock) SetText(agentText string) *ErrorBlock {
 
 // InputTextBlock is used to prompt for user input
 type InputTextBlock struct {
-	doc *Document
+	blockBase
 
 	// text is populated when we have input from the user
 	text Observable[string]
@@ -172,14 +182,6 @@ type InputTextBlock struct {
 
 func NewInputTextBlock() *InputTextBlock {
 	return &InputTextBlock{}
-}
-
-func (b *InputTextBlock) attached(doc *Document) {
-	b.doc = doc
-}
-
-func (b *InputTextBlock) Document() *Document {
-	return b.doc
 }
 
 func (b *InputTextBlock) Observable() *Observable[string] {
@@ -202,7 +204,7 @@ func (b *InputTextBlock) Text() (string, error) {
 
 // InputOptionBlock is used to prompt for a selection from multiple choices
 type InputOptionBlock struct {
-	doc *Document
+	blockBase
 
 	// Options are the valid options that can be chosen
 	Options []InputOptionChoice
@@ -212,6 +214,9 @@ type InputOptionBlock struct {
 
 	// selection is populated when we have input from the user
 	selection Observable[string]
+
+	// editable is true if the input option block is editable
+	editable bool
 }
 
 type InputOptionChoice struct {
@@ -232,8 +237,13 @@ func NewInputOptionBlock() *InputOptionBlock {
 
 // Editable returns true if the input option block is editable
 func (b *InputOptionBlock) Editable() bool {
-	v, err := b.selection.Get()
-	return err == nil && v == ""
+	return b.editable
+}
+
+func (b *InputOptionBlock) SetEditable(editable bool) *InputOptionBlock {
+	b.editable = editable
+	b.doc.blockChanged(b)
+	return b
 }
 
 // AddOption adds an option to the input option block
@@ -252,14 +262,6 @@ func (b *InputOptionBlock) SetPrompt(prompt string) *InputOptionBlock {
 	b.Prompt = prompt
 	b.doc.blockChanged(b)
 	return b
-}
-
-func (b *InputOptionBlock) attached(doc *Document) {
-	b.doc = doc
-}
-
-func (b *InputOptionBlock) Document() *Document {
-	return b.doc
 }
 
 func (b *InputOptionBlock) Selection() *Observable[string] {
