@@ -457,13 +457,21 @@ func (c *Agent) Run(ctx context.Context) error {
 					c.session.LastModified = time.Now()
 					c.Output <- message
 
-					// For models with tool-use support (shim disabled), use proper FunctionCallResult
-					// Note: This assumes the model supports sending FunctionCallResult
-					c.currChatContent = append(c.currChatContent, gollm.FunctionCallResult{
-						ID:     toolCallAnalysisResults[interactiveToolCallIndex].FunctionCall.ID,
-						Name:   toolCallAnalysisResults[interactiveToolCallIndex].FunctionCall.Name,
-						Result: map[string]any{"error": toolCallAnalysisResults[interactiveToolCallIndex].IsInteractiveError.Error()},
-					})
+					if c.EnableToolUseShim {
+						// Add the error as an observation
+						observation := fmt.Sprintf("Result of running %q:\n%v",
+							toolCallAnalysisResults[interactiveToolCallIndex].FunctionCall.Name,
+							toolCallAnalysisResults[interactiveToolCallIndex].IsInteractiveError.Error())
+						c.currChatContent = append(c.currChatContent, observation)
+					} else {
+						// For models with tool-use support (shim disabled), use proper FunctionCallResult
+						// Note: This assumes the model supports sending FunctionCallResult
+						c.currChatContent = append(c.currChatContent, gollm.FunctionCallResult{
+							ID:     toolCallAnalysisResults[interactiveToolCallIndex].FunctionCall.ID,
+							Name:   toolCallAnalysisResults[interactiveToolCallIndex].FunctionCall.Name,
+							Result: map[string]any{"error": toolCallAnalysisResults[interactiveToolCallIndex].IsInteractiveError.Error()},
+						})
+					}
 					c.pendingFunctionCalls = []ToolCallAnalysis{} // reset pending function calls
 					continue                                      // Skip execution for interactive commands
 				}
@@ -567,31 +575,38 @@ func (c *Agent) DispatchToolCalls(ctx context.Context) error {
 			c.session.LastModified = time.Now()
 			c.Output <- message
 		}
-
-		// If shim is disabled, convert the result to a map and append FunctionCallResult
-		result, err := tools.ToolResultToMap(output)
-		if err != nil {
-			log.Error(err, "error converting tool result to map", "output", output)
-			return err
-		}
-
 		// Add the tool call result to maintain conversation flow
 		message = &api.Message{
 			ID:        uuid.New().String(),
 			Source:    api.MessageSourceAgent,
 			Type:      api.MessageTypeToolCallResponse,
-			Payload:   result,
 			Timestamp: time.Now(),
+		}
+
+		if c.EnableToolUseShim {
+			// Add the error as an observation
+			observation := fmt.Sprintf("Result of running %q:\n%v",
+				call.FunctionCall.Name,
+				output)
+			c.currChatContent = append(c.currChatContent, observation)
+			message.Payload = observation
+		} else {
+			// If shim is disabled, convert the result to a map and append FunctionCallResult
+			result, err := tools.ToolResultToMap(output)
+			if err != nil {
+				log.Error(err, "error converting tool result to map", "output", output)
+				return err
+			}
+			message.Payload = result
+			c.currChatContent = append(c.currChatContent, gollm.FunctionCallResult{
+				ID:     call.FunctionCall.ID,
+				Name:   call.FunctionCall.Name,
+				Result: result,
+			})
 		}
 		c.session.Messages = append(c.session.Messages, message)
 		c.session.LastModified = time.Now()
 		c.Output <- message
-
-		c.currChatContent = append(c.currChatContent, gollm.FunctionCallResult{
-			ID:     call.FunctionCall.ID,
-			Name:   call.FunctionCall.Name,
-			Result: result,
-		})
 	}
 	return nil
 }
