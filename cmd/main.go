@@ -120,12 +120,13 @@ type UserInterface string
 const (
 	UserInterfaceTerminal UserInterface = "terminal"
 	UserInterfaceHTML     UserInterface = "html"
+	UserInterfaceTUI      UserInterface = "tui"
 )
 
 // Implement pflag.Value for UserInterface
 func (u *UserInterface) Set(s string) error {
 	switch s {
-	case "terminal", "html":
+	case "terminal", "html", "tui":
 		*u = UserInterface(s)
 		return nil
 	default:
@@ -393,6 +394,27 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 
 	doc := ui.NewDocument()
 
+	k8sAgent := &agent.Agent{
+		Model:              opt.ModelID,
+		Kubeconfig:         opt.KubeConfigPath,
+		LLM:                llmClient,
+		MaxIterations:      opt.MaxIterations,
+		PromptTemplateFile: opt.PromptTemplateFilePath,
+		ExtraPromptPaths:   opt.ExtraPromptPaths,
+		Tools:              tools.Default(),
+		Recorder:           recorder,
+		RemoveWorkDir:      opt.RemoveWorkDir,
+		SkipPermissions:    opt.SkipPermissions,
+		EnableToolUseShim:  opt.EnableToolUseShim,
+		MCPClientEnabled:   opt.MCPClient,
+	}
+
+	err = k8sAgent.Init(ctx)
+	if err != nil {
+		return fmt.Errorf("starting k8s agent: %w", err)
+	}
+	defer k8sAgent.Close()
+
 	var userInterface ui.UI
 	switch opt.UserInterface {
 	case UserInterfaceTerminal:
@@ -400,7 +422,7 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 		useTTYForInput := hasInputData
 
 		var u ui.UI
-		u, err = ui.NewTerminalUI(doc, recorder, useTTYForInput)
+		u, err = ui.NewTerminalUI(recorder, useTTYForInput, k8sAgent)
 		if err != nil {
 			return err
 		}
@@ -422,38 +444,20 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 		}
 		userInterface = u
 
+	case UserInterfaceTUI:
+		userInterface = ui.NewBubbleUI(k8sAgent)
+
 	default:
 		return fmt.Errorf("user-interface mode %q is not known", opt.UserInterface)
 	}
 
-	conversation := &agent.Conversation{
-		Model:              opt.ModelID,
-		Kubeconfig:         opt.KubeConfigPath,
-		LLM:                llmClient,
-		MaxIterations:      opt.MaxIterations,
-		PromptTemplateFile: opt.PromptTemplateFilePath,
-		ExtraPromptPaths:   opt.ExtraPromptPaths,
-		Tools:              tools.Default(),
-		Recorder:           recorder,
-		RemoveWorkDir:      opt.RemoveWorkDir,
-		SkipPermissions:    opt.SkipPermissions,
-		EnableToolUseShim:  opt.EnableToolUseShim,
-		MCPClientEnabled:   opt.MCPClient,
-	}
-
-	err = conversation.Init(ctx, doc)
-	if err != nil {
-		return fmt.Errorf("starting conversation: %w", err)
-	}
-	defer conversation.Close()
-
 	chatSession := session{
-		model:        opt.ModelID,
-		doc:          doc,
-		ui:           userInterface,
-		conversation: conversation,
-		LLM:          llmClient,
-		mcpManager:   mcpManager,
+		model:      opt.ModelID,
+		doc:        doc,
+		ui:         userInterface,
+		agent:      k8sAgent,
+		LLM:        llmClient,
+		mcpManager: mcpManager,
 	}
 
 	// Prepare MCP server status blocks only when MCP client is enabled
@@ -474,7 +478,8 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 		if queryFromCmd == "" {
 			return fmt.Errorf("quiet mode requires a query to be provided as a positional argument")
 		}
-		return chatSession.answerQuery(ctx, queryFromCmd)
+		// TODO: repl won't work for non-interactive mode, we need to fix this.
+		return chatSession.repl(ctx, queryFromCmd, mcpBlocks)
 	}
 
 	return chatSession.repl(ctx, queryFromCmd, mcpBlocks)
@@ -524,7 +529,7 @@ type session struct {
 	model           string
 	ui              ui.UI
 	doc             *ui.Document
-	conversation    *agent.Conversation
+	agent           *agent.Agent
 	availableModels []string
 	LLM             gollm.Client
 	mcpManager      *mcp.Manager
@@ -539,94 +544,19 @@ func (s *session) repl(ctx context.Context, initialQuery string, initialBlocks [
 	if query == "" {
 		s.doc.AddBlock(ui.NewAgentTextBlock().WithText("Hey there, what can I help you with today?"))
 	}
-	for {
-		if query == "" {
-			input := ui.NewInputTextBlock()
-			input.SetEditable(true)
-			s.doc.AddBlock(input)
 
-			userInput, err := input.Observable().Wait()
-			if err != nil {
-				if err == io.EOF {
-					// Use hit control-D, or was piping and we reached the end of stdin.
-					// Not a "big" problem
-					return nil
-				}
-				return fmt.Errorf("reading input: %w", err)
-			}
-			query = strings.TrimSpace(userInput)
-		}
-
-		switch {
-		case query == "":
-			continue
-		case query == "reset":
-			err := s.conversation.Init(ctx, s.doc)
-			if err != nil {
-				return err
-			}
-		case query == "clear":
-			s.ui.ClearScreen()
-		case query == "exit" || query == "quit":
-			// s.ui.RenderOutput(ctx, "Alright...bye.\n")
-			return nil
-		default:
-			if err := s.answerQuery(ctx, query); err != nil {
-				errorBlock := &ui.ErrorBlock{}
-				errorBlock.SetText(fmt.Sprintf("Error: %v\n", err))
-				s.doc.AddBlock(errorBlock)
-			}
-		}
-		// Reset query to empty string so that we prompt for input again
-		query = ""
+	// Start the agent (non-blocking, starts internal goroutine)
+	err := s.agent.Run(ctx, query)
+	if err != nil {
+		return fmt.Errorf("running agent: %w", err)
 	}
-}
 
-func (s *session) listModels(ctx context.Context) ([]string, error) {
-	if s.availableModels == nil {
-		modelNames, err := s.LLM.ListModels(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("listing models: %w", err)
-		}
-		s.availableModels = modelNames
+	// Now start the UI (this will block until the program exits)
+	err = s.ui.Run(ctx)
+	if err != nil {
+		return fmt.Errorf("running UI: %w", err)
 	}
-	return s.availableModels, nil
-}
 
-func (s *session) answerQuery(ctx context.Context, query string) error {
-	switch {
-	case query == "model":
-		infoBlock := &ui.AgentTextBlock{}
-		infoBlock.AppendText(fmt.Sprintf("Current model is `%s`\n", s.model))
-		s.doc.AddBlock(infoBlock)
-
-	case query == "version":
-		infoBlock := &ui.AgentTextBlock{}
-		infoBlock.AppendText(fmt.Sprintf("Version: `%s`\n", version))
-		s.doc.AddBlock(infoBlock)
-
-	case query == "models":
-		models, err := s.listModels(ctx)
-		if err != nil {
-			return fmt.Errorf("listing models: %w", err)
-		}
-		infoBlock := &ui.AgentTextBlock{}
-		infoBlock.AppendText("\n  Available models:\n")
-		infoBlock.AppendText(strings.Join(models, "\n"))
-		s.doc.AddBlock(infoBlock)
-
-	case query == "tools":
-		if s.conversation == nil {
-			return fmt.Errorf("listing tols: conversation is not initialized")
-		}
-		infoBlock := &ui.AgentTextBlock{}
-		infoBlock.AppendText("\n  Available tools:\n")
-		infoBlock.AppendText(strings.Join(s.conversation.Tools.Names(), "\n"))
-		s.doc.AddBlock(infoBlock)
-
-	default:
-		return s.conversation.RunOneRound(ctx, query)
-	}
 	return nil
 }
 

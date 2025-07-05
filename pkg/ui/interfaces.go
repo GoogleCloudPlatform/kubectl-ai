@@ -14,11 +14,17 @@
 
 package ui
 
-import "html/template"
+import (
+	"context"
+	"html/template"
+)
 
 type UI interface {
 	// ClearScreen clears any output rendered to the screen
 	ClearScreen()
+
+	// Run starts the UI and blocks until the context is done.
+	Run(ctx context.Context) error
 }
 
 type ComputedStyle struct {
