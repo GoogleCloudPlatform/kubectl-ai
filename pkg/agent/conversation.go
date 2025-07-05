@@ -563,6 +563,9 @@ func (c *Agent) Run(ctx context.Context) error {
 
 func (c *Agent) handleMetaQuery(ctx context.Context, query string) (answer string, err error) {
 	switch query {
+	case "clear", "reset":
+		c.session.Messages = []*api.Message{}
+		return "Cleared the conversation.", nil
 	case "model":
 		return "Current model is `" + c.Model + "`", nil
 	case "models":

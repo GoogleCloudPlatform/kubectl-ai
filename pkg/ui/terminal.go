@@ -225,6 +225,9 @@ func (u *TerminalUI) handleMessage(msg *api.Message) {
 				u.agent.Input <- query
 			}
 		}
+		if query == "clear" || query == "reset" {
+			u.ClearScreen()
+		}
 		return
 	case api.MessageTypeUserChoiceRequest:
 		choiceRequest := msg.Payload.(*api.UserChoiceRequest)

@@ -252,8 +252,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			} else {
-				m.agent.Input <- m.textarea.Value()
-				m.textarea.Reset()
+				query := m.textarea.Value()
+				switch query {
+				case "exit", "quit":
+					return m, tea.Quit
+				default:
+					m.agent.Input <- query
+					m.textarea.Reset()
+				}
 			}
 			// m.messages = append(m.messages, m.senderStyle.Render("You: ")+m.textarea.Value())
 			// m.viewport.SetContent(lipgloss.NewStyle().Width(m.viewport.Width).Render(strings.Join(m.messages, "\n")))
