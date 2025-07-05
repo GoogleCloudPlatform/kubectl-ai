@@ -546,7 +546,7 @@ func (s *session) repl(ctx context.Context, initialQuery string, initialBlocks [
 	}
 
 	// Start the agent (non-blocking, starts internal goroutine)
-	err := s.agent.Run(ctx)
+	err := s.agent.Run(ctx, query)
 	if err != nil {
 		return fmt.Errorf("running agent: %w", err)
 	}

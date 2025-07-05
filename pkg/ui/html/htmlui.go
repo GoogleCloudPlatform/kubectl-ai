@@ -84,7 +84,6 @@ func NewHTMLUserInterface(doc *ui.Document, listenAddress string, journal journa
 }
 
 func (u *HTMLUserInterface) Run(ctx context.Context) error {
-
 	return nil
 }
 

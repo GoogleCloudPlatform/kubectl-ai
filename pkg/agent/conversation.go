@@ -192,12 +192,63 @@ func (c *Agent) Close() error {
 	return nil
 }
 
-func (c *Agent) Run(ctx context.Context) error {
+func (c *Agent) Run(ctx context.Context, initialQuery string) error {
 	log := klog.FromContext(ctx)
 
 	log.Info("Starting agent loop")
 
-	if c.currIteration == 0 && c.state == AgentStateIdle {
+	if initialQuery != "" {
+		log.Info("Initial query provided", "initialQuery", initialQuery)
+		// Process the initial query immediately
+		message := &api.Message{
+			ID:        uuid.New().String(),
+			Source:    api.MessageSourceUser,
+			Type:      api.MessageTypeText,
+			Payload:   initialQuery,
+			Timestamp: time.Now(),
+		}
+		c.session.Messages = append(c.session.Messages, message)
+		c.session.LastModified = time.Now()
+		c.Output <- message
+
+		// Handle meta query first
+		answer, err := c.handleMetaQuery(ctx, initialQuery)
+		if err != nil {
+			log.Error(err, "error handling meta query")
+			message := &api.Message{
+				ID:        uuid.New().String(),
+				Source:    api.MessageSourceAgent,
+				Type:      api.MessageTypeError,
+				Payload:   "Error: " + err.Error(),
+				Timestamp: time.Now(),
+			}
+			c.session.Messages = append(c.session.Messages, message)
+			c.session.LastModified = time.Now()
+			c.Output <- message
+			c.state = AgentStateDone
+			c.pendingFunctionCalls = []ToolCallAnalysis{}
+		} else if answer != "" {
+			// we handled the meta query, so we don't need to run the agentic loop
+			message := &api.Message{
+				ID:        uuid.New().String(),
+				Source:    api.MessageSourceAgent,
+				Type:      api.MessageTypeText,
+				Payload:   answer,
+				Timestamp: time.Now(),
+			}
+			c.session.Messages = append(c.session.Messages, message)
+			c.session.LastModified = time.Now()
+			c.state = AgentStateDone
+			c.pendingFunctionCalls = []ToolCallAnalysis{}
+			c.Output <- message
+		} else {
+			// Start the agentic loop with the initial query
+			c.state = AgentStateRunning
+			c.currIteration = 0
+			c.currChatContent = []any{initialQuery}
+			c.pendingFunctionCalls = []ToolCallAnalysis{}
+		}
+	} else {
 		greetingMessage := "Hey there, what can I help you with today ?"
 		message := &api.Message{
 			ID:        uuid.New().String(),

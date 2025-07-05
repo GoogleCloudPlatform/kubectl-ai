@@ -73,6 +73,7 @@ func NewTerminalUI(journal journal.Recorder, useTTYForInput bool, agent *agent.A
 }
 
 func (u *TerminalUI) Run(ctx context.Context) error {
+	// Start a goroutine to handle agent output
 	go func() {
 		for {
 			select {
