@@ -1,7 +1,4 @@
-package main
-
-// A simple example that shows how to send messages to a Bubble Tea program
-// from outside the program using Program.Send(Msg).
+package ui
 
 import (
 	"context"

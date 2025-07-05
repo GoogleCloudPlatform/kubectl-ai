@@ -445,7 +445,7 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 		userInterface = u
 
 	case UserInterfaceTUI:
-		userInterface = NewBubbleUI(k8sAgent)
+		userInterface = ui.NewBubbleUI(k8sAgent)
 
 	default:
 		return fmt.Errorf("user-interface mode %q is not known", opt.UserInterface)
