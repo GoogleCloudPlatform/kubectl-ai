@@ -36,11 +36,27 @@ var (
 	writeOps = map[string]bool{
 		"create": true, "apply": true, "edit": true, "delete": true,
 		"patch": true, "replace": true, "scale": true, "autoscale": true,
-		"expose": true, "rollout": true, "run": true, "set": true,
+		"expose": true, "run": true, "set": true,
 		"label": true, "annotate": true, "taint": true, "drain": true,
 		"cordon": true, "uncordon": true, "debug": true, "attach": true,
 		"cp": true, "reconcile": true, "approve": true, "deny": true,
 		"certificate": true,
+	}
+
+	readOnlySubOps = map[string]map[string]bool{
+		"rollout": {
+			"history": true,
+			"status":  true,
+		},
+	}
+
+	writeSubOps = map[string]map[string]bool{
+		"rollout": {
+			"pause":   true,
+			"restart": true,
+			"resume":  true,
+			"undo":    true,
+		},
 	}
 )
 
@@ -133,42 +149,42 @@ func analyzeCall(call *syntax.CallExpr) string {
 
 	klog.V(2).Infof("analyzeCall: found kubectl: %q", firstArg)
 
-	// Get the verb (first non-flag argument after kubectl)
-	verbPos := 1 // Start after kubectl at position 0
-	for verbPos < len(args) && strings.HasPrefix(args[verbPos], "-") {
-		verbPos++
-	}
-
-	if verbPos >= len(args) {
+	// Parse kubectl arguments to extract verb, subverb, and flags
+	verb, subVerb, hasDryRun := parseKubectlArgs(args[1:])
+	if verb == "" {
 		klog.Warningf("analyzeCall: no verb found after kubectl in args: %v", args)
 		return "unknown"
 	}
 
-	verb := args[verbPos]
-	hasDryRun := hasDryRunFlag(strings.Join(args, " "))
-
 	// Check standard operations - write operations first (prioritize immediate detection)
-	if writeOps[verb] && !hasDryRun {
-		klog.V(1).Infof("analyzeCall: write op for verb=%q", verb)
+	if (writeOps[verb] || writeSubOps[verb][subVerb]) && !hasDryRun {
+		klog.V(1).Infof("analyzeCall: write op for verb=%q subVerb=%q", verb, subVerb)
 		return "yes"
 	}
 
 	// Check read-only operations or dry-run write operations
-	if readOnlyOps[verb] || (writeOps[verb] && hasDryRun) {
-		klog.V(1).Infof("analyzeCall: read op for verb=%q (dry-run=%v)", verb, hasDryRun)
+	if (readOnlyOps[verb] || readOnlySubOps[verb][subVerb]) || ((writeOps[verb] || writeSubOps[verb][subVerb]) && hasDryRun) {
+		klog.V(1).Infof("analyzeCall: read op for verb=%q subVerb=%q (dry-run=%v)", verb, subVerb, hasDryRun)
 		return "no"
 	}
 
-	klog.V(1).Infof("analyzeCall: unknown op for verb=%q", verb)
+	klog.V(1).Infof("analyzeCall: unknown op for verb=%q subVerb=%q", verb, subVerb)
 	return "unknown"
 }
 
-func hasDryRunFlag(command string) bool {
-	tokens := strings.Fields(command)
-	for _, token := range tokens {
-		if strings.HasPrefix(token, "--dry-run") {
-			return true
+// parseKubectlArgs extracts verb, subverb, and dry-run flag from kubectl arguments
+func parseKubectlArgs(args []string) (verb, subVerb string, hasDryRun bool) {
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "--dry-run") {
+			hasDryRun = true
+		}
+		if !strings.HasPrefix(arg, "-") {
+			if verb == "" {
+				verb = arg
+			} else if subVerb == "" {
+				subVerb = arg
+			}
 		}
 	}
-	return false
+	return verb, subVerb, hasDryRun
 }

@@ -47,6 +47,7 @@ func TestKubectlModifiesResource(t *testing.T) {
 			{"Logs with follow", "kubectl logs nginx -f", "no"},
 			{"Watch pods", "kubectl get pods --watch", "no"},
 			{"Watch pods short", "kubectl get pods -w", "no"},
+			{"Rollout status", "kubectl rollout status deployment nginx", "no"},
 			{"Diff", "kubectl diff -f deployment.yaml", "no"},
 			{"Can-i", "kubectl auth can-i create pods", "no"},
 			{"Kustomize", "kubectl kustomize ./", "no"},
@@ -134,6 +135,7 @@ func TestKubectlModifiesResource(t *testing.T) {
 			{"Proxy command", "kubectl proxy --port=8080", "no"},
 			{"Attach command", "kubectl attach mypod -i", "yes"},
 			{"Copy files", "kubectl cp mypod:/tmp/foo /tmp/bar", "yes"},
+			{"Rollout status with flags", "kubectl rollout --recursive=false status --timeout=0s deployment -w nginx", "no"},
 		},
 	}
 
@@ -154,24 +156,33 @@ func TestKubectlModifiesResource(t *testing.T) {
 
 // TestKubectlAnalyzerComponents tests the internal helper functions used by KubectlModifiesResource
 func TestKubectlAnalyzerComponents(t *testing.T) {
-	t.Run("hasDryRunFlag detection", func(t *testing.T) {
+	t.Run("parseKubectlArgs detection", func(t *testing.T) {
 		tests := []struct {
-			command  string
-			expected bool
+			command           string
+			verbExpected      string
+			subverbExpected   string
+			hasDryRunExpected bool
 		}{
-			{"kubectl apply -f deploy.yaml --dry-run=client", true},
-			{"kubectl apply -f deploy.yaml --dry-run", true},
-			{"kubectl delete pod nginx --dry-run client", true},
-			{"kubectl delete pod nginx --dry-run=server", true},
-			{"kubectl apply -f deploy.yaml", false},
-			{"kubectl get pods --dry", false}, // Not a valid dry-run flag
-			{"echo --dry-run", true},          // The current implementation doesn't check if it's kubectl
+			{"kubectl apply -f deploy.yaml --dry-run=client", "apply", "deploy.yaml", true},
+			{"kubectl apply -f deploy.yaml --dry-run", "apply", "deploy.yaml", true},
+			{"kubectl delete pod nginx --dry-run client", "delete", "pod", true},
+			{"kubectl delete pod nginx --dry-run=server", "delete", "pod", true},
+			{"kubectl apply -f deploy.yaml", "apply", "deploy.yaml", false},
+			{"kubectl get pods --dry", "get", "pods", false}, // Not a valid dry-run flag
+			{"echo --dry-run", "", "", true},                 // The current implementation doesn't check if it's kubectl
+			{"kubectl rollout status deployment nginx", "rollout", "status", false},
 		}
 
 		for _, tt := range tests {
-			result := hasDryRunFlag(tt.command)
-			if result != tt.expected {
-				t.Errorf("hasDryRunFlag(%q) = %v, want %v", tt.command, result, tt.expected)
+			verb, subVerb, hasDryRun := parseKubectlArgs(strings.Split(tt.command, " ")[1:]) // Skip the first arg (kubectl)
+			if verb != tt.verbExpected {
+				t.Errorf("parseKubectlArgs(%q) verb = %q, want %q", tt.command, verb, tt.verbExpected)
+			}
+			if subVerb != tt.subverbExpected {
+				t.Errorf("parseKubectlArgs(%q) subVerb = %q, want %q", tt.command, subVerb, tt.subverbExpected)
+			}
+			if hasDryRun != tt.hasDryRunExpected {
+				t.Errorf("parseKubectlArgs(%q) hasDryRun = %v, want %v", tt.command, hasDryRun, tt.hasDryRunExpected)
 			}
 		}
 	})
