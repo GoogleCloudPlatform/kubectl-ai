@@ -53,7 +53,35 @@ const (
 )
 
 type ScriptStep struct {
-	Prompt string `json:"prompt"`
+	Prompt     string `json:"prompt"`
+	PromptFile string `json:"promptFile"`
+}
+
+// ResolvePrompt resolves the prompt from either inline or file source
+func (s *ScriptStep) ResolvePrompt(baseDir string) (string, error) {
+	// If both are provided, promptFile takes precedence
+	if s.PromptFile != "" {
+		// If the path is relative, resolve it relative to the task directory
+		promptPath := s.PromptFile
+		if !filepath.IsAbs(promptPath) {
+			promptPath = filepath.Join(baseDir, s.PromptFile)
+		}
+
+		content, err := os.ReadFile(promptPath)
+		if err != nil {
+			return "", fmt.Errorf("failed to read prompt file %q: %w", promptPath, err)
+		}
+
+		return string(content), nil
+	}
+
+	// If no promptFile, use inline prompt
+	if s.Prompt != "" {
+		return s.Prompt, nil
+	}
+
+	// If neither is provided, return an error
+	return "", fmt.Errorf("neither 'prompt' nor 'promptFile' is specified in script step")
 }
 
 type Expectation struct {

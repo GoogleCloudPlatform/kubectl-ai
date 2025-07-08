@@ -393,7 +393,14 @@ func (x *TaskExecution) runAgent(ctx context.Context) error {
 	go func() {
 		// TODO: Wait for idle between sending steps?
 		for _, step := range x.task.Script {
-			fmt.Fprintf(stdinWriter, "%s\n", step.Prompt)
+			prompt, err := step.ResolvePrompt(x.taskDir)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error resolving prompt: %v\n", err)
+				x.result.AddFailure("failed to resolve prompt: %v", err)
+				stdinWriter.Close()
+				return
+			}
+			fmt.Fprintf(stdinWriter, "%s\n", prompt)
 		}
 		stdinWriter.Close()
 	}()
