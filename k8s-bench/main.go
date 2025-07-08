@@ -59,7 +59,12 @@ type ScriptStep struct {
 
 // ResolvePrompt resolves the prompt from either inline or file source
 func (s *ScriptStep) ResolvePrompt(baseDir string) (string, error) {
-	// If both are provided, promptFile takes precedence
+	// Fail if both prompt and promptFile are provided to avoid confusion
+	if s.Prompt != "" && s.PromptFile != "" {
+		return "", fmt.Errorf("both 'prompt' and 'promptFile' are specified in script step; only one should be provided")
+	}
+
+	// If promptFile is provided, read the file
 	if s.PromptFile != "" {
 		// If the path is relative, resolve it relative to the task directory
 		promptPath := s.PromptFile
@@ -75,7 +80,7 @@ func (s *ScriptStep) ResolvePrompt(baseDir string) (string, error) {
 		return string(content), nil
 	}
 
-	// If no promptFile, use inline prompt
+	// If prompt is provided, use it
 	if s.Prompt != "" {
 		return s.Prompt, nil
 	}
