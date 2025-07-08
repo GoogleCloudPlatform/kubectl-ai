@@ -27,6 +27,7 @@ import (
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/journal"
 	"github.com/charmbracelet/glamour"
 	"github.com/chzyer/readline"
+	"golang.org/x/term"
 	"k8s.io/klog/v2"
 )
 
@@ -57,6 +58,18 @@ var _ UI = &TerminalUI{}
 func getCustomTerminalWidth() int {
 	// Check for user-configured width via environment variable
 	if widthStr := os.Getenv("KUBECTL_AI_TERM_WIDTH"); widthStr != "" {
+
+		if widthStr == "auto" {
+			width, _, err := term.GetSize(int(os.Stdout.Fd()))
+
+			if err != nil {
+				klog.Warningf("Failed to get terminal size: %v, using default width", err)
+				return 0
+			}
+
+			return width
+		}
+
 		if width, err := strconv.Atoi(widthStr); err == nil && width > 0 {
 			return width
 		}
