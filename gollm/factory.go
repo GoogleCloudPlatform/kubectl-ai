@@ -51,7 +51,12 @@ func (r *registry) listProviders() []string {
 type ClientOptions struct {
 	URL           *url.URL
 	SkipVerifySSL bool
-	// Extend with more options as needed
+
+	// NEW: Enhanced capabilities for usage tracking and inference configuration
+	InferenceConfig *InferenceConfig // Inference parameters for provider configuration
+	UsageCallback   UsageCallback    // Callback for structured usage metrics
+	UsageExtractor  UsageExtractor   // Custom usage extraction logic
+	Debug           bool             // Enable debug logging
 }
 
 // Option is a functional option for configuring ClientOptions.
@@ -61,6 +66,40 @@ type Option func(*ClientOptions)
 func WithSkipVerifySSL() Option {
 	return func(o *ClientOptions) {
 		o.SkipVerifySSL = true
+	}
+}
+
+// WithInferenceConfig sets inference configuration for provider-agnostic parameter passing.
+// This allows specifying model parameters (temperature, max tokens, etc.) in a standardized way
+// that each provider can interpret according to their capabilities.
+func WithInferenceConfig(config *InferenceConfig) Option {
+	return func(o *ClientOptions) {
+		o.InferenceConfig = config
+	}
+}
+
+// WithUsageCallback sets a callback function to receive structured usage metrics.
+// The callback is called whenever usage data is available, enabling cost tracking
+// and metrics aggregation across multiple model calls.
+func WithUsageCallback(callback UsageCallback) Option {
+	return func(o *ClientOptions) {
+		o.UsageCallback = callback
+	}
+}
+
+// WithUsageExtractor sets custom usage extraction logic for converting provider-specific
+// raw usage data into standardized Usage structs. If not provided, providers will use
+// their default extraction logic.
+func WithUsageExtractor(extractor UsageExtractor) Option {
+	return func(o *ClientOptions) {
+		o.UsageExtractor = extractor
+	}
+}
+
+// WithDebug enables debug logging for troubleshooting provider behavior and usage tracking.
+func WithDebug(debug bool) Option {
+	return func(o *ClientOptions) {
+		o.Debug = debug
 	}
 }
 
@@ -91,17 +130,29 @@ func (r *registry) NewClient(ctx context.Context, providerID string, opts ...Opt
 		providerID = providerID + "://"
 	}
 
-	r.mutex.Lock()
-	defer r.mutex.Unlock()
-
 	u, err := url.Parse(providerID)
 	if err != nil {
 		return nil, fmt.Errorf("parsing provider id %q: %w", providerID, err)
 	}
 
-	factoryFunc := r.providers[u.Scheme]
+	// Get the factory function and available providers list while holding the mutex
+	var factoryFunc FactoryFunc
+	var availableProviders []string
+
+	r.mutex.Lock()
+	factoryFunc = r.providers[u.Scheme]
 	if factoryFunc == nil {
-		return nil, fmt.Errorf("provider %q not registered. Available providers: %v", u.Scheme, r.listProviders())
+		// Get list of available providers for error message
+		availableProviders = make([]string, 0, len(r.providers))
+		for k := range r.providers {
+			availableProviders = append(availableProviders, k)
+		}
+	}
+	r.mutex.Unlock()
+
+	// Check if provider was found after releasing the mutex
+	if factoryFunc == nil {
+		return nil, fmt.Errorf("provider %q not registered. Available providers: %v", u.Scheme, availableProviders)
 	}
 
 	// Build ClientOptions
@@ -116,6 +167,7 @@ func (r *registry) NewClient(ctx context.Context, providerID string, opts ...Opt
 		opt(&clientOpts)
 	}
 
+	// Call the factory function without holding the mutex to avoid deadlock
 	return factoryFunc(ctx, clientOpts)
 }
 
@@ -128,7 +180,15 @@ func NewClient(ctx context.Context, providerID string, opts ...Option) (Client, 
 	if providerID == "" {
 		s := os.Getenv("LLM_CLIENT")
 		if s == "" {
-			return nil, fmt.Errorf("LLM_CLIENT is not set. Available providers: %v", globalRegistry.listProviders())
+			// Get available providers without holding mutex to avoid potential deadlock
+			globalRegistry.mutex.Lock()
+			providers := make([]string, 0, len(globalRegistry.providers))
+			for k := range globalRegistry.providers {
+				providers = append(providers, k)
+			}
+			globalRegistry.mutex.Unlock()
+
+			return nil, fmt.Errorf("LLM_CLIENT is not set. Available providers: %v", providers)
 		}
 		providerID = s
 	}
