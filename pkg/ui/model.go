@@ -15,17 +15,70 @@
 package ui
 
 import (
+	"fmt"
 	"io"
 	"slices"
 	"sync"
+
+	"github.com/charmbracelet/glamour"
+	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/parser"
+	"github.com/yuin/goldmark/renderer/html"
 )
 
+type DocumentOptions struct {
+	MarkdownTerminalRenderer *glamour.TermRenderer
+	MarkdownHTMLRenderer     goldmark.Markdown
+}
+
+func NewDocumentOptions(useMarkdown bool) (*DocumentOptions, error) {
+	options := &DocumentOptions{}
+	if useMarkdown {
+		mdRenderer, err := glamour.NewTermRenderer(
+			glamour.WithAutoStyle(),
+			glamour.WithPreservedNewLines(),
+			glamour.WithEmoji(),
+		)
+		if err != nil {
+			return nil, fmt.Errorf("initializing the markdown renderer: %w", err)
+		}
+		options.MarkdownTerminalRenderer = mdRenderer
+
+		// Initialize Goldmark for HTML rendering
+		md := goldmark.New(
+			// goldmark.WithExtensions(
+			// 	extension.GFM,
+			// 	extension.DefinitionList,
+			// ),
+			goldmark.WithParserOptions(
+				parser.WithAutoHeadingID(),
+			),
+			goldmark.WithRendererOptions(
+				html.WithHardWraps(),
+				html.WithXHTML(),
+			),
+		)
+		options.MarkdownHTMLRenderer = md
+	}
+	return options, nil
+}
+
 type Document struct {
+	options DocumentOptions
+
 	mutex         sync.Mutex
 	subscriptions []*subscription
 	nextID        uint64
 
 	blocks []Block
+}
+
+func (d *Document) MarkdownTerminalRenderer() *glamour.TermRenderer {
+	return d.options.MarkdownTerminalRenderer
+}
+
+func (d *Document) MarkdownHTMLRenderer() goldmark.Markdown {
+	return d.options.MarkdownHTMLRenderer
 }
 
 func (d *Document) Blocks() []Block {
@@ -50,9 +103,10 @@ func (d *Document) IndexOf(find Block) int {
 	return -1
 }
 
-func NewDocument() *Document {
+func NewDocument(options *DocumentOptions) *Document {
 	return &Document{
-		nextID: 1,
+		nextID:  1,
+		options: *options,
 	}
 }
 

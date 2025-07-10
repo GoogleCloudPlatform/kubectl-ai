@@ -391,7 +391,17 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 		defer recorder.Close()
 	}
 
-	doc := ui.NewDocument()
+	useMarkdown := false
+	switch opt.UserInterface {
+	case UserInterfaceHTML:
+		useMarkdown = true
+	}
+
+	documentOptions, err := ui.NewDocumentOptions(useMarkdown)
+	if err != nil {
+		return fmt.Errorf("creating document options: %w", err)
+	}
+	doc := ui.NewDocument(documentOptions)
 
 	var userInterface ui.UI
 	switch opt.UserInterface {
