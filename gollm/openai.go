@@ -418,7 +418,9 @@ func (cs *openAIChatSession) IsRetryableError(err error) bool {
 	return DefaultIsRetryableError(err)
 }
 
-// Helper structs for ChatResponse interface
+func (cs *openAIChatSession) Initialize(messages []*ChatMessage) error {
+	return fmt.Errorf("LoadHistory not yet implemented for openai")
+}
 
 type openAIChatResponse struct {
 	openaiCompletion *openai.ChatCompletion

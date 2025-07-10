@@ -29,11 +29,13 @@ import (
 	"slices"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/GoogleCloudPlatform/kubectl-ai/gollm"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/agent"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/journal"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/mcp"
+	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/sessions"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/tools"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/ui"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/ui/html"
@@ -113,6 +115,12 @@ type Options struct {
 
 	// SkipVerifySSL is a flag to skip verifying the SSL certificate of the LLM provider.
 	SkipVerifySSL bool `json:"skipVerifySSL,omitempty"`
+
+	// Session management options
+	SessionID     string `json:"sessionID,omitempty"`
+	NewSession    bool   `json:"newSession,omitempty"`
+	ListSessions  bool   `json:"listSessions,omitempty"`
+	DeleteSession string `json:"deleteSession,omitempty"`
 }
 
 type UserInterface string
@@ -153,14 +161,14 @@ var defaultConfigPaths = []string{
 
 func (o *Options) InitDefaults() {
 	o.ProviderID = "gemini"
-	o.ModelID = "gemini-2.5-pro-preview-06-05"
+	o.ModelID = "gemini-2.5-pro"
 	// by default, confirm before executing kubectl commands that modify resources in the cluster.
 	o.SkipPermissions = false
 	o.MCPServer = false
 	o.MCPClient = false
 	// by default, external tools are disabled (only works with --mcp-server)
 	o.ExternalTools = false
-	// We now default to our strongest model (gemini-2.5-pro-exp-03-25) which supports tool use natively.
+	// We now default to our strongest model which supports tool use natively.
 	// so we don't need shim.
 	o.EnableToolUseShim = false
 	o.Quiet = false
@@ -179,6 +187,12 @@ func (o *Options) InitDefaults() {
 
 	// Default to not skipping SSL verification
 	o.SkipVerifySSL = false
+
+	// Session management defaults
+	o.SessionID = ""
+	o.NewSession = false
+	o.ListSessions = false
+	o.DeleteSession = ""
 }
 
 func (o *Options) LoadConfiguration(b []byte) error {
@@ -296,7 +310,7 @@ func (opt *Options) bindCLIFlags(f *pflag.FlagSet) error {
 	f.BoolVar(&opt.RemoveWorkDir, "remove-workdir", opt.RemoveWorkDir, "remove the temporary working directory after execution")
 
 	f.StringVar(&opt.ProviderID, "llm-provider", opt.ProviderID, "language model provider")
-	f.StringVar(&opt.ModelID, "model", opt.ModelID, "language model e.g. gemini-2.0-flash-thinking-exp-01-21, gemini-2.0-flash")
+	f.StringVar(&opt.ModelID, "model", opt.ModelID, "language model e.g. gemini-2.5-pro")
 	f.BoolVar(&opt.SkipPermissions, "skip-permissions", opt.SkipPermissions, "(dangerous) skip asking for confirmation before executing kubectl commands that modify resources")
 	f.BoolVar(&opt.MCPServer, "mcp-server", opt.MCPServer, "run in MCP server mode")
 	f.BoolVar(&opt.ExternalTools, "external-tools", opt.ExternalTools, "in MCP server mode, discover and expose external MCP tools")
@@ -308,6 +322,12 @@ func (opt *Options) bindCLIFlags(f *pflag.FlagSet) error {
 	f.Var(&opt.UserInterface, "user-interface", "user interface mode to use. Supported values: terminal, html.")
 	f.StringVar(&opt.UIListenAddress, "ui-listen-address", opt.UIListenAddress, "address to listen for the HTML UI.")
 	f.BoolVar(&opt.SkipVerifySSL, "skip-verify-ssl", opt.SkipVerifySSL, "skip verifying the SSL certificate of the LLM provider")
+
+	// Session management flags
+	f.StringVar(&opt.SessionID, "session", opt.SessionID, "session ID to use (use 'latest' for the most recent session)")
+	f.BoolVar(&opt.NewSession, "new-session", opt.NewSession, "create a new session")
+	f.BoolVar(&opt.ListSessions, "list-sessions", opt.ListSessions, "list all available sessions")
+	f.StringVar(&opt.DeleteSession, "delete-session", opt.DeleteSession, "delete a session by ID")
 
 	return nil
 }
@@ -330,6 +350,15 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 			return fmt.Errorf("failed to start MCP server: %w", err)
 		}
 		return nil // MCP server mode blocks, so we return here
+	}
+
+	// Handle session management operations
+	if opt.ListSessions {
+		return handleListSessions()
+	}
+
+	if opt.DeleteSession != "" {
+		return handleDeleteSession(opt.DeleteSession)
 	}
 
 	if err := handleCustomTools(opt.ToolConfigPaths); err != nil {
@@ -375,6 +404,66 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 		return fmt.Errorf("creating llm client: %w", err)
 	}
 	defer llmClient.Close()
+
+	// Initialize session management
+	var currentSession *sessions.Session
+	var sessionManager *sessions.SessionManager
+
+	sessionManager, err = sessions.NewSessionManager()
+	if err != nil {
+		return fmt.Errorf("failed to create session manager: %w", err)
+	}
+
+	// Handle session creation or loading
+	if opt.NewSession {
+		// Create a new session
+		meta := sessions.Metadata{
+			ProviderID: opt.ProviderID,
+			ModelID:    opt.ModelID,
+		}
+		currentSession, err = sessionManager.NewSession(meta)
+		if err != nil {
+			return fmt.Errorf("failed to create new session: %w", err)
+		}
+		fmt.Printf("Created new session: %s\n", currentSession.ID)
+	} else {
+		// Load existing session
+		var sessionID string
+		if opt.SessionID == "" || opt.SessionID == "latest" {
+			// Get the latest session
+			currentSession, err = sessionManager.GetLatestSession()
+			if err != nil {
+				return fmt.Errorf("failed to get latest session: %w", err)
+			}
+			if currentSession == nil {
+				// No sessions exist, create a new one
+				meta := sessions.Metadata{
+					ProviderID: opt.ProviderID,
+					ModelID:    opt.ModelID,
+				}
+				currentSession, err = sessionManager.NewSession(meta)
+				if err != nil {
+					return fmt.Errorf("failed to create new session: %w", err)
+				}
+				fmt.Printf("Created new session: %s\n", currentSession.ID)
+			} else {
+				sessionID = currentSession.ID
+			}
+		} else {
+			sessionID = opt.SessionID
+			currentSession, err = sessionManager.FindSessionByID(sessionID)
+			if err != nil {
+				return fmt.Errorf("session %s not found: %w", sessionID, err)
+			}
+		}
+
+		if currentSession != nil {
+			// Update last accessed time
+			if err := currentSession.UpdateLastAccessed(); err != nil {
+				klog.Warningf("Failed to update session last accessed time: %v", err)
+			}
+		}
+	}
 
 	var recorder journal.Recorder
 	if opt.TracePath != "" {
@@ -426,7 +515,8 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 		return fmt.Errorf("user-interface mode %q is not known", opt.UserInterface)
 	}
 
-	conversation := &agent.Conversation{
+	var conversation *agent.Conversation
+	conversation = &agent.Conversation{
 		Model:              opt.ModelID,
 		Kubeconfig:         opt.KubeConfigPath,
 		LLM:                llmClient,
@@ -439,6 +529,7 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 		SkipPermissions:    opt.SkipPermissions,
 		EnableToolUseShim:  opt.EnableToolUseShim,
 		MCPClientEnabled:   opt.MCPClient,
+		ChatMessageStore:   currentSession,
 	}
 
 	err = conversation.Init(ctx, doc)
@@ -454,6 +545,7 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 		conversation: conversation,
 		LLM:          llmClient,
 		mcpManager:   mcpManager,
+		sessionDB:    currentSession,
 	}
 
 	// Prepare MCP server status blocks only when MCP client is enabled
@@ -528,6 +620,8 @@ type session struct {
 	availableModels []string
 	LLM             gollm.Client
 	mcpManager      *mcp.Manager
+	// sessionDB is the underlying data persistence layer for the session.
+	sessionDB *sessions.Session
 }
 
 // repl is a read-eval-print loop for the chat session.
@@ -622,6 +716,128 @@ func (s *session) answerQuery(ctx context.Context, query string) error {
 		infoBlock := &ui.AgentTextBlock{}
 		infoBlock.AppendText("\n  Available tools:\n")
 		infoBlock.AppendText(strings.Join(s.conversation.Tools.Names(), "\n"))
+		s.doc.AddBlock(infoBlock)
+
+	case query == "reset":
+		if s.sessionDB != nil {
+			if err := s.sessionDB.ClearChatMessages(); err != nil {
+				return fmt.Errorf("clearing data store: %w", err)
+			}
+		}
+		err := s.conversation.Init(ctx, s.doc)
+		if err != nil {
+			return err
+		}
+	case query == "clear":
+		s.ui.ClearScreen()
+
+	case query == "compact":
+		if s.sessionDB == nil {
+			return fmt.Errorf("data store not enabled, compaction is not possible")
+		}
+		history := s.sessionDB.ChatMessages()
+		if len(history) == 0 {
+			s.doc.AddBlock((&ui.AgentTextBlock{}).WithText("History is empty, nothing to compact."))
+			return nil
+		}
+
+		var historyBuilder strings.Builder
+		for _, record := range history {
+			for _, content := range record.Content {
+				historyBuilder.WriteString(fmt.Sprintf("%s: %s\n", record.Role, content))
+			}
+		}
+
+		prompt := fmt.Sprintf("Summarize the following conversation, keeping information that is relevant to future conversation:\n\n%s", historyBuilder.String())
+
+		req := &gollm.CompletionRequest{
+			Model:  s.model,
+			Prompt: prompt,
+		}
+
+		resp, err := s.LLM.GenerateCompletion(ctx, req)
+		if err != nil {
+			return fmt.Errorf("failed to summarize history: %w", err)
+		}
+		summaryContent := resp.Response()
+		if summaryContent == "" {
+			return fmt.Errorf("LLM returned no summary")
+		}
+
+		newHistory := []*gollm.ChatMessage{
+			{
+				Role:      "user",
+				Content:   []any{"The following is a summary of our conversation so far."},
+				Timestamp: time.Now(),
+			},
+			{
+				Role:      "model",
+				Content:   []any{summaryContent},
+				Timestamp: time.Now(),
+			},
+		}
+
+		if err := s.sessionDB.SetChatMessages(newHistory); err != nil {
+			return fmt.Errorf("failed to set new history: %w", err)
+		}
+
+		// Reload conversation history
+		if err := s.conversation.Init(ctx, s.doc); err != nil {
+			return fmt.Errorf("re-initializing conversation: %w", err)
+		}
+
+		s.doc.AddBlock((&ui.AgentTextBlock{}).WithText("History compacted successfully."))
+		return nil
+
+	case query == "session":
+		if s.sessionDB == nil {
+			s.doc.AddBlock((&ui.AgentTextBlock{}).WithText("No active session."))
+			return nil
+		}
+		metadata, err := s.sessionDB.LoadMetadata()
+		if err != nil {
+			return fmt.Errorf("failed to load session metadata: %w", err)
+		}
+		infoBlock := &ui.AgentTextBlock{}
+		infoBlock.AppendText(fmt.Sprintf("Current session: %s\n", s.sessionDB.ID))
+		infoBlock.AppendText(fmt.Sprintf("Model: %s\n", metadata.ModelID))
+		infoBlock.AppendText(fmt.Sprintf("Provider: %s\n", metadata.ProviderID))
+		infoBlock.AppendText(fmt.Sprintf("Created: %s\n", metadata.CreatedAt.Format("2006-01-02 15:04:05")))
+		infoBlock.AppendText(fmt.Sprintf("Last accessed: %s\n", metadata.LastAccessed.Format("2006-01-02 15:04:05")))
+		infoBlock.AppendText(fmt.Sprintf("Messages: %d\n", metadata.MessageCount))
+		infoBlock.AppendText(fmt.Sprintf("Total tokens: %d\n", metadata.TotalTokens))
+		infoBlock.AppendText(fmt.Sprintf("Total cost: %.2f\n", metadata.TotalCost))
+		s.doc.AddBlock(infoBlock)
+
+	case query == "sessions":
+		manager, err := sessions.NewSessionManager()
+		if err != nil {
+			return fmt.Errorf("failed to create session manager: %w", err)
+		}
+		sessionList, err := manager.ListSessions()
+		if err != nil {
+			return fmt.Errorf("failed to list sessions: %w", err)
+		}
+		if len(sessionList) == 0 {
+			s.doc.AddBlock((&ui.AgentTextBlock{}).WithText("No sessions found."))
+			return nil
+		}
+		infoBlock := &ui.AgentTextBlock{}
+		infoBlock.AppendText("Available sessions:\n")
+		for _, session := range sessionList {
+			metadata, err := session.LoadMetadata()
+			if err != nil {
+				infoBlock.AppendText(fmt.Sprintf("  %s: <error loading metadata>\n", session.ID))
+				continue
+			}
+			infoBlock.AppendText(fmt.Sprintf("  %s: %s (%s) - %d messages, %d tokens, $%.2f\n",
+				session.ID,
+				metadata.ModelID,
+				metadata.CreatedAt.Format("2006-01-02 15:04"),
+				metadata.MessageCount,
+				metadata.TotalTokens,
+				metadata.TotalCost))
+		}
 		s.doc.AddBlock(infoBlock)
 
 	default:
@@ -750,4 +966,90 @@ func startMCPServer(ctx context.Context, opt Options) error {
 		return fmt.Errorf("creating mcp server: %w", err)
 	}
 	return mcpServer.Serve(ctx)
+}
+
+// handleListSessions lists all available sessions with their metadata.
+func handleListSessions() error {
+	manager, err := sessions.NewSessionManager()
+	if err != nil {
+		return fmt.Errorf("failed to create session manager: %w", err)
+	}
+
+	sessionList, err := manager.ListSessions()
+	if err != nil {
+		return fmt.Errorf("failed to list sessions: %w", err)
+	}
+
+	if len(sessionList) == 0 {
+		fmt.Println("No sessions found.")
+		return nil
+	}
+
+	fmt.Println("Available sessions:")
+	fmt.Println("ID\t\tCreated\t\t\tLast Accessed\t\tModel\t\tProvider\tMessages\tTokens\tCost")
+	fmt.Println("--\t\t-------\t\t\t-------------\t\t-----\t\t--------\t--------\t------\t---")
+
+	for _, session := range sessionList {
+		metadata, err := session.LoadMetadata()
+		if err != nil {
+			fmt.Printf("%s\t\t<error loading metadata>\n", session.ID)
+			continue
+		}
+
+		fmt.Printf("%s\t%s\t%s\t%s\t%s\t%d\t%d\t%.2f\n",
+			session.ID,
+			metadata.CreatedAt.Format("2006-01-02 15:04:05"),
+			metadata.LastAccessed.Format("2006-01-02 15:04:05"),
+			metadata.ModelID,
+			metadata.ProviderID,
+			metadata.MessageCount,
+			metadata.TotalTokens,
+			metadata.TotalCost)
+	}
+
+	return nil
+}
+
+// handleDeleteSession deletes a session by ID.
+func handleDeleteSession(sessionID string) error {
+	manager, err := sessions.NewSessionManager()
+	if err != nil {
+		return fmt.Errorf("failed to create session manager: %w", err)
+	}
+
+	// Check if session exists
+	session, err := manager.FindSessionByID(sessionID)
+	if err != nil {
+		return fmt.Errorf("session %s not found: %w", sessionID, err)
+	}
+
+	// Load metadata for confirmation
+	metadata, err := session.LoadMetadata()
+	if err != nil {
+		return fmt.Errorf("failed to load session metadata: %w", err)
+	}
+
+	fmt.Printf("Deleting session %s:\n", sessionID)
+	fmt.Printf("  Model: %s\n", metadata.ModelID)
+	fmt.Printf("  Provider: %s\n", metadata.ProviderID)
+	fmt.Printf("  Created: %s\n", metadata.CreatedAt.Format("2006-01-02 15:04:05"))
+	fmt.Printf("  Messages: %d\n", metadata.MessageCount)
+	fmt.Printf("  Total tokens: %d\n", metadata.TotalTokens)
+	fmt.Printf("  Total cost: %.2f\n", metadata.TotalCost)
+
+	fmt.Print("Are you sure you want to delete this session? (y/N): ")
+	var response string
+	fmt.Scanln(&response)
+
+	if response != "y" && response != "Y" {
+		fmt.Println("Deletion cancelled.")
+		return nil
+	}
+
+	if err := manager.DeleteSession(sessionID); err != nil {
+		return fmt.Errorf("failed to delete session: %w", err)
+	}
+
+	fmt.Printf("Session %s deleted successfully.\n", sessionID)
+	return nil
 }

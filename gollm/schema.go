@@ -17,6 +17,7 @@ package gollm
 import (
 	"reflect"
 	"strings"
+	"time"
 
 	"k8s.io/klog/v2"
 )
@@ -67,4 +68,24 @@ func BuildSchemaFor(t reflect.Type) *Schema {
 	}
 
 	return out
+}
+
+// ChatMessage is a message in the chat history.
+type ChatMessage struct {
+	Timestamp time.Time `json:"timestamp"`
+	Role      string    `json:"role"`
+	Content   []any     `json:"content,omitempty"`
+	Response  any       `json:"response,omitempty"`
+}
+
+// RecordCompletionResponse is a standard struct for persisting LLM completion responses.
+type RecordCompletionResponse struct {
+	Text string `json:"text"`
+	Raw  any    `json:"raw"`
+}
+
+// RecordChatResponse is a standard struct for persisting LLM chat responses.
+type RecordChatResponse struct {
+	// TODO: Structured data?
+	Raw any `json:"raw"`
 }

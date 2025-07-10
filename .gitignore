@@ -2,6 +2,7 @@
 ./kubectl-ai
 bin/
 .build/
+kubectl-ai
 
 # Log files
 *.log
