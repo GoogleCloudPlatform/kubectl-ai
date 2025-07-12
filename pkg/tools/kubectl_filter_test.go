@@ -100,11 +100,11 @@ func TestKubectlModifiesResource(t *testing.T) {
 			{"Mix safe and unsafe with result", "kubectl get pods && kubectl delete pod bad-pod", "yes"},
 			{"Mix with initial unsafe", "kubectl delete pod bad-pod && kubectl get pods", "yes"},
 			{"Kubectl alias k", "k get pods", "unknown"},
-			{"Full path with arguments", "/usr/local/custom/kubectl --kubeconfig=/path/config get pods", "no"},
+			{"Full path with arguments", "/usr/local/custom/kubectl --kubeconfig=/path/config get pods", "unknown"},
 			{"Complex jsonpath", "kubectl get pods -o=jsonpath='{range .items[*]}{.metadata.name}{\"\\t\"}{.status.phase}{\"\\n\"}{end}'", "no"},
 			{"Custom columns", "kubectl get pods -o=custom-columns=NAME:.metadata.name,STATUS:.status.phase", "no"},
 			{"Impersonation", "kubectl get pods --as=system:serviceaccount:default:deployer", "no"},
-			{"With token", "kubectl --token=eyJhbGciOiJSUzI1NiIsImtpZCI6IiJ9... get pods", "no"},
+			{"With token", "kubectl --token=eyJhbGciOiJSUzI1NiIsImtpZCI6IiJ9... get pods", "unknown"},
 			{"Weird spacing", "kubectl     get    pods   -n   default", "no"},
 			{"kubectl in shell script with line continuation", "kubectl get pods \\\n  --namespace=production", "no"},
 			{"kubectl command split across lines in CI/CD", "kubectl delete pod \\\n  my-pod-name \\\n  --grace-period=30", "yes"},
@@ -244,7 +244,8 @@ func TestKubectlCommandParsing(t *testing.T) {
 
 		// Complex scenarios
 		{"long path", "/very/long/path/to/kubectl get pods", "no", "very long path"},
-		{"flags before verb", "kubectl --context=prod --namespace=app get pods", "no", "global flags before verb"},
+		{"flags before verb", "kubectl --context=prod --namespace=app get pods", "unknown", "global flags before verb"},
+		{"flags before verb without equals", "kubectl --context prod --namespace app get pods", "unknown", "global flags before verb without equals"},
 		{"no verb", "kubectl --help", "unknown", "kubectl with only flags"},
 
 		// Dry run scenarios

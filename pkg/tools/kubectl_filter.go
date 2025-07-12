@@ -149,6 +149,19 @@ func analyzeCall(call *syntax.CallExpr) string {
 
 	klog.V(2).Infof("analyzeCall: found kubectl: %q", firstArg)
 
+	// Check for flags before the verb (first non-flag argument)
+	verbPos := -1
+	for i, arg := range args[1:] {
+		if !strings.HasPrefix(arg, "-") {
+			verbPos = i + 1 // +1 because we skipped args[0]
+			break
+		}
+	}
+	if verbPos > 1 {
+		klog.Warningf("analyzeCall: flags found before verb in args: %v", args)
+		return "unknown"
+	}
+
 	// Parse kubectl arguments to extract verb, subverb, and flags
 	verb, subVerb, hasDryRun := parseKubectlArgs(args[1:])
 	if verb == "" {
