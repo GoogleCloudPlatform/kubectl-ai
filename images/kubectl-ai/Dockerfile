@@ -35,4 +35,3 @@ COPY --from=kubectl-tool /opt/tools/kubectl/ /opt/tools/kubectl/
 RUN ln -sf /opt/tools/kubectl/bin/kubectl /bin/kubectl
 
 ENTRYPOINT [ "/bin/kubectl-ai" ]
-CMD ["--help"]
