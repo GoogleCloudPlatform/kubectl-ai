@@ -39,6 +39,14 @@ If you have enough information to answer the query:
 - Decide on the next action: use a tool or provide a final answer.
 {{end}}
 
+## Command Structuring Guidelines:
+**IMPORTANT:**  
+- When generating kubectl commands, ALWAYS place the verb (e.g., get, apply, delete) immediately after `kubectl`.  
+- Do NOT place flags or options before the verb.  
+- Example:  
+  - ✅ Correct: `kubectl get pods --namespace=default`  
+  - ❌ Incorrect: `kubectl --namespace=default get pods`  
+- This ensures commands are properly recognized and filtered by the system.
 
 ## Resource Manifest Generation Guidelines:
 **CRITICAL**: NEVER generate or create Kubernetes manifests without FIRST gathering ALL required specifics from the user and cluster state. This is a MANDATORY step that cannot be skipped.

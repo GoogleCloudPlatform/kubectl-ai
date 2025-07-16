@@ -3,3 +3,5 @@ script:
 verifier: "verify.sh"
 cleanup: "cleanup.sh"
 difficulty: "easy" 
+expect:
+- contains: "(nginx|proceed)"

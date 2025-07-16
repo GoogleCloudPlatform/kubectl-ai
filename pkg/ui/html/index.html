@@ -13,6 +13,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <script>
         tailwind.config = {
+            darkMode: 'class',
             theme: {
                 extend: {
                     fontFamily: {
@@ -57,12 +58,26 @@
         .custom-scrollbar::-webkit-scrollbar-track {
             background: #f1f5f9;
         }
+        .dark .custom-scrollbar::-webkit-scrollbar-track {
+            background: #1e293b;
+        }
         .custom-scrollbar::-webkit-scrollbar-thumb {
             background: #cbd5e1;
             border-radius: 3px;
         }
+        .dark .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #475569;
+        }
         .custom-scrollbar::-webkit-scrollbar-thumb:hover {
             background: #94a3b8;
+        }
+        .dark .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #64748b;
+        }
+
+        /* Dark mode for body background */
+        body.dark {
+            background: linear-gradient(to bottom right, #0f172a, #1e293b);
         }
 
         /* Markdown content styles */
@@ -91,6 +106,10 @@
             font-size: 0.875em;
             font-weight: 500;
         }
+        .dark .prose code {
+            background: #374151;
+            color: #e5e7eb;
+        }
         .prose pre {
             background: #0f172a;
             color: #e2e8f0;
@@ -99,6 +118,10 @@
             overflow-x: auto;
             margin: 1.5em 0;
             border: 1px solid #1e293b;
+        }
+        .dark .prose pre {
+            background: #111827;
+            border-color: #374151;
         }
         .prose pre code {
             background: transparent;
@@ -120,6 +143,10 @@
             color: #64748b;
             font-style: italic;
         }
+        .dark .prose blockquote {
+            border-left-color: #475569;
+            color: #9ca3af;
+        }
         .prose a {
             color: #0ea5e9;
             text-decoration: underline;
@@ -130,6 +157,14 @@
             color: #0284c7;
             text-decoration-color: #0ea5e9;
         }
+        .dark .prose a {
+            color: #38bdf8;
+            text-decoration-color: #0369a1;
+        }
+        .dark .prose a:hover {
+            color: #0ea5e9;
+            text-decoration-color: #38bdf8;
+        }
         .prose table {
             border-collapse: collapse;
             width: 100%;
@@ -138,15 +173,25 @@
             overflow: hidden;
             border: 1px solid #e2e8f0;
         }
+        .dark .prose table {
+            border-color: #374151;
+        }
         .prose th, .prose td {
             border: 1px solid #e2e8f0;
             padding: 0.75rem;
             text-align: left;
         }
+        .dark .prose th, .dark .prose td {
+            border-color: #374151;
+        }
         .prose th {
             background: #f8fafc;
             font-weight: 600;
             color: #374151;
+        }
+        .dark .prose th {
+            background: #1f2937;
+            color: #e5e7eb;
         }
 
         /* Message animations */
@@ -172,7 +217,7 @@
         .typing-indicator {
             display: flex;
             align-items: center;
-            space-x: 1px;
+            gap: 1px;
         }
         
         .typing-dot {
@@ -181,6 +226,10 @@
             border-radius: 50%;
             background-color: #94a3b8;
             animation: typing 1.4s infinite ease-in-out;
+        }
+
+        .dark .typing-dot {
+            background-color: #64748b;
         }
         
         .typing-dot:nth-child(1) {
@@ -218,6 +267,21 @@
             const [agentState, setAgentState] = useState('idle');
             const [isConnected, setIsConnected] = useState(false);
             const [expandedOutputs, setExpandedOutputs] = useState(new Set());
+            const [isDarkMode, setIsDarkMode] = useState(() => {
+                // Check for saved preference first
+                const saved = localStorage.getItem('kubectl-ai-dark-mode');
+                if (saved !== null) {
+                    return JSON.parse(saved);
+                }
+                
+                // If no saved preference, use OS/browser default
+                if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+                    return true;
+                }
+                
+                // Fallback to light mode
+                return false;
+            });
             const messagesEndRef = useRef(null);
             const inputRef = useRef(null);
 
@@ -230,6 +294,42 @@
                 }
                 setExpandedOutputs(newExpanded);
             };
+
+            const toggleDarkMode = () => {
+                const newDarkMode = !isDarkMode;
+                setIsDarkMode(newDarkMode);
+                localStorage.setItem('kubectl-ai-dark-mode', JSON.stringify(newDarkMode));
+            };
+
+            // Apply dark mode to document body
+            useEffect(() => {
+                if (isDarkMode) {
+                    document.body.classList.add('dark');
+                } else {
+                    document.body.classList.remove('dark');
+                }
+            }, [isDarkMode]);
+
+            // Listen for OS theme changes
+            useEffect(() => {
+                const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+                
+                const handleThemeChange = (e) => {
+                    // Only auto-update if user hasn't manually set a preference
+                    const hasManualPreference = localStorage.getItem('kubectl-ai-dark-mode') !== null;
+                    if (!hasManualPreference) {
+                        setIsDarkMode(e.matches);
+                    }
+                };
+
+                // Add listener for theme changes
+                mediaQuery.addEventListener('change', handleThemeChange);
+
+                // Cleanup
+                return () => {
+                    mediaQuery.removeEventListener('change', handleThemeChange);
+                };
+            }, []);
 
             const scrollToBottom = () => {
                 messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -354,10 +454,30 @@
             const renderMessage = (message, index) => {
                 const getSourceInfo = (source) => {
                     switch (source) {
-                        case 'user': return { name: 'You', color: 'text-brand-700', bg: 'bg-brand-50', avatar: '👤' };
-                        case 'model': return { name: 'AI Assistant', color: 'text-emerald-700', bg: 'bg-emerald-50', avatar: '🤖' };
-                        case 'agent': return { name: 'AI Assistant', color: 'text-emerald-700', bg: 'bg-emerald-50', avatar: '🤖' };
-                        default: return { name: 'System', color: 'text-gray-700', bg: 'bg-gray-50', avatar: '⚙️' };
+                        case 'user': return { 
+                            name: 'You', 
+                            color: isDarkMode ? 'text-blue-200' : 'text-blue-700', 
+                            bg: isDarkMode ? 'bg-blue-800/40' : 'bg-blue-50', 
+                            avatar: '👤' 
+                        };
+                        case 'model': return { 
+                            name: 'AI Assistant', 
+                            color: isDarkMode ? 'text-emerald-400' : 'text-emerald-700', 
+                            bg: isDarkMode ? 'bg-emerald-900/30' : 'bg-emerald-50', 
+                            avatar: '🤖' 
+                        };
+                        case 'agent': return { 
+                            name: 'AI Assistant', 
+                            color: isDarkMode ? 'text-emerald-400' : 'text-emerald-700', 
+                            bg: isDarkMode ? 'bg-emerald-900/30' : 'bg-emerald-50', 
+                            avatar: '🤖' 
+                        };
+                        default: return { 
+                            name: 'System', 
+                            color: isDarkMode ? 'text-gray-400' : 'text-gray-700', 
+                            bg: isDarkMode ? 'bg-gray-800' : 'bg-gray-50', 
+                            avatar: '⚙️' 
+                        };
                     }
                 };
 
@@ -398,7 +518,7 @@
                     case 'user-input-request':
                         return (
                             <MessageWrapper key={index}>
-                                <div className="prose text-gray-700 leading-relaxed"
+                                <div className={`prose leading-relaxed ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}
                                      dangerouslySetInnerHTML={{ __html: formatMessage(message.Payload) }} />
                             </MessageWrapper>
                         );
@@ -406,12 +526,12 @@
                     case 'error':
                         return (
                             <MessageWrapper key={index} className="error-message">
-                                <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                                <div className={`${isDarkMode ? 'bg-red-900/30 border-red-800' : 'bg-red-50 border-red-200'} border rounded-lg p-4`}>
                                     <div className="flex items-center">
-                                        <span className="text-red-600 text-lg mr-2">⚠️</span>
-                                        <div className="text-red-800 font-medium">Error</div>
+                                        <span className={`${isDarkMode ? 'text-red-400' : 'text-red-600'} text-lg mr-2`}>⚠️</span>
+                                        <div className={`${isDarkMode ? 'text-red-300' : 'text-red-800'} font-medium`}>Error</div>
                                     </div>
-                                    <div className="text-red-700 mt-1">{message.Payload}</div>
+                                    <div className={`${isDarkMode ? 'text-red-400' : 'text-red-700'} mt-1`}>{message.Payload}</div>
                                 </div>
                             </MessageWrapper>
                         );
@@ -449,25 +569,25 @@
                         
                         return (
                             <MessageWrapper key={index}>
-                                <div className={"border rounded-lg p-4 " + (isCompleted ? "border-emerald-200 bg-emerald-50" : "border-blue-200 bg-blue-50")}>
+                                <div className={`border rounded-lg p-4 ${isCompleted ? (isDarkMode ? 'border-emerald-700 bg-emerald-900/20' : 'border-emerald-200 bg-emerald-50') : (isDarkMode ? 'border-blue-700 bg-blue-900/20' : 'border-blue-200 bg-blue-50')}`}>
                                     <div className="flex items-center">
                                         {isCompleted ? (
-                                            <span className="text-emerald-600 text-lg mr-3">✅</span>
+                                            <span className={`${isDarkMode ? 'text-emerald-400' : 'text-emerald-600'} text-lg mr-3`}>✅</span>
                                         ) : (
-                                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-3"></div>
+                                            <div className={`animate-spin rounded-full h-4 w-4 border-b-2 ${isDarkMode ? 'border-blue-400' : 'border-blue-600'} mr-3`}></div>
                                         )}
-                                        <span className={"font-medium " + (isCompleted ? "text-emerald-800" : "text-blue-800")}>
+                                        <span className={`font-medium ${isCompleted ? (isDarkMode ? 'text-emerald-300' : 'text-emerald-800') : (isDarkMode ? 'text-blue-300' : 'text-blue-800')}`}>
                                             {isCompleted ? "Completed" : "Executing"}
                                         </span>
                                     </div>
-                                    <div className={"font-mono text-sm mt-2 rounded px-3 py-2 " + (isCompleted ? "text-emerald-700 bg-emerald-100" : "text-blue-700 bg-blue-100")}>
+                                    <div className={`font-mono text-sm mt-2 rounded px-3 py-2 ${isCompleted ? (isDarkMode ? 'text-emerald-300 bg-emerald-900/30' : 'text-emerald-700 bg-emerald-100') : (isDarkMode ? 'text-blue-300 bg-blue-900/30' : 'text-blue-700 bg-blue-100')}`}>
                                         {message.Payload}
                                     </div>
                                     {isCompleted && hasOutput && (
-                                        <div className="mt-3 pt-3 border-t border-emerald-200">
+                                        <div className={`mt-3 pt-3 border-t ${isDarkMode ? 'border-emerald-700' : 'border-emerald-200'}`}>
                                             <button 
                                                 onClick={() => toggleOutput(index)}
-                                                className="flex items-center space-x-2 text-emerald-600 hover:text-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-1 rounded px-2 py-1 transition-colors"
+                                                className={`flex items-center space-x-2 ${isDarkMode ? 'text-emerald-400 hover:text-emerald-300' : 'text-emerald-600 hover:text-emerald-700'} focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-1 rounded px-2 py-1 transition-colors`}
                                             >
                                                 <span className="text-xs font-medium">
                                                     {isOutputExpanded ? 'Hide output' : 'Show output'}
@@ -482,7 +602,7 @@
                                                 </svg>
                                             </button>
                                             {isOutputExpanded && (
-                                                <div className="mt-2 text-sm text-emerald-700 bg-emerald-100 rounded px-3 py-2 font-mono text-xs overflow-x-auto max-h-96 overflow-y-auto">
+                                                <div className={`mt-2 text-sm rounded px-3 py-2 font-mono text-xs overflow-x-auto max-h-96 overflow-y-auto ${isDarkMode ? 'text-emerald-300 bg-emerald-900/30' : 'text-emerald-700 bg-emerald-100'}`}>
                                                     <pre className="whitespace-pre-wrap">{outputText}</pre>
                                                 </div>
                                             )}
@@ -500,25 +620,33 @@
                         const choiceRequest = message.Payload;
                         return (
                             <MessageWrapper key={index}>
-                                <div className="border border-amber-200 bg-amber-50 rounded-xl p-6 shadow-sm">
+                                <div className={`border rounded-xl p-6 shadow-sm ${isDarkMode ? 'border-amber-700 bg-amber-900/20' : 'border-amber-200 bg-amber-50'}`}>
                                     <div className="flex items-center mb-4">
-                                        <span className="text-amber-600 text-lg mr-2">🤔</span>
-                                        <span className="text-amber-800 font-semibold">Decision Required</span>
+                                        <span className={`${isDarkMode ? 'text-amber-400' : 'text-amber-600'} text-lg mr-2`}>🤔</span>
+                                        <span className={`${isDarkMode ? 'text-amber-300' : 'text-amber-800'} font-semibold`}>Decision Required</span>
                                     </div>
-                                    <div className="prose text-gray-700 mb-4"
+                                    <div className={`prose mb-4 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}
                                          dangerouslySetInnerHTML={{ __html: formatMessage(choiceRequest.Prompt) }} />
                                     <div className="space-y-3">
                                         {choiceRequest.Options.map((option, idx) => (
                                             <button
                                                 key={idx}
                                                 onClick={() => chooseOption(idx + 1)}
-                                                className="choice-button w-full text-left px-4 py-3 bg-white border border-gray-200 rounded-lg hover:border-brand-300 hover:bg-brand-50 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
+                                                className={`choice-button w-full text-left px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-colors ${
+                                                    isDarkMode 
+                                                        ? 'bg-gray-800 border-gray-600 hover:border-brand-500 hover:bg-gray-700' 
+                                                        : 'bg-white border-gray-200 hover:border-brand-300 hover:bg-brand-50'
+                                                }`}
                                             >
                                                 <div className="flex items-center">
-                                                    <span className="flex-shrink-0 w-6 h-6 bg-brand-100 text-brand-700 rounded-full flex items-center justify-center text-sm font-medium mr-3">
+                                                    <span className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-sm font-medium mr-3 ${
+                                                        isDarkMode 
+                                                            ? 'bg-brand-900/50 text-brand-300' 
+                                                            : 'bg-brand-100 text-brand-700'
+                                                    }`}>
                                                         {idx + 1}
                                                     </span>
-                                                    <span className="text-gray-700 font-medium">{option.label}</span>
+                                                    <span className={`font-medium ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>{option.label}</span>
                                                 </div>
                                             </button>
                                         ))}
@@ -530,9 +658,9 @@
                     default:
                         return (
                             <MessageWrapper key={index}>
-                                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                                    <div className="text-yellow-800 font-medium mb-2">Debug Information</div>
-                                    <pre className="text-xs text-yellow-700 overflow-x-auto font-mono">
+                                <div className={`border rounded-lg p-4 ${isDarkMode ? 'bg-yellow-900/20 border-yellow-700' : 'bg-yellow-50 border-yellow-200'}`}>
+                                    <div className={`font-medium mb-2 ${isDarkMode ? 'text-yellow-300' : 'text-yellow-800'}`}>Debug Information</div>
+                                    <pre className={`text-xs overflow-x-auto font-mono ${isDarkMode ? 'text-yellow-400' : 'text-yellow-700'}`}>
                                         {JSON.stringify(message, null, 2)}
                                     </pre>
                                 </div>
@@ -558,11 +686,11 @@
             const TypingIndicator = () => (
                 <div className="message-enter mb-6">
                     <div className="flex items-start space-x-3">
-                        <div className="flex-shrink-0 w-8 h-8 rounded-full bg-emerald-50 flex items-center justify-center text-sm">
+                        <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-sm ${isDarkMode ? 'bg-emerald-900/30' : 'bg-emerald-50'}`}>
                             🤖
                         </div>
                         <div className="flex-1 min-w-0">
-                            <div className="text-sm font-medium text-emerald-700 mb-1">
+                            <div className={`text-sm font-medium mb-1 ${isDarkMode ? 'text-emerald-400' : 'text-emerald-700'}`}>
                                 AI Assistant
                             </div>
                             <div className="flex items-center space-x-2">
@@ -571,7 +699,7 @@
                                     <div className="typing-dot"></div>
                                     <div className="typing-dot"></div>
                                 </div>
-                                <span className="text-sm text-gray-500">working on it...</span>
+                                <span className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>working on it...</span>
                             </div>
                         </div>
                     </div>
@@ -595,17 +723,17 @@
             const statusInfo = getAgentStatusInfo();
 
             return (
-                <div className="flex flex-col h-screen bg-gradient-to-br from-slate-50 to-blue-50">
+                <div className={`flex flex-col h-screen ${isDarkMode ? 'bg-gradient-to-br from-slate-900 to-gray-900' : 'bg-gradient-to-br from-slate-50 to-blue-50'}`}>
                     {/* Header */}
-                    <div className="bg-white/80 backdrop-blur-sm border-b border-gray-200 px-6 py-4 shadow-sm">
+                    <div className={`${isDarkMode ? 'bg-gray-800/80' : 'bg-white/80'} backdrop-blur-sm ${isDarkMode ? 'border-gray-700' : 'border-gray-200'} border-b px-6 py-4 shadow-sm`}>
                         <div className="flex items-center justify-between">
                             <div className="flex items-center space-x-3">
                                 <div className="w-8 h-8 bg-gradient-to-br from-brand-500 to-brand-600 rounded-lg flex items-center justify-center">
                                     <span className="text-white font-bold text-sm">K8</span>
                                 </div>
                                 <div>
-                                    <h1 className="text-xl font-bold text-gray-900">kubectl-ai</h1>
-                                    <p className="text-sm text-gray-500">Your intelligent Kubernetes assistant</p>
+                                    <h1 className={`text-xl font-bold ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>kubectl-ai</h1>
+                                    <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>Your intelligent Kubernetes assistant</p>
                                 </div>
                             </div>
                             <div className="flex items-center space-x-4">
@@ -617,10 +745,30 @@
                                 </div>
                                 <div className="flex items-center space-x-2">
                                     <div className={"w-2 h-2 rounded-full " + (isConnected ? 'bg-emerald-500' : 'bg-red-500') + " " + (!isConnected ? 'status-pulse' : '')}></div>
-                                    <span className="text-sm text-gray-600">
+                                    <span className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>
                                         {isConnected ? 'Connected' : 'Connecting...'}
                                     </span>
                                 </div>
+                                {/* Dark Mode Toggle */}
+                                <button
+                                    onClick={toggleDarkMode}
+                                    className={`p-2 rounded-lg transition-colors duration-200 ${
+                                        isDarkMode 
+                                            ? 'bg-gray-700 hover:bg-gray-600 text-yellow-400' 
+                                            : 'bg-gray-100 hover:bg-gray-200 text-gray-600'
+                                    }`}
+                                    title={isDarkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+                                >
+                                    {isDarkMode ? (
+                                        <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                                            <path fillRule="evenodd" d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z" clipRule="evenodd" />
+                                        </svg>
+                                    ) : (
+                                        <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                                            <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z" />
+                                        </svg>
+                                    )}
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -633,26 +781,26 @@
                                     <div className="w-16 h-16 bg-gradient-to-br from-brand-500 to-brand-600 rounded-2xl flex items-center justify-center mx-auto mb-4">
                                         <span className="text-white text-2xl">🚀</span>
                                     </div>
-                                    <h2 className="text-2xl font-bold text-gray-900 mb-2">Welcome to kubectl-ai</h2>
-                                    <p className="text-gray-600 mb-8 max-w-md mx-auto">
+                                    <h2 className={`text-2xl font-bold ${isDarkMode ? 'text-white' : 'text-gray-900'} mb-2`}>Welcome to kubectl-ai</h2>
+                                    <p className={`${isDarkMode ? 'text-gray-300' : 'text-gray-600'} mb-8 max-w-md mx-auto`}>
                                         I'm your intelligent Kubernetes assistant. I can help you manage deployments, 
                                         troubleshoot issues, and answer questions about your cluster.
                                     </p>
                                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-2xl mx-auto">
-                                        <div className="bg-white rounded-lg p-4 shadow-sm border border-gray-200">
+                                        <div className={`${isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} rounded-lg p-4 shadow-sm border`}>
                                             <div className="text-2xl mb-2">⚙️</div>
-                                            <div className="font-medium text-gray-900">Manage Resources</div>
-                                            <div className="text-sm text-gray-600">Scale deployments, update configs</div>
+                                            <div className={`font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Manage Resources</div>
+                                            <div className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>Scale deployments, update configs</div>
                                         </div>
-                                        <div className="bg-white rounded-lg p-4 shadow-sm border border-gray-200">
+                                        <div className={`${isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} rounded-lg p-4 shadow-sm border`}>
                                             <div className="text-2xl mb-2">🔍</div>
-                                            <div className="font-medium text-gray-900">Debug Issues</div>
-                                            <div className="text-sm text-gray-600">Find and fix problems quickly</div>
+                                            <div className={`font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Debug Issues</div>
+                                            <div className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>Find and fix problems quickly</div>
                                         </div>
-                                        <div className="bg-white rounded-lg p-4 shadow-sm border border-gray-200">
+                                        <div className={`${isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} rounded-lg p-4 shadow-sm border`}>
                                             <div className="text-2xl mb-2">📊</div>
-                                            <div className="font-medium text-gray-900">Get Insights</div>
-                                            <div className="text-sm text-gray-600">Monitor and analyze your cluster</div>
+                                            <div className={`font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Get Insights</div>
+                                            <div className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>Monitor and analyze your cluster</div>
                                         </div>
                                     </div>
                                 </div>
@@ -667,7 +815,7 @@
                     </div>
                     
                     {/* Input Area */}
-                    <div className="bg-white/80 backdrop-blur-sm border-t border-gray-200 p-6">
+                    <div className={`${isDarkMode ? 'bg-gray-800/80' : 'bg-white/80'} backdrop-blur-sm ${isDarkMode ? 'border-gray-700' : 'border-gray-200'} border-t p-6`}>
                         <div className="max-w-4xl mx-auto">
                             <form onSubmit={handleSubmit} className="flex space-x-3">
                                 <div className="flex-1 relative">
@@ -678,7 +826,11 @@
                                         onChange={(e) => setInput(e.target.value)}
                                         placeholder={getInputPlaceholder()}
                                         disabled={!canSendMessage}
-                                        className="w-full px-4 py-3 pr-12 bg-white border border-gray-300 rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent disabled:bg-gray-50 disabled:text-gray-500 placeholder-gray-400"
+                                        className={`w-full px-4 py-3 pr-12 border rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-colors ${
+                                            isDarkMode 
+                                                ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
+                                                : 'bg-white border-gray-300 text-gray-900 placeholder-gray-400'
+                                        } ${!canSendMessage ? (isDarkMode ? 'bg-gray-800 text-gray-500' : 'bg-gray-50 text-gray-500') : ''}`}
                                     />
                                     {agentState === 'running' && (
                                         <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
@@ -694,7 +846,7 @@
                                     Send
                                 </button>
                             </form>
-                            <div className="flex items-center justify-center mt-3 text-xs text-gray-500">
+                            <div className={`flex items-center justify-center mt-3 text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
                                 <span>💡 Try: "scale nginx to 3 replicas" or "show me pod status"</span>
                             </div>
                         </div>

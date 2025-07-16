@@ -245,7 +245,23 @@ func TestKubectlCommandParsing(t *testing.T) {
 		// Complex scenarios
 		{"long path", "/very/long/path/to/kubectl get pods", "no", "very long path"},
 		{"flags before verb", "kubectl --context=prod --namespace=app get pods", "no", "global flags before verb"},
+		{"flags before verb mutating", "kubectl --replicas=3 scale deployment/nginx-deployment", "yes", "global flags before verb mutating"},
+		{"flags before verb without equals", "kubectl --context prod --namespace app get pods", "unknown", "global flags before verb without equals"},
 		{"no verb", "kubectl --help", "unknown", "kubectl with only flags"},
+		{"boolean flag before verb", "kubectl --verbose get pods", "unknown", "boolean flag before verb"},
+		{"boolean flag before verb mutating", "kubectl --force delete pod nginx", "unknown", "boolean flag before verb mutating"},
+		{"mixed flags before verb", "kubectl --context=prod --namespace app get pods", "unknown", "mixed non-spaced and spaced flags before verb"},
+		{"non-spaced key-value before verb non-mutating", "kubectl --namespace=default get pods", "no", "non-spaced key-value before verb non-mutating"},
+		{"non-spaced key-value before verb mutating", "kubectl --namespace=default delete pod nginx", "yes", "non-spaced key-value before verb mutating"},
+		{"flag after verb spaced", "kubectl get pods --context prod", "no", "spaced key-value flag after verb"},
+		{"flag after verb boolean", "kubectl get pods --verbose", "no", "boolean flag after verb"},
+		{"flag after verb mutating", "kubectl delete pod nginx --force", "yes", "boolean flag after verb mutating"},
+		{"flag with equals empty value before verb", "kubectl --namespace= get pods", "no", "non-spaced key-value with empty value before verb"},
+		{"unexpected arg before verb", "kubectl something get pods", "unknown", "unexpected arg before verb"},
+		{"multiple boolean flags before verb", "kubectl --verbose --debug get pods", "unknown", "multiple boolean flags before verb"},
+		{"multiple spaced flags before verb", "kubectl --context prod --namespace app get pods", "unknown", "multiple spaced flags before verb"},
+		{"multiple non-spaced flags before verb mutating", "kubectl --namespace=default --force=true delete pod nginx", "yes", "multiple non-spaced flags before verb mutating"},
+		{"multiple non-spaced flags before verb non-mutating", "kubectl --namespace=default --verbose=true get pods", "no", "multiple non-spaced flags before verb non-mutating"},
 
 		// Dry run scenarios
 		{"dry run create", "/usr/bin/kubectl create -f pod.yaml --dry-run=client", "no", "dry run with path"},

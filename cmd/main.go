@@ -126,7 +126,7 @@ var defaultConfigPaths = []string{
 
 func (o *Options) InitDefaults() {
 	o.ProviderID = "gemini"
-	o.ModelID = "gemini-2.5-pro-preview-06-05"
+	o.ModelID = "gemini-2.5-pro"
 	// by default, confirm before executing kubectl commands that modify resources in the cluster.
 	o.SkipPermissions = false
 	o.MCPServer = false

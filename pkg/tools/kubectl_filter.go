@@ -120,7 +120,7 @@ func analyzeCall(call *syntax.CallExpr) string {
 		if lit == "" {
 			var sb strings.Builder
 			syntax.NewPrinter().Print(&sb, arg)
-			lit = strings.Trim(sb.String(), `"'`)
+			lit = strings.Trim(sb.String(), "'\"")
 		}
 		if lit != "" {
 			args = append(args, lit)
@@ -148,6 +148,18 @@ func analyzeCall(call *syntax.CallExpr) string {
 	}
 
 	klog.V(2).Infof("analyzeCall: found kubectl: %q", firstArg)
+
+	// Check for boolean or spaced key-value flags before the verb
+	for _, arg := range args[1:] {
+		if !strings.HasPrefix(arg, "-") {
+			break
+		}
+		// If flag does not contain '=', it's boolean or spaced key-value
+		if !strings.Contains(arg, "=") {
+			klog.Warningf("analyzeCall: boolean or spaced key-value flag before verb: %q", arg)
+			return "unknown"
+		}
+	}
 
 	// Parse kubectl arguments to extract verb, subverb, and flags
 	verb, subVerb, hasDryRun := parseKubectlArgs(args[1:])
