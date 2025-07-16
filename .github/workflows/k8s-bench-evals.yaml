@@ -48,7 +48,7 @@ jobs:
         env:
           TEST_ARGS: >-
             --llm-provider ${{ github.event.inputs.llm_provider || 'vertexai' }} \
-            --models ${{ github.event.inputs.model || 'gemini-2.5-pro-preview-05-06' }} \
+            --models ${{ github.event.inputs.model || 'gemini-2.5-pro' }} \
             --enable-tool-use-shim=${{ github.event.inputs.enable_tool_use_shim || 'false' }} \
             --task-pattern=${{ github.event.inputs.task_pattern || 'scale-' }}
         run: |
