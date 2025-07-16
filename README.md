@@ -39,14 +39,18 @@ sudo mv kubectl-ai /usr/local/bin/
 ```
 
 #### Install with Krew (Linux/macOS/Windows)
+
 First of all, you need to have krew insatlled, refer to [krew document](https://krew.sigs.k8s.io/docs/user-guide/setup/install/) for more details
 Then you can install with krew
+
 ```shell
 kubectl krew install ai
 ```
+
 Now you can invoke `kubectl-ai` as a kubectl plugin like this: `kubectl ai`.
 
 #### Install on NixOS
+
 There are multiple ways to install `kubectl-ai` on NixOS. For a permantent installation add the following to your NixOS-Configuration:
 
 ```nix
@@ -54,11 +58,13 @@ There are multiple ways to install `kubectl-ai` on NixOS. For a permantent insta
     kubectl-ai
   ];
 ```
+
 For a temporary installation, you can use the following command:
 
 ```
 nix-shell -p kubectl-ai
 ```
+
 </details>
 
 ### Usage
@@ -138,12 +144,15 @@ kubectl-ai --llm-provider=openai --model=gpt-4.1
 ```
 
 #### Using OpenAI Compatible API
+
 For example, you can use aliyun qwen-xxx models as follows
+
 ```bash
 export OPENAI_API_KEY=your_openai_api_key_here
 export OPENAI_ENDPOINT=https://dashscope.aliyuncs.com/compatible-mode/v1
 kubectl-ai --llm-provider=openai --model=qwen-plus
 ```
+
 </details>
 
 Run interactively:
@@ -182,8 +191,8 @@ You can also configure `kubectl-ai` using a YAML configuration file at `~/.confi
 mkdir -p ~/.config/kubectl-ai/
 cat <<EOF > ~/.config/kubectl-ai/config.yaml
 model: gemini-2.5-flash-preview-04-17
-llm-provider: gemini
-custom-tools-config: ~/.config/kubectl-ai/tools.yaml
+llmProvider: gemini
+toolConfigPaths: ~/.config/kubectl-ai/tools.yaml
 EOF
 ```
 
@@ -201,42 +210,44 @@ Here's a complete configuration file with all available options and their defaul
 
 ```yaml
 # LLM provider configuration
-llm-provider: "gemini"               # Default LLM provider
+llmProvider: "gemini"               # Default LLM provider
 model: "gemini-2.5-pro-preview-06-05" # Default model
-skip-verify-ssl: false              # Skip SSL verification for LLM API calls
+skipVerifySSL: false              # Skip SSL verification for LLM API calls
 
 # Tool and permission settings
-custom-tools-config: ["~/.config/kubectl-ai/tools.yaml"]  # Custom tools configuration paths
-skip-permissions: false             # Skip confirmation for resource-modifying commands
-enable-tool-use-shim: false        # Enable tool use shim for certain models
+toolConfigPaths: ["~/.config/kubectl-ai/tools.yaml"]  # Custom tools configuration paths
+skipPermissions: false             # Skip confirmation for resource-modifying commands
+enableToolUseShim: false        # Enable tool use shim for certain models
 
 # MCP configuration
-mcp-server: false                  # Run in MCP server mode
-mcp-client: false                  # Enable MCP client mode
-external-tools: false             # Discover external MCP tools (requires mcp-server)
+mcpServer: false                  # Run in MCP server mode
+mcpClient: false                  # Enable MCP client mode
+externalTools: false             # Discover external MCP tools (requires mcp-server)
 
 # Runtime settings
-max-iterations: 20                 # Maximum iterations for the agent
+maxIterations: 20                 # Maximum iterations for the agent
 quiet: false                       # Run in non-interactive mode
-remove-workdir: false             # Remove temporary working directory after execution
+removeWorkdir: false             # Remove temporary working directory after execution
 
 # Kubernetes configuration
 kubeconfig: "~/.kube/config"      # Path to kubeconfig file
 
 # UI configuration
-user-interface: "terminal"         # UI mode: "terminal" or "html"
-ui-listen-address: "localhost:8888" # Address for HTML UI server
+userInterface: "terminal"         # UI mode: "terminal" or "html"
+uiListenAddress: "localhost:8888" # Address for HTML UI server
 
 # Prompt configuration
-prompt-template-file-path: ""      # Custom prompt template file
-extra-prompt-paths: []            # Additional prompt template paths
+promptTemplateFilePath: ""      # Custom prompt template file
+extraPromptPaths: []            # Additional prompt template paths
 
 # Debug and trace settings
-trace-path: "/tmp/kubectl-ai-trace.txt" # Path to trace file
+tracePath: "/tmp/kubectl-ai-trace.txt" # Path to trace file
 ```
+
 </details>
 
 All these settings can be configured through either:
+
 1. Command line flags (e.g., `--model=gemini-2.5-pro`)
 2. Configuration file (`~/.config/kubectl-ai/config.yaml`)
 3. Environment variables (e.g., `GEMINI_API_KEY`)
@@ -325,6 +336,7 @@ servers:
 ```
 
 The system automatically:
+
 - Converts parameter names (snake_case → camelCase)
 - Handles type conversion (strings → numbers/booleans when appropriate)
 - Provides fallback behavior for unknown servers
@@ -339,13 +351,13 @@ No additional setup required - just use the `--mcp-client` flag and the AI will 
 
 You can use the following special keywords for specific actions:
 
-* `model`: Display the currently selected model.
-* `models`: List all available models.
-* `tools`: List all available tools.
-* `version`: Display the `kubectl-ai` version.
-* `reset`: Clear the conversational context.
-* `clear`: Clear the terminal screen.
-* `exit` or `quit`: Terminate the interactive shell (Ctrl+C also works).
+- `model`: Display the currently selected model.
+- `models`: List all available models.
+- `tools`: List all available tools.
+- `version`: Display the `kubectl-ai` version.
+- `reset`: Clear the conversational context.
+- `clear`: Clear the terminal screen.
+- `exit` or `quit`: Terminate the interactive shell (Ctrl+C also works).
 
 ### Invoking as kubectl plugin
 
@@ -372,7 +384,8 @@ kubectl-ai --mcp-server --external-tools
 ```
 
 This creates a powerful **tool aggregation hub** where kubectl-ai acts as both:
-- **MCP Server**: Exposing kubectl tools to clients 
+
+- **MCP Server**: Exposing kubectl tools to clients
 - **MCP Client**: Consuming tools from other MCP servers
 
 The enhanced mode provides AI clients with access to both Kubernetes operations and general-purpose tools (filesystem, web search, databases, etc.) through a single MCP endpoint.
