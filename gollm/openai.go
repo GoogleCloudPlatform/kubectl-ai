@@ -342,23 +342,26 @@ func (cs *openAIChatSession) SendStreaming(ctx context.Context, contents ...any)
 			}
 
 			// Handle tool call completion
+			var toolCallsForThisChunk []openai.ChatCompletionMessageToolCall
 			if tool, ok := acc.JustFinishedToolCall(); ok {
 				klog.V(2).Infof("Tool call finished: %s %s", tool.Name, tool.Arguments)
-				currentToolCalls = append(currentToolCalls, openai.ChatCompletionMessageToolCall{
+				newToolCall := openai.ChatCompletionMessageToolCall{
 					ID: tool.ID,
 					Function: openai.ChatCompletionMessageToolCallFunction{
 						Name:      tool.Name,
 						Arguments: tool.Arguments,
 					},
-				})
+				}
+				currentToolCalls = append(currentToolCalls, newToolCall)
+				// Only include the newly finished tool call in this chunk
+				toolCallsForThisChunk = []openai.ChatCompletionMessageToolCall{newToolCall}
 			}
 
-			// Create a streaming response with proper nil checks
 			streamResponse := &openAIChatStreamResponse{
 				streamChunk: chunk,
 				accumulator: acc,
 				content:     "", // Default to empty content
-				toolCalls:   currentToolCalls,
+				toolCalls:   toolCallsForThisChunk,
 			}
 
 			// Only process content if there are choices and a delta
