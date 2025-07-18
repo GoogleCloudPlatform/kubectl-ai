@@ -55,8 +55,8 @@ github.com/kylelemons/godebug v1.1.0 h1:RPNrshWIDI6G2gRW9EHilWtl7Z6Sb1BR0xunSBf0
 github.com/kylelemons/godebug v1.1.0/go.mod h1:9/0rRGxNHcop5bhtWyNeEfOS8JIWk580+fNqagV/RAw=
 github.com/ollama/ollama v0.6.5 h1:vXKkVX57ql/1ZzMw4SVK866Qfd6pjwEcITVyEpF0QXQ=
 github.com/ollama/ollama v0.6.5/go.mod h1:pGgtoNyc9DdM6oZI6yMfI6jTk2Eh4c36c2GpfQCH7PY=
-github.com/openai/openai-go v1.0.0 h1:KtP+VfrgzX9dHwHrLwHeyWmS0jjm16N+753Vi7OwEYg=
-github.com/openai/openai-go v1.0.0/go.mod h1:g461MYGXEXBVdV5SaR/5tNzNbSfwTBBefwc+LlDCK0Y=
+github.com/openai/openai-go v1.11.0 h1:ztH+W0ug5Kh9+/EErHa8KAmhwixkzjK57rXyE+ZnSCk=
+github.com/openai/openai-go v1.11.0/go.mod h1:g461MYGXEXBVdV5SaR/5tNzNbSfwTBBefwc+LlDCK0Y=
 github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c h1:+mdjkGKdHQG3305AYmdv1U2eRNDiU2ErMBj1gwrq8eQ=
 github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c/go.mod h1:7rwL4CYBLnjLxUqIJNnCWiEdr3bn6IUYi15bNlnbCCU=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
