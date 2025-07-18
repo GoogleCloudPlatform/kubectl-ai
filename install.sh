@@ -64,16 +64,17 @@ fi
 TARBALL="kubectl-ai_${OS}_${ARCH}.tar.gz"
 URL="https://github.com/$REPO/releases/download/$LATEST_TAG/$TARBALL"
 
+# Create temp dir and clean up on exit
+tmpdir="$(mktemp -d)"
+trap "rm -rf '$tmpdir'" EXIT
+
 # Download and extract
 echo "Downloading $URL ..."
-curl -fSL --retry 3 "$URL" -o "$TARBALL"
-tar --no-same-owner -xzf "$TARBALL"
+curl -fSL --retry 3 "$URL" -o "$tmpdir/$TARBALL"
+tar --no-same-owner -xzf "$tmpdir/$TARBALL" -C "$tmpdir"
 
 # Move binary to /usr/local/bin (may require sudo)
 echo "Installing $BINARY to /usr/local/bin (may require sudo)..."
-sudo install -m 0755 "$BINARY" /usr/local/bin/
-
-# Clean up
-rm "$TARBALL"
+sudo install -m 0755 "$tmpdir/$BINARY" /usr/local/bin/
 
 echo "✅ $BINARY installed successfully! Run '$BINARY --help' to get started."
