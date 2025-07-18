@@ -627,7 +627,7 @@ func TestStreamingToolCallDetection(t *testing.T) {
 							Content: "",
 							ToolCalls: []openai.ChatCompletionChunkChoiceDeltaToolCall{
 								{
-									Index: 0,
+									Index: int64(0),
 									ID:    "call_reasoning_test",
 									Function: openai.ChatCompletionChunkChoiceDeltaToolCallFunction{
 										Name:      "kubectl",
@@ -671,7 +671,7 @@ func TestStreamingToolCallDetection(t *testing.T) {
 							Content: "",
 							ToolCalls: []openai.ChatCompletionChunkChoiceDeltaToolCall{
 								{
-									Index: 0,
+									Index: int64(0),
 									ID:    "call_complex_reasoning",
 									Function: openai.ChatCompletionChunkChoiceDeltaToolCallFunction{
 										Name:      "bash",
@@ -717,7 +717,7 @@ func TestStreamingToolCallDetection(t *testing.T) {
 							Content: "",
 							ToolCalls: []openai.ChatCompletionChunkChoiceDeltaToolCall{
 								{
-									Index: 0,
+									Index: int64(0),
 									ID:    "call_traditional_std",
 									Function: openai.ChatCompletionChunkChoiceDeltaToolCallFunction{
 										Name:      "kubectl",
@@ -752,7 +752,7 @@ func TestStreamingToolCallDetection(t *testing.T) {
 							Content: "I'll help you check the pod status.",
 							ToolCalls: []openai.ChatCompletionChunkChoiceDeltaToolCall{
 								{
-									Index: 0,
+									Index: int64(0),
 									ID:    "call_mixed_content",
 									Function: openai.ChatCompletionChunkChoiceDeltaToolCallFunction{
 										Name:      "kubectl",
@@ -789,7 +789,7 @@ func TestStreamingToolCallDetection(t *testing.T) {
 							Content: "",
 							ToolCalls: []openai.ChatCompletionChunkChoiceDeltaToolCall{
 								{
-									Index: 0,
+									Index: int64(0),
 									ID:    "call_basic_simple",
 									Function: openai.ChatCompletionChunkChoiceDeltaToolCallFunction{
 										Name:      "bash",
@@ -826,7 +826,7 @@ func TestStreamingToolCallDetection(t *testing.T) {
 							Content: "",
 							ToolCalls: []openai.ChatCompletionChunkChoiceDeltaToolCall{
 								{
-									Index: 0,
+									Index: int64(0),
 									ID:    "call_partial_json",
 									Function: openai.ChatCompletionChunkChoiceDeltaToolCallFunction{
 										Name:      "kubectl",
@@ -850,7 +850,7 @@ func TestStreamingToolCallDetection(t *testing.T) {
 						Delta: openai.ChatCompletionChunkChoiceDelta{
 							ToolCalls: []openai.ChatCompletionChunkChoiceDeltaToolCall{
 								{
-									Index: 0,
+									Index: int64(0),
 									ID:    "call_empty_name",
 									Function: openai.ChatCompletionChunkChoiceDeltaToolCallFunction{
 										Name:      "", // Empty function name
@@ -875,7 +875,7 @@ func TestStreamingToolCallDetection(t *testing.T) {
 							Content: "",
 							ToolCalls: []openai.ChatCompletionChunkChoiceDeltaToolCall{
 								{
-									Index: 0,
+									Index: int64(0),
 									ID:    "call_malformed_json",
 									Function: openai.ChatCompletionChunkChoiceDeltaToolCallFunction{
 										Name:      "kubectl",
@@ -900,7 +900,7 @@ func TestStreamingToolCallDetection(t *testing.T) {
 							Content: "",
 							ToolCalls: []openai.ChatCompletionChunkChoiceDeltaToolCall{
 								{
-									Index: 0,
+									Index: int64(0),
 									ID:    "call_multi_1",
 									Function: openai.ChatCompletionChunkChoiceDeltaToolCallFunction{
 										Name:      "kubectl",
@@ -909,7 +909,7 @@ func TestStreamingToolCallDetection(t *testing.T) {
 									Type: "function",
 								},
 								{
-									Index: 1,
+									Index: int64(1),
 									ID:    "call_multi_2",
 									Function: openai.ChatCompletionChunkChoiceDeltaToolCallFunction{
 										Name:      "bash",
@@ -947,7 +947,7 @@ func TestStreamingToolCallDetection(t *testing.T) {
 							Content: "",
 							ToolCalls: []openai.ChatCompletionChunkChoiceDeltaToolCall{
 								{
-									Index: 0,
+									Index: int64(0),
 									ID:    "call_unicode_test",
 									Function: openai.ChatCompletionChunkChoiceDeltaToolCallFunction{
 										Name:      "kubectl",
@@ -1079,7 +1079,7 @@ func TestStreamingIntegrationWithFallback(t *testing.T) {
 								Content: "I'll help you check the pods.",
 								ToolCalls: []openai.ChatCompletionChunkChoiceDeltaToolCall{
 									{
-										Index: 0,
+										Index: int64(0),
 										ID:    "call_fallback_test",
 										Function: openai.ChatCompletionChunkChoiceDeltaToolCallFunction{
 											Name:      "kubectl",
@@ -1156,7 +1156,7 @@ func TestStreamingIntegrationWithFallback(t *testing.T) {
 								Content: "",
 								ToolCalls: []openai.ChatCompletionChunkChoiceDeltaToolCall{
 									{
-										Index: 0,
+										Index: int64(0),
 										ID:    "call_invalid_json",
 										Function: openai.ChatCompletionChunkChoiceDeltaToolCallFunction{
 											Name:      "kubectl",
@@ -1190,7 +1190,7 @@ func TestStreamingIntegrationWithFallback(t *testing.T) {
 								Content: "First, let me check pods.",
 								ToolCalls: []openai.ChatCompletionChunkChoiceDeltaToolCall{
 									{
-										Index: 0,
+										Index: int64(0),
 										ID:    "call_multi_1",
 										Function: openai.ChatCompletionChunkChoiceDeltaToolCallFunction{
 											Name:      "kubectl",
@@ -1211,7 +1211,7 @@ func TestStreamingIntegrationWithFallback(t *testing.T) {
 								Content: "Now checking services.",
 								ToolCalls: []openai.ChatCompletionChunkChoiceDeltaToolCall{
 									{
-										Index: 0,
+										Index: int64(0),
 										ID:    "call_multi_2",
 										Function: openai.ChatCompletionChunkChoiceDeltaToolCallFunction{
 											Name:      "kubectl",
@@ -1252,7 +1252,7 @@ func TestStreamingIntegrationWithFallback(t *testing.T) {
 								Content: "",
 								ToolCalls: []openai.ChatCompletionChunkChoiceDeltaToolCall{
 									{
-										Index: 0,
+										Index: int64(0),
 										ID:    "call_empty_func",
 										Function: openai.ChatCompletionChunkChoiceDeltaToolCallFunction{
 											Name:      "", // Empty function name
@@ -1363,7 +1363,7 @@ func TestAccumulatorStateManagement(t *testing.T) {
 						Delta: openai.ChatCompletionChunkChoiceDelta{
 							ToolCalls: []openai.ChatCompletionChunkChoiceDeltaToolCall{
 								{
-									Index: 0,
+									Index: int64(0),
 									ID:    "call_partial",
 									Function: openai.ChatCompletionChunkChoiceDeltaToolCallFunction{
 										Name:      "kubectl",
@@ -1476,7 +1476,7 @@ func TestRegressionO1MiniBugScenario(t *testing.T) {
 					Content: "I'll help you check the pods in the specified namespaces.",
 					ToolCalls: []openai.ChatCompletionChunkChoiceDeltaToolCall{
 						{
-							Index: 0,
+							Index: int64(0),
 							ID:    "call_o1_mini_bug",
 							Function: openai.ChatCompletionChunkChoiceDeltaToolCallFunction{
 								Name:      "kubectl",
