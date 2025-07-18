@@ -94,7 +94,10 @@ type Options struct {
 	// ExternalTools enables discovery and exposure of external MCP tools (only works with --mcp-server)
 	ExternalTools bool `json:"externalTools,omitempty"`
 	MaxIterations int  `json:"maxIterations,omitempty"`
-
+	// MCPServerMode is the mode of the MCP server. only works with --mcp-server.
+	MCPServerMode string `json:"mcpServerMode,omitempty"`
+	// Set the SSEndpoint port for the MCP server. only works with --mcp-server and --mcp-server-mode=sse.
+	SSEndpointPort int `json:"sseEndpointPort,omitempty"`
 	// KubeConfigPath is the path to the kubeconfig file.
 	// If not provided, the default kubeconfig path will be used.
 	KubeConfigPath string `json:"kubeConfigPath,omitempty"`
@@ -149,9 +152,12 @@ func (o *Options) InitDefaults() {
 	o.UIType = ui.UITypeTerminal
 	// Default UI listen address for HTML UI
 	o.UIListenAddress = "localhost:8888"
-
 	// Default to not skipping SSL verification
 	o.SkipVerifySSL = false
+	// Default MCP server mode is stdio
+	o.MCPServerMode = "stdio"
+	// Default port for SSE endpoint
+	o.SSEndpointPort = 9080
 }
 
 func (o *Options) LoadConfiguration(b []byte) error {
@@ -284,6 +290,8 @@ func (opt *Options) bindCLIFlags(f *pflag.FlagSet) error {
 	f.BoolVar(&opt.ExternalTools, "external-tools", opt.ExternalTools, "in MCP server mode, discover and expose external MCP tools")
 	f.StringArrayVar(&opt.ToolConfigPaths, "custom-tools-config", opt.ToolConfigPaths, "path to custom tools config file or directory")
 	f.BoolVar(&opt.MCPClient, "mcp-client", opt.MCPClient, "enable MCP client mode to connect to external MCP servers")
+	f.StringVar(&opt.MCPServerMode, "mcp-server-mode", opt.MCPServerMode, "mode of the MCP server. Supported values: stdio, sse")
+	f.IntVar(&opt.SSEndpointPort, "sse-endpoint-port", opt.SSEndpointPort, "port for the SSE endpoint in MCP server mode (only works with --mcp-server and --mcp-server-mode=sse)")
 	f.BoolVar(&opt.EnableToolUseShim, "enable-tool-use-shim", opt.EnableToolUseShim, "enable tool use shim")
 	f.BoolVar(&opt.Quiet, "quiet", opt.Quiet, "run in non-interactive mode, requires a query to be provided as a positional argument")
 
@@ -578,7 +586,7 @@ func startMCPServer(ctx context.Context, opt Options) error {
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
 		return fmt.Errorf("error creating work directory: %w", err)
 	}
-	mcpServer, err := newKubectlMCPServer(ctx, opt.KubeConfigPath, tools.Default(), workDir, opt.ExternalTools)
+	mcpServer, err := newKubectlMCPServer(ctx, opt.KubeConfigPath, tools.Default(), workDir, opt.ExternalTools, opt.MCPServerMode, opt.SSEndpointPort)
 	if err != nil {
 		return fmt.Errorf("creating mcp server: %w", err)
 	}
