@@ -90,36 +90,52 @@ func (b *Broadcaster) Broadcast(msg []byte) {
 	b.messages <- msg
 }
 
+// Replace single-agent fields with SessionManager and per-session broadcasters.
 type HTMLUserInterface struct {
 	httpServer         *http.Server
 	httpServerListener net.Listener
 
-	agent            *agent.Agent
-	journal          journal.Recorder
+	sessions *agent.SessionManager
+	journal  journal.Recorder
+
+	// markdownRenderer is used by future server-side rendering needs (kept for now)
 	markdownRenderer *glamour.TermRenderer
-	broadcaster      *Broadcaster
+
+	// broadcasterMap holds a broadcaster per sessionID.
+	broadcasterMap map[string]*Broadcaster
+	bMu            sync.Mutex // protects broadcasterMap
+
+	promptGroups []api.PromptGroup
 }
 
 var _ ui.UI = &HTMLUserInterface{}
 
-func NewHTMLUserInterface(agent *agent.Agent, listenAddress string, journal journal.Recorder) (*HTMLUserInterface, error) {
+func NewHTMLUserInterface(sessions *agent.SessionManager, listenAddress string, journal journal.Recorder) (*HTMLUserInterface, error) {
 	mux := http.NewServeMux()
 
 	u := &HTMLUserInterface{
-		agent:       agent,
-		journal:     journal,
-		broadcaster: NewBroadcaster(),
+		sessions:       sessions,
+		journal:        journal,
+		broadcasterMap: make(map[string]*Broadcaster),
+		promptGroups:   nil,
 	}
+
+	// API routes
+	mux.HandleFunc("GET /api/prompts", u.handleGetPrompts)
+	mux.HandleFunc("GET /api/sessions", u.handleListSessions)
+	mux.HandleFunc("POST /api/sessions", u.handleCreateSession)
+	mux.HandleFunc("POST /api/sessions/{id}/rename", u.handleRenameSession)
+	mux.HandleFunc("GET /api/sessions/{id}/stream", u.handleSessionStream)
+	mux.HandleFunc("POST /api/sessions/{id}/send-message", u.handlePOSTSendMessage)
+	mux.HandleFunc("POST /api/sessions/{id}/choose-option", u.handlePOSTChooseOption)
+
+	// Frontend
+	mux.HandleFunc("/", u.serveIndex)
 
 	httpServer := &http.Server{
 		Addr:    listenAddress,
 		Handler: mux,
 	}
-
-	mux.HandleFunc("GET /", u.serveIndex)
-	mux.HandleFunc("GET /messages-stream", u.serveMessagesStream)
-	mux.HandleFunc("POST /send-message", u.handlePOSTSendMessage)
-	mux.HandleFunc("POST /choose-option", u.handlePOSTChooseOption)
 
 	httpServerListener, err := net.Listen("tcp", listenAddress)
 	if err != nil {
@@ -141,40 +157,28 @@ func NewHTMLUserInterface(agent *agent.Agent, listenAddress string, journal jour
 	}
 	u.markdownRenderer = mdRenderer
 
+	// Load prompt library
+	if pg, err := loadPromptLibrary(); err == nil {
+		u.promptGroups = pg
+	} else {
+		klog.Warningf("failed to load prompt library: %v", err)
+	}
+
+	// Ensure there is at least one default session so the UI works out of the box.
+	if _, err := u.ensureDefaultSession(context.Background()); err != nil {
+		return nil, err
+	}
+
 	return u, nil
 }
 
 func (u *HTMLUserInterface) Run(ctx context.Context) error {
 	g, gctx := errgroup.WithContext(ctx)
 
-	// Start the broadcaster
+	// Start all broadcasters (each runs its own loop)
 	g.Go(func() error {
-		u.broadcaster.Run(gctx)
+		<-gctx.Done()
 		return nil
-	})
-
-	// This goroutine listens to agent output and broadcasts it.
-	g.Go(func() error {
-		for {
-			select {
-			case <-gctx.Done():
-				return nil
-			case _, ok := <-u.agent.Output:
-				if !ok {
-					return nil // Channel closed
-				}
-				// We received a message from the agent. It's a signal that
-				// the state has changed. We fetch the entire current state and
-				// broadcast it to all connected clients.
-				jsonData, err := u.getCurrentStateJSON()
-				if err != nil {
-					// Don't return an error, just log it and continue
-					klog.Errorf("Error marshaling state for broadcast: %v", err)
-					continue
-				}
-				u.broadcaster.Broadcast(jsonData)
-			}
-		}
 	})
 
 	g.Go(func() error {
@@ -205,48 +209,7 @@ func (u *HTMLUserInterface) serveIndex(w http.ResponseWriter, req *http.Request)
 	w.Write(indexHTML)
 }
 
-func (u *HTMLUserInterface) serveMessagesStream(w http.ResponseWriter, req *http.Request) {
-	ctx := req.Context()
-	log := klog.FromContext(ctx)
-
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		http.Error(w, "Streaming unsupported!", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-
-	clientChan := make(chan []byte, 10)
-	u.broadcaster.newClient <- clientChan
-	defer func() {
-		u.broadcaster.delClient <- clientChan
-	}()
-
-	log.Info("SSE client connected")
-
-	// Immediately send the current state to the new client
-	initialData, err := u.getCurrentStateJSON()
-	if err != nil {
-		log.Error(err, "getting initial state for SSE client")
-	} else {
-		fmt.Fprintf(w, "data: %s\n\n", initialData)
-		flusher.Flush()
-	}
-
-	for {
-		select {
-		case <-ctx.Done():
-			log.Info("SSE client disconnected")
-			return
-		case msg := <-clientChan:
-			fmt.Fprintf(w, "data: %s\n\n", msg)
-			flusher.Flush()
-		}
-	}
-}
+// serveMessagesStream is now replaced by handleSessionStream (per-session).
 
 func (u *HTMLUserInterface) handlePOSTSendMessage(w http.ResponseWriter, req *http.Request) {
 	ctx := req.Context()
@@ -266,14 +229,22 @@ func (u *HTMLUserInterface) handlePOSTSendMessage(w http.ResponseWriter, req *ht
 		return
 	}
 
+	// Resolve sessionID from URL.
+	sessionID := req.PathValue("id")
+	ag, ok := u.sessions.GetAgent(sessionID)
+	if !ok {
+		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	}
+
 	// Send the message to the agent
-	u.agent.Input <- &api.UserInputResponse{Query: q}
+	ag.Input <- &api.UserInputResponse{Query: q}
 
 	w.WriteHeader(http.StatusOK)
 }
 
-func (u *HTMLUserInterface) getCurrentStateJSON() ([]byte, error) {
-	allMessages := u.agent.Session().AllMessages()
+func (u *HTMLUserInterface) getCurrentStateJSON(agent *agent.Agent) ([]byte, error) {
+	allMessages := agent.Session().AllMessages()
 	// Create a copy of the messages to avoid race conditions
 	var messages []*api.Message
 	for _, message := range allMessages {
@@ -283,7 +254,7 @@ func (u *HTMLUserInterface) getCurrentStateJSON() ([]byte, error) {
 		messages = append(messages, message)
 	}
 
-	agentState := u.agent.Session().AgentState
+	agentState := agent.Session().AgentState
 
 	data := map[string]interface{}{
 		"messages":   messages,
@@ -316,8 +287,14 @@ func (u *HTMLUserInterface) handlePOSTChooseOption(w http.ResponseWriter, req *h
 		return
 	}
 
+	sessionID := req.PathValue("id")
+	ag, ok := u.sessions.GetAgent(sessionID)
+	if !ok {
+		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	}
 	// Send the choice to the agent
-	u.agent.Input <- &api.UserChoiceResponse{Choice: choiceIndex}
+	ag.Input <- &api.UserChoiceResponse{Choice: choiceIndex}
 
 	w.WriteHeader(http.StatusOK)
 }
@@ -336,4 +313,163 @@ func (u *HTMLUserInterface) Close() error {
 
 func (u *HTMLUserInterface) ClearScreen() {
 	// Not applicable for HTML UI
+}
+
+// ----------------------------
+// Session & broadcaster helpers
+// ----------------------------
+
+// ensureDefaultSession creates the very first session if none exist and returns it.
+func (u *HTMLUserInterface) ensureDefaultSession(ctx context.Context) (*agent.Agent, error) {
+	sessions := u.sessions.ListSessions()
+	if len(sessions) > 0 {
+		ag, _ := u.sessions.GetAgent(sessions[0].ID)
+		return ag, nil
+	}
+
+	ag, err := u.sessions.CreateSession(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Start the agent loop in background.
+	go func() {
+		if err := ag.Run(ctx, ""); err != nil {
+			klog.Errorf("agent run error (default session): %v", err)
+		}
+	}()
+
+	return ag, nil
+}
+
+func (u *HTMLUserInterface) getBroadcaster(sessionID string) *Broadcaster {
+	u.bMu.Lock()
+	defer u.bMu.Unlock()
+	b, ok := u.broadcasterMap[sessionID]
+	if !ok {
+		b = NewBroadcaster()
+		// Run broadcaster loop in background. It will stop when context is cancelled
+		go b.Run(context.Background())
+		u.broadcasterMap[sessionID] = b
+
+		// Hook agent output to broadcaster once.
+		if ag, ok := u.sessions.GetAgent(sessionID); ok {
+			go func() {
+				for range ag.Output {
+					jsonData, err := u.getCurrentStateJSON(ag)
+					if err != nil {
+						klog.Errorf("marshal state for session %s: %v", sessionID, err)
+						continue
+					}
+					b.Broadcast(jsonData)
+				}
+			}()
+		}
+	}
+	return b
+}
+
+// -------------------
+// HTTP handlers below
+// -------------------
+
+func (u *HTMLUserInterface) handleListSessions(w http.ResponseWriter, req *http.Request) {
+	sessions := u.sessions.ListSessions()
+	data, _ := json.Marshal(sessions)
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(data)
+}
+
+func (u *HTMLUserInterface) handleCreateSession(w http.ResponseWriter, req *http.Request) {
+	// Use a background context so the session survives beyond this HTTP request.
+	ctx := context.Background()
+	ag, err := u.sessions.CreateSession(ctx)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Start agent loop.
+	go func() {
+		if err := ag.Run(ctx, ""); err != nil {
+			klog.Errorf("agent run error for session %s: %v", ag.Session().ID, err)
+		}
+	}()
+
+	resp := map[string]string{"id": ag.Session().ID}
+	json.NewEncoder(w).Encode(resp)
+}
+
+func (u *HTMLUserInterface) handleRenameSession(w http.ResponseWriter, req *http.Request) {
+	sessionID := req.PathValue("id")
+	if err := req.ParseForm(); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	newName := req.FormValue("name")
+	if newName == "" {
+		http.Error(w, "missing name", http.StatusBadRequest)
+		return
+	}
+	if err := u.sessions.RenameSession(sessionID, newName); err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+func (u *HTMLUserInterface) handleSessionStream(w http.ResponseWriter, req *http.Request) {
+	ctx := req.Context()
+	log := klog.FromContext(ctx)
+
+	sessionID := req.PathValue("id")
+	ag, ok := u.sessions.GetAgent(sessionID)
+	if !ok {
+		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	}
+
+	flusher, okF := w.(http.Flusher)
+	if !okF {
+		http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	broadcaster := u.getBroadcaster(sessionID)
+
+	clientChan := make(chan []byte, 10)
+	broadcaster.newClient <- clientChan
+	defer func() { broadcaster.delClient <- clientChan }()
+
+	// Send initial state
+	if initial, err := u.getCurrentStateJSON(ag); err == nil {
+		fmt.Fprintf(w, "data: %s\n\n", initial)
+		flusher.Flush()
+	}
+
+	log.Info("SSE client connected", "session", sessionID)
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info("SSE client disconnected", "session", sessionID)
+			return
+		case msg := <-clientChan:
+			fmt.Fprintf(w, "data: %s\n\n", msg)
+			flusher.Flush()
+		}
+	}
+}
+
+func (u *HTMLUserInterface) handleGetPrompts(w http.ResponseWriter, req *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	prompts := u.promptGroups
+	if prompts == nil {
+		prompts = []api.PromptGroup{}
+	}
+	json.NewEncoder(w).Encode(prompts)
 }

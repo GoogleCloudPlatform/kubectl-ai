@@ -18,6 +18,7 @@ import "time"
 
 type Session struct {
 	ID           string
+	Name         string
 	Messages     []*Message
 	AgentState   AgentState
 	CreatedAt    time.Time
@@ -108,6 +109,12 @@ type MCPTool struct {
 	Name        string `json:"name,omitempty"`
 	Description string `json:"description,omitempty"`
 	Server      string `json:"server,omitempty"`
+}
+
+// PromptGroup represents a group of canned prompts for the UI prompt library.
+type PromptGroup struct {
+	Group string   `json:"group" yaml:"group"`
+	Items []string `json:"items" yaml:"items"`
 }
 
 func (s *Session) AllMessages() []*Message {

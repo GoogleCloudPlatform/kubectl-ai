@@ -31,6 +31,7 @@ import (
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/api"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/journal"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/mcp"
+	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/sandbox"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/tools"
 	"github.com/google/uuid"
 	"k8s.io/klog/v2"
@@ -92,12 +93,21 @@ type Agent struct {
 	// MCPClientEnabled indicates whether MCP client mode is enabled
 	MCPClientEnabled bool
 
+	// UseSandbox indicates whether to execute tools in a sandbox environment
+	UseSandbox bool
+
+	// SandboxImage is the container image to use for the sandbox
+	SandboxImage string
+
 	// Recorder captures events for diagnostics
 	Recorder journal.Recorder
 
 	llmChat gollm.Chat
 
 	workDir string
+
+	// sandbox is the sandbox instance for isolated command execution
+	sandbox *sandbox.Sandbox
 
 	// session tracks the current session of the agent
 	// this is used by the UI to track the state of the agent and the conversation
@@ -123,6 +133,15 @@ func (s *Agent) Session() *api.Session {
 	// to avoid race conditions.
 	sessionCopy := *s.session
 	return &sessionCopy
+}
+
+// UpdateSessionName updates the human-friendly name of the session in a
+// threadsafe manner.
+func (s *Agent) UpdateSessionName(name string) {
+	s.sessionMu.Lock()
+	defer s.sessionMu.Unlock()
+	s.session.Name = name
+	s.session.LastModified = time.Now()
 }
 
 // addMessage creates a new message, adds it to the session, and sends it to the output channel
@@ -182,8 +201,10 @@ func (s *Agent) Init(ctx context.Context) error {
 
 	// TODO: this is ephemeral for now, but in the future, we will support
 	// session persistence.
+	sid := uuid.New().String()
 	s.session = &api.Session{
-		ID:           uuid.New().String(),
+		ID:           sid,
+		Name:         "session-" + sid[:8],
 		Messages:     []*api.Message{},
 		AgentState:   api.AgentStateIdle,
 		CreatedAt:    time.Now(),
@@ -234,6 +255,29 @@ func (s *Agent) Init(ctx context.Context) error {
 	}
 	s.workDir = workDir
 
+	// Initialize sandbox if enabled
+	if s.UseSandbox {
+		sandboxName := fmt.Sprintf("kubectl-ai-sandbox-%s", uuid.New().String()[:8])
+
+		// Use default image if not specified
+		sandboxImage := s.SandboxImage
+		if sandboxImage == "" {
+			sandboxImage = "bitnami/kubectl:latest"
+		}
+
+		// Create sandbox with kubeconfig
+		sb, err := sandbox.New(sandboxName,
+			sandbox.WithKubeconfig(s.Kubeconfig),
+			sandbox.WithImage(sandboxImage),
+		)
+		if err != nil {
+			return fmt.Errorf("failed to create sandbox: %w", err)
+		}
+
+		s.sandbox = sb
+		log.Info("Created sandbox", "name", sandboxName, "image", sandboxImage)
+	}
+
 	// Initialize MCP client if enabled
 	if s.MCPClientEnabled {
 		if err := s.InitializeMCPClient(ctx); err != nil {
@@ -258,6 +302,18 @@ func (c *Agent) Close() error {
 			}
 		}
 	}
+
+	// Close sandbox if enabled
+	if c.sandbox != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		if err := c.sandbox.Delete(ctx); err != nil {
+			klog.Warningf("error cleaning up sandbox: %v", err)
+		} else {
+			klog.Info("Sandbox cleaned up successfully")
+		}
+	}
+
 	// Close MCP client connections
 	if err := c.CloseMCPClient(); err != nil {
 		klog.Warningf("error closing MCP client: %v", err)
@@ -663,6 +719,7 @@ func (c *Agent) DispatchToolCalls(ctx context.Context) error {
 		output, err := call.ParsedToolCall.InvokeTool(ctx, tools.InvokeToolOptions{
 			Kubeconfig: c.Kubeconfig,
 			WorkDir:    c.workDir,
+			Sandbox:    c.sandbox,
 		})
 		if err != nil {
 			log.Error(err, "error executing action", "output", output)

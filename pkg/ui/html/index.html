@@ -21,14 +21,15 @@
                         'mono': ['JetBrains Mono', 'Menlo', 'Monaco', 'Courier New', 'monospace'],
                     },
                     colors: {
+                        // Emerald-based accent palette
                         'brand': {
-                            50: '#f0f9ff',
-                            100: '#e0f2fe',
-                            500: '#0ea5e9',
-                            600: '#0284c7',
-                            700: '#0369a1',
-                            800: '#075985',
-                            900: '#0c4a6e',
+                            50:  '#ecfdf5',
+                            100: '#d1fae5',
+                            500: '#10a37f',
+                            600: '#0e9775',
+                            700: '#0d8b6b',
+                            800: '#0b7f61',
+                            900: '#0a7357',
                         }
                     },
                     animation: {
@@ -261,12 +262,27 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
+        // Helper to fetch JSON with minimal boilerplate
+        async function fetchJSON(url, opts = {}) {
+            const res = await fetch(url, opts);
+            if (!res.ok) throw new Error(await res.text());
+            return res.json();
+        }
+
         function App() {
+            const [sessions, setSessions] = useState([]); // list of session metadata
+            const [currentSessionId, setCurrentSessionId] = useState(null);
             const [messages, setMessages] = useState([]);
             const [input, setInput] = useState('');
             const [agentState, setAgentState] = useState('idle');
             const [isConnected, setIsConnected] = useState(false);
             const [expandedOutputs, setExpandedOutputs] = useState(new Set());
+            const [showDrawer, setShowDrawer] = useState(false);
+            const [promptGroups, setPromptGroups] = useState([]);
+            const [sidebarWidth, setSidebarWidth] = useState(() => {
+                const savedWidth = localStorage.getItem('kubectl-ai-sidebar-width');
+                return savedWidth ? parseInt(savedWidth, 10) : 260; // Default width
+            });
             const [isDarkMode, setIsDarkMode] = useState(() => {
                 // Check for saved preference first
                 const saved = localStorage.getItem('kubectl-ai-dark-mode');
@@ -284,6 +300,45 @@
             });
             const messagesEndRef = useRef(null);
             const inputRef = useRef(null);
+            const sidebarRef = useRef(null);
+
+            const startResizing = React.useCallback((mouseDownEvent) => {
+                mouseDownEvent.preventDefault();
+                const startSize = sidebarWidth;
+                const startPosition = mouseDownEvent.clientX;
+                
+                document.body.style.cursor = 'col-resize';
+                document.body.style.userSelect = 'none';
+
+                function onMouseMove(mouseMoveEvent) {
+                    const newSize = startSize + mouseMoveEvent.clientX - startPosition;
+                    if (newSize >= 220 && newSize <= 500) { // Set min/max width for sidebar
+                        setSidebarWidth(newSize);
+                    }
+                }
+                function onMouseUp() {
+                    document.body.style.cursor = 'default';
+                    document.body.style.userSelect = 'auto';
+                    document.removeEventListener("mousemove", onMouseMove);
+                    document.removeEventListener("mouseup", onMouseUp);
+                }
+
+                document.addEventListener("mousemove", onMouseMove);
+                document.addEventListener("mouseup", onMouseUp);
+            }, [sidebarWidth]);
+
+            // Save sidebar width to localStorage whenever it changes
+            useEffect(() => {
+                localStorage.setItem('kubectl-ai-sidebar-width', sidebarWidth);
+            }, [sidebarWidth]);
+
+            const scrollToBottom = () => {
+                messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+            };
+
+            useEffect(() => {
+                scrollToBottom();
+            }, [messages]);
 
             const toggleOutput = (messageIndex) => {
                 const newExpanded = new Set(expandedOutputs);
@@ -331,16 +386,34 @@
                 };
             }, []);
 
-            const scrollToBottom = () => {
-                messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-            };
+            // parse session param from URL
+            const urlParams = new URLSearchParams(window.location.search);
+            const sessionFromURL = urlParams.get('session');
 
+            // Load session list on mount
             useEffect(() => {
-                scrollToBottom();
-            }, [messages]);
+                fetchSessions();
+            }, []);
 
+            async function fetchSessions() {
+                try {
+                    const data = await fetchJSON('/api/sessions');
+                    setSessions(data);
+                    if (sessionFromURL && data.some(s=>s.ID===sessionFromURL)) {
+                        setCurrentSessionId(sessionFromURL);
+                    } else if (!currentSessionId && data.length > 0) {
+                        setCurrentSessionId(data[0].ID);
+                    }
+                } catch (err) {
+                    console.error('Error fetching sessions', err);
+                }
+            }
+
+            // SSE connection handling per-session
             useEffect(() => {
-                const eventSource = new EventSource('/messages-stream');
+                if (!currentSessionId) return;
+
+                const eventSource = new EventSource(`/api/sessions/${currentSessionId}/stream`);
                 
                 eventSource.onopen = () => {
                     setIsConnected(true);
@@ -365,7 +438,7 @@
                 return () => {
                     eventSource.close();
                 };
-            }, []);
+            }, [currentSessionId]);
 
             useEffect(() => {
                 const canSendMessage = agentState === 'idle' || agentState === 'done' || agentState === 'waiting-for-input';
@@ -381,7 +454,7 @@
                 if (!message.trim()) return;
 
                 try {
-                    const response = await fetch('/send-message', {
+                    const response = await fetch(`/api/sessions/${currentSessionId}/send-message`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                         body: 'q=' + encodeURIComponent(message)
@@ -397,7 +470,7 @@
 
             const chooseOption = async (optionIndex) => {
                 try {
-                    await fetch('/choose-option', {
+                    await fetch(`/api/sessions/${currentSessionId}/choose-option`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                         body: 'choice=' + encodeURIComponent(optionIndex)
@@ -456,20 +529,15 @@
                     switch (source) {
                         case 'user': return { 
                             name: 'You', 
-                            color: isDarkMode ? 'text-blue-200' : 'text-blue-700', 
-                            bg: isDarkMode ? 'bg-blue-800/40' : 'bg-blue-50', 
+                            color: isDarkMode ? 'text-gray-200' : 'text-gray-700', 
+                            bg: isDarkMode ? 'bg-gray-700' : 'bg-gray-200', 
                             avatar: '👤' 
                         };
-                        case 'model': return { 
-                            name: 'AI Assistant', 
-                            color: isDarkMode ? 'text-emerald-400' : 'text-emerald-700', 
-                            bg: isDarkMode ? 'bg-emerald-900/30' : 'bg-emerald-50', 
-                            avatar: '🤖' 
-                        };
+                        case 'model': 
                         case 'agent': return { 
                             name: 'AI Assistant', 
-                            color: isDarkMode ? 'text-emerald-400' : 'text-emerald-700', 
-                            bg: isDarkMode ? 'bg-emerald-900/30' : 'bg-emerald-50', 
+                            color: isDarkMode ? 'text-gray-200' : 'text-gray-700', 
+                            bg: isDarkMode ? 'bg-gray-700' : 'bg-gray-200', 
                             avatar: '🤖' 
                         };
                         default: return { 
@@ -497,9 +565,9 @@
                     return null;
                 };
 
-                const MessageWrapper = ({ children, className = "" }) => (
+                const MessageWrapper = ({ children, className = "", isUser = false }) => (
                     <div className={"message-enter mb-6 " + className}>
-                        <div className="flex items-start space-x-3">
+                        <div className="flex items-start space-x-3"> 
                             <div className={"flex-shrink-0 w-8 h-8 rounded-full " + sourceInfo.bg + " flex items-center justify-center text-sm"}>
                                 {sourceInfo.avatar}
                             </div>
@@ -517,8 +585,8 @@
                     case 'text':
                     case 'user-input-request':
                         return (
-                            <MessageWrapper key={index}>
-                                <div className={`prose leading-relaxed ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}
+                            <MessageWrapper key={index} isUser={message.Source === 'user'}>
+                                <div className={`prose leading-relaxed ${isDarkMode ? 'text-gray-300' : 'text-gray-700'} ${message.Source==='user' ? (isDarkMode ? 'bg-gray-800' : 'bg-gray-100') + ' rounded-lg p-3' : ''}`}
                                      dangerouslySetInnerHTML={{ __html: formatMessage(message.Payload) }} />
                             </MessageWrapper>
                         );
@@ -602,7 +670,7 @@
                                                 </svg>
                                             </button>
                                             {isOutputExpanded && (
-                                                <div className={`mt-2 text-sm rounded px-3 py-2 font-mono text-xs overflow-x-auto max-h-96 overflow-y-auto ${isDarkMode ? 'text-emerald-300 bg-emerald-900/30' : 'text-emerald-700 bg-emerald-100'}`}>
+                                                <div className={`mt-2 text-sm rounded px-3 py-2 font-mono text-xs overflow-auto max-h-[60vh] ${isDarkMode ? 'text-emerald-300 bg-emerald-900/30' : 'text-emerald-700 bg-emerald-100'}`}>
                                                     <pre className="whitespace-pre-wrap">{outputText}</pre>
                                                 </div>
                                             )}
@@ -722,10 +790,57 @@
 
             const statusInfo = getAgentStatusInfo();
 
+            const createNewSession = async () => {
+                try {
+                    const data = await fetchJSON('/api/sessions', { method: 'POST' });
+                    await fetchSessions(); // refresh list
+                    setCurrentSessionId(data.id);
+                } catch (err) {
+                    console.error('Error creating session', err);
+                }
+            };
+
+            async function toggleDrawer() {
+                if (!showDrawer && promptGroups.length === 0) {
+                    try {
+                        const data = await fetchJSON('/api/prompts');
+                        setPromptGroups(data);
+                    } catch(err) { console.error('fetch prompts', err);}    
+                }
+                setShowDrawer(!showDrawer);
+            }
+
+            const renameSessionPrompt = async (session) => {
+                const newName = prompt('Enter new session name:', session.Name || 'New Session');
+                if (newName && newName.trim() !== '') {
+                    try {
+                        await fetch(`/api/sessions/${session.ID}/rename`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                            body: 'name=' + encodeURIComponent(newName.trim())
+                        });
+                        await fetchSessions(); // refresh list
+                    } catch (err) {
+                        console.error('Error renaming session:', err);
+                        alert('Failed to rename session.');
+                    }
+                }
+            };
+
+            const shareSession = (session) => {
+                const shareUrl = `${window.location.origin}?session=${session.ID}`;
+                navigator.clipboard.writeText(shareUrl).then(()=>{
+                    alert('Share link copied to clipboard');
+                }).catch(()=>{
+                    prompt('Copy session link:', shareUrl);
+                });
+            };
+
             return (
-                <div className={`flex flex-col h-screen ${isDarkMode ? 'bg-gradient-to-br from-slate-900 to-gray-900' : 'bg-gradient-to-br from-slate-50 to-blue-50'}`}>
+                <>
+                <div className={`flex flex-col h-screen ${isDarkMode ? 'bg-gray-900 text-gray-200' : 'bg-white text-gray-900'}`}>
                     {/* Header */}
-                    <div className={`${isDarkMode ? 'bg-gray-800/80' : 'bg-white/80'} backdrop-blur-sm ${isDarkMode ? 'border-gray-700' : 'border-gray-200'} border-b px-6 py-4 shadow-sm`}>
+                    <div className={`${isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-100'} border-b px-6 py-4 flex-shrink-0`}>
                         <div className="flex items-center justify-between">
                             <div className="flex items-center space-x-3">
                                 <div className="w-8 h-8 bg-gradient-to-br from-brand-500 to-brand-600 rounded-lg flex items-center justify-center">
@@ -773,85 +888,175 @@
                         </div>
                     </div>
                     
-                    {/* Messages Area */}
-                    <div className="flex-1 overflow-y-auto px-6 py-6 custom-scrollbar">
-                        <div className="max-w-4xl mx-auto">
-                            {messages.length === 0 ? (
-                                <div className="text-center py-16">
-                                    <div className="w-16 h-16 bg-gradient-to-br from-brand-500 to-brand-600 rounded-2xl flex items-center justify-center mx-auto mb-4">
-                                        <span className="text-white text-2xl">🚀</span>
+                    <div className="flex flex-1 min-h-0">
+                        {/* Sidebar */}
+                        <div
+                            ref={sidebarRef}
+                            style={{ width: `${sidebarWidth}px`, flexShrink: 0 }}
+                            className={`${isDarkMode ? 'bg-gray-900 border-gray-700' : 'bg-white border-gray-100'} border-r flex flex-col`}
+                        > 
+                            <div className="flex items-center justify-between px-4 py-3 border-b border-transparent">
+                                <span className={`${isDarkMode ? 'text-white' : 'text-gray-800'} font-semibold`}>Sessions</span>
+                                <button onClick={createNewSession} className="text-sm px-2 py-1 rounded bg-brand-500 hover:bg-brand-600 text-white">+ New</button>
+                            </div>
+                            <div className="flex-1 overflow-y-auto custom-scrollbar">
+                                {sessions.map((s) => (
+                                    <div key={s.ID} className={`px-2 py-1 mx-2 my-1 rounded-md ${currentSessionId===s.ID ? (isDarkMode ? 'bg-gray-800' : 'bg-brand-100') : 'hover:bg-slate-200 dark:hover:bg-slate-800'}`}> 
+                                        <div className="flex items-center">
+                                            <button onClick={() => setCurrentSessionId(s.ID)} className="flex-1 text-left p-1">
+                                                <div className={`${isDarkMode ? 'text-gray-200' : 'text-gray-800'} truncate`}>{s.Name || ('session-'+s.ID.slice(0,8))}</div>
+                                                <div className="text-xs text-gray-500 truncate">{s.LastMessage || ''}</div>
+                                            </button>
+                                            <button onClick={() => renameSessionPrompt(s)} className="ml-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 p-1 rounded-md" title="Rename">
+                                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10" />
+                                                </svg>
+                                            </button>
+                                            <button onClick={() => shareSession(s)} className="ml-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 p-1 rounded-md" title="Share">
+                                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244" />
+                                                </svg>
+                                            </button>
+                                        </div>
                                     </div>
-                                    <h2 className={`text-2xl font-bold ${isDarkMode ? 'text-white' : 'text-gray-900'} mb-2`}>Welcome to kubectl-ai</h2>
-                                    <p className={`${isDarkMode ? 'text-gray-300' : 'text-gray-600'} mb-8 max-w-md mx-auto`}>
-                                        I'm your intelligent Kubernetes assistant. I can help you manage deployments, 
-                                        troubleshoot issues, and answer questions about your cluster.
-                                    </p>
-                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-2xl mx-auto">
-                                        <div className={`${isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} rounded-lg p-4 shadow-sm border`}>
-                                            <div className="text-2xl mb-2">⚙️</div>
-                                            <div className={`font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Manage Resources</div>
-                                            <div className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>Scale deployments, update configs</div>
-                                        </div>
-                                        <div className={`${isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} rounded-lg p-4 shadow-sm border`}>
-                                            <div className="text-2xl mb-2">🔍</div>
-                                            <div className={`font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Debug Issues</div>
-                                            <div className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>Find and fix problems quickly</div>
-                                        </div>
-                                        <div className={`${isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} rounded-lg p-4 shadow-sm border`}>
-                                            <div className="text-2xl mb-2">📊</div>
-                                            <div className={`font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Get Insights</div>
-                                            <div className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>Monitor and analyze your cluster</div>
-                                        </div>
-                                    </div>
-                                </div>
-                            ) : (
-                                <>
-                                    {messages.map((message, index) => renderMessage(message, index))}
-                                    {showTypingIndicator && <TypingIndicator />}
-                                </>
-                            )}
-                            <div ref={messagesEndRef} />
+                                ))}
+                            </div>
                         </div>
-                    </div>
-                    
-                    {/* Input Area */}
-                    <div className={`${isDarkMode ? 'bg-gray-800/80' : 'bg-white/80'} backdrop-blur-sm ${isDarkMode ? 'border-gray-700' : 'border-gray-200'} border-t p-6`}>
-                        <div className="max-w-4xl mx-auto">
-                            <form onSubmit={handleSubmit} className="flex space-x-3">
-                                <div className="flex-1 relative">
-                                    <input
-                                        ref={inputRef}
-                                        type="text"
-                                        value={input}
-                                        onChange={(e) => setInput(e.target.value)}
-                                        placeholder={getInputPlaceholder()}
-                                        disabled={!canSendMessage}
-                                        className={`w-full px-4 py-3 pr-12 border rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-colors ${
-                                            isDarkMode 
-                                                ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
-                                                : 'bg-white border-gray-300 text-gray-900 placeholder-gray-400'
-                                        } ${!canSendMessage ? (isDarkMode ? 'bg-gray-800 text-gray-500' : 'bg-gray-50 text-gray-500') : ''}`}
-                                    />
-                                    {agentState === 'running' && (
-                                        <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
-                                            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-brand-500"></div>
+
+                        {/* Resizer */}
+                        <div onMouseDown={startResizing} className="w-3 cursor-col-resize flex-shrink-0 bg-gray-100 dark:bg-gray-800 hover:bg-brand-100 dark:hover:bg-gray-700 transition-colors duration-200 group flex items-center justify-center">
+                            <div className="w-0.5 h-8 bg-gray-300 dark:bg-gray-600 rounded-full group-hover:bg-brand-500 transition-colors duration-200"></div>
+                        </div>
+
+                        {/* Main area */}
+                        <div className="flex flex-col flex-1 min-w-0">
+                            {/* Messages Area */}
+                            <div className="flex-1 overflow-y-auto px-6 py-6 pb-40 custom-scrollbar">
+                                <div className="max-w-4xl mx-auto">
+                                    {messages.length === 0 ? (
+                                        <div className="text-center py-16 animate-fade-in">
+                                            <div className="w-16 h-16 bg-gradient-to-br from-brand-500 to-brand-600 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                                                <span className="text-white text-2xl">🚀</span>
+                                            </div>
+                                            <h2 className={`text-2xl font-bold ${isDarkMode ? 'text-white' : 'text-gray-900'} mb-2`}>Welcome to kubectl-ai</h2>
+                                            <p className={`${isDarkMode ? 'text-gray-300' : 'text-gray-600'} mb-8 max-w-md mx-auto`}>
+                                                I'm your intelligent Kubernetes assistant. I can help you manage deployments, 
+                                                troubleshoot issues, and answer questions about your cluster.
+                                            </p>
+                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-2xl mx-auto">
+                                                <div className={`${isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-slate-200'} rounded-lg p-4 shadow-sm border`}>
+                                                    <div className="text-2xl mb-2">⚙️</div>
+                                                    <div className={`font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Manage Resources</div>
+                                                    <div className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>Scale deployments, update configs</div>
+                                                </div>
+                                                <div className={`${isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-slate-200'} rounded-lg p-4 shadow-sm border`}>
+                                                    <div className="text-2xl mb-2">🔍</div>
+                                                    <div className={`font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Debug Issues</div>
+                                                    <div className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>Find and fix problems quickly</div>
+                                                </div>
+                                                <div className={`${isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-slate-200'} rounded-lg p-4 shadow-sm border`}>
+                                                    <div className="text-2xl mb-2">📊</div>
+                                                    <div className={`font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Get Insights</div>
+                                                    <div className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>Monitor and analyze your cluster</div>
+                                                </div>
+                                            </div>
                                         </div>
+                                    ) : (
+                                        <>
+                                            {messages.map((message, index) => renderMessage(message, index))}
+                                            {showTypingIndicator && <TypingIndicator />}
+                                        </>
                                     )}
+                                    <div ref={messagesEndRef} />
                                 </div>
-                                <button
-                                    type="submit"
-                                    disabled={!canSendMessage || !input.trim()}
-                                    className="px-6 py-3 bg-gradient-to-r from-brand-500 to-brand-600 text-white rounded-xl hover:from-brand-600 hover:to-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 font-medium shadow-sm"
-                                >
-                                    Send
-                                </button>
-                            </form>
-                            <div className={`flex items-center justify-center mt-3 text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                                <span>💡 Try: "scale nginx to 3 replicas" or "show me pod status"</span>
+                            </div>
+                            
+                            {/* Input Area */}
+                            <div className={`${isDarkMode ? 'bg-slate-800/95 border-slate-700' : 'bg-white/80 backdrop-blur-sm border-slate-200'} border-t p-6`}>
+                                <div className="max-w-4xl mx-auto">
+                                    <form onSubmit={handleSubmit} className="flex space-x-3">
+                                        <div className="flex-1 relative">
+                                            <input
+                                                ref={inputRef}
+                                                type="text"
+                                                value={input}
+                                                onChange={(e) => setInput(e.target.value)}
+                                                placeholder={getInputPlaceholder()}
+                                                disabled={!canSendMessage}
+                                                className={`w-full px-4 py-3 pr-12 border rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-colors ${
+                                                    isDarkMode 
+                                                        ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
+                                                        : 'bg-white border-gray-300 text-gray-900 placeholder-gray-400'
+                                                } ${!canSendMessage ? (isDarkMode ? 'bg-gray-800 text-gray-500' : 'bg-gray-50 text-gray-500') : ''}`}
+                                            />
+                                            {agentState === 'running' && (
+                                                <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+                                                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-brand-500"></div>
+                                                </div>
+                                            )}
+                                        </div>
+                                        <button
+                                            type="submit"
+                                            disabled={!canSendMessage || !input.trim()}
+                                            className="flex items-center space-x-2 px-5 py-2.5 bg-brand-500 text-white rounded-lg hover:bg-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 font-medium shadow-sm"
+                                        >
+                                            <span>Send</span>
+                                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
+                                              <path d="M3.105 2.289a.75.75 0 0 0-.826.95l1.414 4.949a.75.75 0 0 0 .95.534l4.261-1.528a.75.75 0 0 1 .658.658l-1.528 4.261a.75.75 0 0 0 .534.95l4.95 1.414a.75.75 0 0 0 .95-.826l-2.093-7.324a.75.75 0 0 0-.546-.546L3.105 2.289Z" />
+                                            </svg>
+                                        </button>
+                                    </form>
+                                    <div className={`flex items-center justify-center mt-3 text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'} space-x-3`}>
+                                        <button onClick={toggleDrawer} className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-md border border-brand-500 text-brand-600 hover:bg-brand-50 dark:hover:bg-gray-700 transition-colors`} title="Prompt Library">
+                                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4">
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 15.75A3 3 0 0 1 12 12.75m0 0a3 3 0 0 1 2.25 3m-2.25-3a3 3 0 0 0-2.25 3m2.25-3a3 3 0 0 1 2.25 3m0 0A3 3 0 0 1 12 18.75m0 0a3 3 0 0 1-2.25-3m2.25 3a3 3 0 0 0 2.25-3m-2.25 3h.008v.008h-.008v-.008Zm-4.5-3.75h.008v.008h-.008v-.008Zm-1.5.008a.375.375 0 0 1 .375-.375h.008a.375.375 0 0 1 .375.375v.008a.375.375 0 0 1-.375.375h-.008a.375.375 0 0 1-.375-.375v-.008Zm-1.5.008a.375.375 0 0 1 .375-.375h.008a.375.375 0 0 1 .375.375v.008a.375.375 0 0 1-.375.375h-.008a.375.375 0 0 1-.375-.375v-.008Zm6.014-1.5a5.986 5.986 0 0 1 2.986 0m-2.986 0a5.986 5.986 0 0 0-2.986 0m2.986 0A5.986 5.986 0 0 1 12 9.75m0 0a5.986 5.986 0 0 0-2.986 2.986m2.986 0A5.986 5.986 0 0 1 12 15.75m0 0v2.25" />
+                                            </svg>
+                                            <span className="font-medium">Prompt Library</span>
+                                        </button>
+
+                                        <span className={isDarkMode ? 'text-gray-700' : 'text-gray-300'}>|</span>
+
+                                        <span className="font-medium">Try:</span>
+                                        <button onClick={() => setInput('scale nginx to 3 replicas')} className={`px-2 py-1 rounded-md transition-colors ${isDarkMode ? 'bg-gray-700 hover:bg-gray-600' : 'bg-gray-200 hover:bg-gray-300'}`}>"scale nginx to 3 replicas"</button>
+                                        <button onClick={() => setInput('show me pod status')} className={`px-2 py-1 rounded-md transition-colors ${isDarkMode ? 'bg-gray-700 hover:bg-gray-600' : 'bg-gray-200 hover:bg-gray-300'}`}>"show me pod status"</button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
                 </div>
+                {/* Prompt Drawer */}
+                {showDrawer && (
+                    <div 
+                        className="fixed inset-0 bg-black/40 z-40"
+                        onClick={toggleDrawer}
+                    ></div>
+                )}
+                <div className={`fixed bottom-0 left-0 w-full max-h-[45vh] bg-white dark:bg-gray-900 shadow-2xl rounded-t-2xl transform transition-transform duration-300 ease-in-out flex flex-col z-50 ${showDrawer ? 'translate-y-0 visible' : 'translate-y-full invisible'}`}>
+                    <div className="flex items-center justify-between px-4 py-3 border-b dark:border-gray-700 flex-shrink-0">
+                        <span className={`font-semibold ${isDarkMode? 'text-white':'text-gray-800'}`}>Prompt Library</span>
+                        <button onClick={toggleDrawer} className={`p-1 rounded-full ${isDarkMode? 'text-gray-400 hover:bg-gray-700':'text-gray-500 hover:bg-gray-200'}`}>
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6">
+                              <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
+                            </svg>
+                        </button>
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
+                        {(promptGroups || []).map(pg => (
+                            <details key={pg.group} className="mb-3" open>
+                                <summary className="cursor-pointer font-semibold mb-2 text-brand-600 dark:text-brand-400">{pg.group}</summary>
+                                <div className="mt-2 space-y-2">
+                                    {(pg.items || []).map((it, idx) => (
+                                        <button key={`${pg.group}-${idx}`} onClick={() => { setInput(it); setShowDrawer(false); inputRef.current.focus(); }} className="block w-full text-left px-3 py-2 bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
+                                            {it}
+                                        </button>
+                                    ))}
+                                </div>
+                            </details>
+                        ))}
+                    </div>
+                </div>
+                </>
             );
         }
 
