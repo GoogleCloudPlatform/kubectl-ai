@@ -913,8 +913,12 @@ func candidateToShimCandidate(iterator gollm.ChatResponseIterator) (gollm.ChatRe
 				if text, ok := part.AsText(); ok {
 					buffer += text
 					klog.Infof("text is %q", text)
-				} else {
-					yield(nil, fmt.Errorf("no text part found in candidate"))
+				} else if calls, ok := part.AsFunctionCalls(); ok && len(calls) > 0 {
+					// If we encounter function calls, we should not use the shim
+					// Instead, pass through the original response
+					klog.Infof("Warning: there are non-text parts FunctionCall in the response, returning concatenation of all text parts.")
+					// Return the original response without shim conversion
+					yield(response, nil)
 					return
 				}
 			}
