@@ -625,6 +625,9 @@ func (c *Agent) handleMetaQuery(ctx context.Context, query string) (answer strin
 		c.session.Messages = []*api.Message{}
 		c.sessionMu.Unlock()
 		return "Cleared the conversation.", true, nil
+	case "exit", "quit":
+		c.setAgentState(api.AgentStateExited)
+		return "It has been a pleasure assisting you. Have a great day!", true, nil
 	case "model":
 		return "Current model is `" + c.Model + "`", true, nil
 	case "models":
