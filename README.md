@@ -242,6 +242,7 @@ extraPromptPaths: []            # Additional prompt template paths
 
 # Debug and trace settings
 tracePath: "/tmp/kubectl-ai-trace.txt" # Path to trace file
+logFilePath: "/tmp/kubectl-ai.log"     # Path to log file (empty or '/dev/null' to disable)
 ```
 
 </details>
