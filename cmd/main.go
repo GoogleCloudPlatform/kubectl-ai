@@ -105,6 +105,7 @@ type Options struct {
 	PromptTemplateFilePath string   `json:"promptTemplateFilePath,omitempty"`
 	ExtraPromptPaths       []string `json:"extraPromptPaths,omitempty"`
 	TracePath              string   `json:"tracePath,omitempty"`
+	LogFilePath            string   `json:"logFilePath,omitempty"`
 	RemoveWorkDir          bool     `json:"removeWorkDir,omitempty"`
 	ToolConfigPaths        []string `json:"toolConfigPaths,omitempty"`
 
@@ -146,6 +147,7 @@ func (o *Options) InitDefaults() {
 	o.PromptTemplateFilePath = ""
 	o.ExtraPromptPaths = []string{}
 	o.TracePath = filepath.Join(os.TempDir(), "kubectl-ai-trace.txt")
+	o.LogFilePath = filepath.Join(os.TempDir(), "kubectl-ai.log")
 	o.RemoveWorkDir = false
 	o.ToolConfigPaths = defaultToolConfigPaths
 	// Default to terminal UI
@@ -235,25 +237,23 @@ func main() {
 }
 
 func run(ctx context.Context) error {
-	// klog setup must happen before Cobra parses any flags
+	var opt Options
+	opt.InitDefaults()
 
+	// load YAML config values early to get log configuration
+	if err := opt.LoadConfigurationFile(); err != nil {
+		return fmt.Errorf("failed to load config file: %w", err)
+	}
+
+	// klog setup must happen before Cobra parses any flags
 	// add commandline flags for logging
 	klogFlags := flag.NewFlagSet("klog", flag.ExitOnError)
 	klog.InitFlags(klogFlags)
 
-	klogFlags.Set("logtostderr", "false")
-	klogFlags.Set("log_file", filepath.Join(os.TempDir(), "kubectl-ai.log"))
+	// Configure logging based on LogFilePath setting
+	configureLogging(klogFlags, opt.LogFilePath)
 
 	defer klog.Flush()
-
-	var opt Options
-
-	opt.InitDefaults()
-
-	// load YAML config values
-	if err := opt.LoadConfigurationFile(); err != nil {
-		return fmt.Errorf("failed to load config file: %w", err)
-	}
 
 	rootCmd, err := BuildRootCommand(&opt)
 	if err != nil {
@@ -264,6 +264,14 @@ func run(ctx context.Context) error {
 	// We add just the klog flags we want, not all the klog flags (there are a lot, most of them are very niche)
 	rootCmd.PersistentFlags().AddGoFlag(klogFlags.Lookup("v"))
 	rootCmd.PersistentFlags().AddGoFlag(klogFlags.Lookup("alsologtostderr"))
+
+	// Parse flags first to get the final LogFilePath value
+	if err := rootCmd.ParseFlags(os.Args[1:]); err != nil {
+		return err
+	}
+
+	// Reconfigure logging with the final LogFilePath value (after CLI flags override config)
+	configureLogging(klogFlags, opt.LogFilePath)
 
 	// do this early, before the third-party code logs anything.
 	redirectStdLogToKlog()
@@ -281,6 +289,7 @@ func (opt *Options) bindCLIFlags(f *pflag.FlagSet) error {
 	f.StringVar(&opt.PromptTemplateFilePath, "prompt-template-file-path", opt.PromptTemplateFilePath, "path to custom prompt template file")
 	f.StringArrayVar(&opt.ExtraPromptPaths, "extra-prompt-paths", opt.ExtraPromptPaths, "extra prompt template paths")
 	f.StringVar(&opt.TracePath, "trace-path", opt.TracePath, "path to the trace file")
+	f.StringVar(&opt.LogFilePath, "log-file-path", opt.LogFilePath, "path to the log file (empty or '/dev/null' to disable logging)")
 	f.BoolVar(&opt.RemoveWorkDir, "remove-workdir", opt.RemoveWorkDir, "remove the temporary working directory after execution")
 
 	f.StringVar(&opt.ProviderID, "llm-provider", opt.ProviderID, "language model provider")
@@ -591,4 +600,15 @@ func startMCPServer(ctx context.Context, opt Options) error {
 		return fmt.Errorf("creating mcp server: %w", err)
 	}
 	return mcpServer.Serve(ctx)
+}
+
+func configureLogging(klogFlags *flag.FlagSet, logFilePath string) {
+	if logFilePath == "" || logFilePath == "/dev/null" {
+		// Disable file logging - only log to stderr if needed
+		klogFlags.Set("logtostderr", "true")
+		klogFlags.Set("stderrthreshold", "FATAL") // Only log fatal errors
+	} else {
+		klogFlags.Set("logtostderr", "false")
+		klogFlags.Set("log_file", logFilePath)
+	}
 }
