@@ -155,3 +155,4 @@ test-coverage: ## Run tests with coverage and generate HTML report
 	@echo "λ Generating coverage HTML report..."
 	go tool cover -html=coverage.out -o coverage.html
 	@echo "Coverage report generated: coverage.html"
+
