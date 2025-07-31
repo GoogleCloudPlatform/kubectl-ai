@@ -85,9 +85,12 @@ type TerminalUI struct {
 	// Spinner functionality
 	spinner          spinner.Model
 	spinning         bool
-	spinnerDone      chan struct{} // Channel to signal spinner goroutine to stop
-	spinnerStartTime time.Time     // Track when spinner started
-	spinnerMutex     sync.Mutex    // Protect spinner state
+	spinnerDone      chan struct{}  // Channel to signal spinner goroutine to stop
+	spinnerStartTime time.Time      // Track when spinner started
+	spinnerMutex     sync.Mutex     // Protect spinner state
+	spinnerClosed    bool           // Track if spinnerDone channel has been closed
+	spinnerWg        sync.WaitGroup // WaitGroup to ensure spinner goroutine has stopped
+	spinnerCloseOnce sync.Once      // Ensure spinnerDone channel is closed only once
 }
 
 var _ UI = &TerminalUI{}
@@ -150,6 +153,7 @@ func NewTerminalUI(agent *agent.Agent, useTTYForInput bool, journal journal.Reco
 		spinner:          s,
 		spinning:         false,
 		spinnerDone:      make(chan struct{}),
+		spinnerClosed:    false,
 	}
 
 	return u, nil
@@ -290,7 +294,7 @@ func (u *TerminalUI) handleMessage(msg *api.Message) {
 		// Stop spinner and show tool result
 		u.StopSpinner()
 		styleOptions = append(styleOptions, foreground(colorGreen))
-		text = fmt.Sprintf("✓ Completed\n")
+		text = "✓ Completed\n"
 	case api.MessageTypeUserInputRequest:
 		text = msg.Payload.(string)
 		klog.Infof("Received user input request with payload: %q", text)
@@ -465,15 +469,30 @@ func (u *TerminalUI) StartSpinner(message string) {
 	defer u.spinnerMutex.Unlock()
 
 	if u.spinning {
-		return // Already spinning
+		// Signal the current spinner goroutine to stop
+		u.spinnerCloseOnce.Do(func() {
+			close(u.spinnerDone)
+			u.spinnerClosed = true
+		})
+		u.spinning = false
+
+		// Wait for the previous spinner goroutine to finish
+		u.spinnerMutex.Unlock()
+		u.spinnerWg.Wait()
+		u.spinnerMutex.Lock()
 	}
 
 	u.spinning = true
 	u.spinnerStartTime = time.Now()
-	u.spinnerDone = make(chan struct{}) // Create new channel for this spinner session
+	u.spinnerDone = make(chan struct{})
+	u.spinnerClosed = false
+	u.spinnerCloseOnce = sync.Once{} // Reset for new spinner
 
 	// Start spinner in a goroutine
+	u.spinnerWg.Add(1)
 	go func() {
+		defer u.spinnerWg.Done()
+
 		ticker := time.NewTicker(100 * time.Millisecond)
 		defer ticker.Stop()
 
@@ -509,10 +528,13 @@ func (u *TerminalUI) StopSpinner() {
 	u.spinning = false
 
 	// Signal the spinner goroutine to stop
-	close(u.spinnerDone)
+	u.spinnerCloseOnce.Do(func() {
+		close(u.spinnerDone)
+		u.spinnerClosed = true
+	})
 
-	// Give the spinner goroutine a moment to stop
-	time.Sleep(50 * time.Millisecond)
+	// Wait for the spinner goroutine to stop
+	u.spinnerWg.Wait()
 
 	// Clear the spinner line more thoroughly
 	fmt.Print("\r\033[K") // Clear from cursor to end of line
