@@ -69,7 +69,7 @@ nix-shell -p kubectl-ai
 
 ### Usage
 
-`kubectl-ai` supports AI models from `gemini`, `vertexai`, `azopenai`, `openai`, `grok` and local LLM providers such as `ollama` and `llama.cpp`.
+`kubectl-ai` supports AI models from `gemini`, `vertexai`, `azopenai`, `openai`, `grok`, `bedrock` and local LLM providers such as `ollama` and `llama.cpp`.
 
 #### Using Gemini (Default)
 
@@ -120,6 +120,32 @@ You can use X.AI's Grok model by setting your X.AI API key:
 export GROK_API_KEY=your_xai_api_key_here
 kubectl-ai --llm-provider=grok --model=grok-3-beta
 ```
+
+#### Using AWS Bedrock
+
+You can use AWS Bedrock Claude models with your AWS credentials:
+
+```bash
+# Configure AWS credentials using AWS SSO
+aws sso login --profile your-profile-name
+# Or use other AWS credential methods (IAM roles, environment variables, etc.)
+
+# Use Claude 4 Sonnet (default)
+kubectl-ai --llm-provider=bedrock --model=us.anthropic.claude-sonnet-4-20250514-v1:0
+
+# Use Claude 3.7 Sonnet
+kubectl-ai --llm-provider=bedrock --model=us.anthropic.claude-3-7-sonnet-20250219-v1:0
+
+# Override model via environment variable
+export BEDROCK_MODEL=us.anthropic.claude-sonnet-4-20250514-v1:0
+kubectl-ai --llm-provider=bedrock
+```
+
+AWS Bedrock uses the standard AWS SDK credential chain, supporting:
+- AWS SSO profiles
+- IAM roles (for EC2/ECS/Lambda)
+- Environment variables (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY)
+- AWS CLI configuration files
 
 #### Using Azure OpenAI
 
@@ -433,7 +459,9 @@ kubectl-ai project includes [k8s-bench](./k8s-bench/README.md) - a benchmark to 
 | gemini-2.5-flash-preview-04-17 | 10 | 0 |
 | gemini-2.5-pro-preview-03-25 | 10 | 0 |
 | gemma-3-27b-it | 8 | 2 |
-| **Total** | 28 | 2 |
+| us.anthropic.claude-sonnet-4-20250514-v1:0 | 9 | 1 |
+| us.anthropic.claude-3-7-sonnet-20250219-v1:0 | 6 | 4 |
+| **Total** | 43 | 7 |
 
 See [full report](./k8s-bench.md) for more details.
 
