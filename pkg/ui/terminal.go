@@ -24,11 +24,15 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/agent"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/api"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/journal"
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/glamour"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/chzyer/readline"
 	"golang.org/x/term"
 	"k8s.io/klog/v2"
@@ -77,6 +81,13 @@ type TerminalUI struct {
 	useTTYForInput bool
 
 	agent *agent.Agent
+
+	// Spinner functionality
+	spinner          spinner.Model
+	spinning         bool
+	spinnerDone      chan struct{} // Channel to signal spinner goroutine to stop
+	spinnerStartTime time.Time     // Track when spinner started
+	spinnerMutex     sync.Mutex    // Protect spinner state
 }
 
 var _ UI = &TerminalUI{}
@@ -125,11 +136,20 @@ func NewTerminalUI(agent *agent.Agent, useTTYForInput bool, journal journal.Reco
 		return nil, fmt.Errorf("error initializing the markdown renderer: %w", err)
 	}
 
+	// Initialize spinner with explicit dot spinner
+	s := spinner.New(
+		spinner.WithSpinner(spinner.Dot),
+		spinner.WithStyle(lipgloss.NewStyle().Foreground(lipgloss.Color("205"))),
+	)
+
 	u := &TerminalUI{
 		markdownRenderer: mdRenderer,
 		journal:          journal,
 		useTTYForInput:   useTTYForInput, // Store this flag
 		agent:            agent,
+		spinner:          s,
+		spinning:         false,
+		spinnerDone:      make(chan struct{}),
 	}
 
 	return u, nil
@@ -213,6 +233,11 @@ func (u *TerminalUI) readlineInstance() (*readline.Instance, error) {
 func (u *TerminalUI) Close() error {
 	var errs []error
 
+	// Stop spinner if running
+	if u.spinning {
+		u.StopSpinner()
+	}
+
 	// Close the initialized input handler
 	if u.rlInstance != nil {
 		if err := u.rlInstance.Close(); err != nil {
@@ -248,11 +273,24 @@ func (u *TerminalUI) handleMessage(msg *api.Message) {
 		styleOptions = append(styleOptions, foreground(colorRed))
 		text = msg.Payload.(string)
 	case api.MessageTypeToolCallRequest:
-		styleOptions = append(styleOptions, foreground(colorGreen))
-		text = fmt.Sprintf("  Running: %s\n", msg.Payload.(string))
-	case api.MessageTypeToolCallResponse:
-		// TODO: we should print the tool call result here
+		// Start spinner for tool execution
+		toolName := msg.Payload.(string)
+		// Extract just the command name (e.g., "kubectl" from "kubectl get pods...")
+		shortName := "kubectl"
+		if strings.HasPrefix(toolName, "kubectl ") {
+			// Get the first part after kubectl (e.g., "get" from "kubectl get pods")
+			parts := strings.Fields(toolName)
+			if len(parts) >= 2 {
+				shortName = fmt.Sprintf("kubectl %s", parts[1])
+			}
+		}
+		u.StartSpinner(fmt.Sprintf("Running: %s", shortName))
 		return
+	case api.MessageTypeToolCallResponse:
+		// Stop spinner and show tool result
+		u.StopSpinner()
+		styleOptions = append(styleOptions, foreground(colorGreen))
+		text = fmt.Sprintf("✓ Completed\n")
 	case api.MessageTypeUserInputRequest:
 		text = msg.Payload.(string)
 		klog.Infof("Received user input request with payload: %q", text)
@@ -419,4 +457,63 @@ func (u *TerminalUI) handleMessage(msg *api.Message) {
 
 func (u *TerminalUI) ClearScreen() {
 	fmt.Print("\033[H\033[2J")
+}
+
+// StartSpinner starts the spinner with a given message
+func (u *TerminalUI) StartSpinner(message string) {
+	u.spinnerMutex.Lock()
+	defer u.spinnerMutex.Unlock()
+
+	if u.spinning {
+		return // Already spinning
+	}
+
+	u.spinning = true
+	u.spinnerStartTime = time.Now()
+	u.spinnerDone = make(chan struct{}) // Create new channel for this spinner session
+
+	// Start spinner in a goroutine
+	go func() {
+		ticker := time.NewTicker(100 * time.Millisecond)
+		defer ticker.Stop()
+
+		// Clear the line first to ensure clean display
+		fmt.Print("\r\033[K")
+
+		for {
+			select {
+			case <-ticker.C:
+				// Update the spinner model with a tick
+				u.spinnerMutex.Lock()
+				u.spinner, _ = u.spinner.Update(spinner.TickMsg{})
+				spinnerView := u.spinner.View()
+				u.spinnerMutex.Unlock()
+				// Clear the current line and print spinner
+				fmt.Printf("\r\033[K%s %s", spinnerView, message)
+			case <-u.spinnerDone:
+				return
+			}
+		}
+	}()
+}
+
+// StopSpinner stops the spinner and clears the line
+func (u *TerminalUI) StopSpinner() {
+	u.spinnerMutex.Lock()
+	defer u.spinnerMutex.Unlock()
+
+	if !u.spinning {
+		return
+	}
+
+	u.spinning = false
+
+	// Signal the spinner goroutine to stop
+	close(u.spinnerDone)
+
+	// Give the spinner goroutine a moment to stop
+	time.Sleep(50 * time.Millisecond)
+
+	// Clear the spinner line more thoroughly
+	fmt.Print("\r\033[K") // Clear from cursor to end of line
 }
