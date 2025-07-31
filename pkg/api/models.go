@@ -14,7 +14,9 @@
 
 package api
 
-import "time"
+import (
+	"time"
+)
 
 type Session struct {
 	ID           string
@@ -24,6 +26,8 @@ type Session struct {
 	LastModified time.Time
 	// MCP status information
 	MCPStatus *MCPStatus
+	// ChatMessageStore is an interface that allows the session to store and retrieve chat messages.
+	ChatMessageStore ChatMessageStore
 }
 
 type AgentState string
@@ -110,6 +114,14 @@ type MCPTool struct {
 	Server      string `json:"server,omitempty"`
 }
 
+// ChatMessageStore defines the interface for managing storage of chat messages of a session.
+type ChatMessageStore interface {
+	AddChatMessage(record *Message) error
+	SetChatMessages(newHistory []*Message) error
+	ChatMessages() []*Message
+	ClearChatMessages() error
+}
+
 func (s *Session) AllMessages() []*Message {
-	return s.Messages
+	return s.ChatMessageStore.ChatMessages()
 }

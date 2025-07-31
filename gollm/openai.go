@@ -25,6 +25,8 @@ import (
 	openai "github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
 	"k8s.io/klog/v2"
+
+	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/api"
 )
 
 // Package-level env var storage (OpenAI env)
@@ -419,6 +421,10 @@ func (cs *openAIChatSession) IsRetryableError(err error) bool {
 		return false
 	}
 	return DefaultIsRetryableError(err)
+}
+
+func (cs *openAIChatSession) Initialize(messages []*api.Message) error {
+	return fmt.Errorf("Initialize not yet implemented for openai")
 }
 
 // Helper structs for ChatResponse interface

@@ -28,6 +28,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/api"
+
 	"k8s.io/klog/v2"
 )
 
@@ -339,4 +341,8 @@ func (rc *retryChat[C]) SetFunctionDefinitions(functionDefinitions []*FunctionDe
 
 func (rc *retryChat[C]) IsRetryableError(err error) bool {
 	return rc.underlying.IsRetryableError(err)
+}
+
+func (rc *retryChat[C]) Initialize(messages []*api.Message) error {
+	return rc.underlying.Initialize(messages)
 }

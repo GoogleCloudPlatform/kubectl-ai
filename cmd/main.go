@@ -33,6 +33,7 @@ import (
 	"github.com/GoogleCloudPlatform/kubectl-ai/gollm"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/agent"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/journal"
+	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/sessions"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/tools"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/ui"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/ui/html"
@@ -115,6 +116,12 @@ type Options struct {
 
 	// SkipVerifySSL is a flag to skip verifying the SSL certificate of the LLM provider.
 	SkipVerifySSL bool `json:"skipVerifySSL,omitempty"`
+
+	// Session management options
+	SessionID     string `json:"sessionID,omitempty"`
+	NewSession    bool   `json:"newSession,omitempty"`
+	ListSessions  bool   `json:"listSessions,omitempty"`
+	DeleteSession string `json:"deleteSession,omitempty"`
 }
 
 var defaultToolConfigPaths = []string{
@@ -158,6 +165,12 @@ func (o *Options) InitDefaults() {
 	o.MCPServerMode = "stdio"
 	// Default port for SSE endpoint
 	o.SSEndpointPort = 9080
+
+	// Session management options
+	o.SessionID = ""
+	o.NewSession = false
+	o.ListSessions = false
+	o.DeleteSession = ""
 }
 
 func (o *Options) LoadConfiguration(b []byte) error {
@@ -299,6 +312,11 @@ func (opt *Options) bindCLIFlags(f *pflag.FlagSet) error {
 	f.StringVar(&opt.UIListenAddress, "ui-listen-address", opt.UIListenAddress, "address to listen for the HTML UI.")
 	f.BoolVar(&opt.SkipVerifySSL, "skip-verify-ssl", opt.SkipVerifySSL, "skip verifying the SSL certificate of the LLM provider")
 
+	f.StringVar(&opt.SessionID, "session", opt.SessionID, "session ID to use (use 'latest for the most recent session)")
+	f.BoolVar(&opt.NewSession, "new-session", opt.NewSession, "create a new session")
+	f.BoolVar(&opt.ListSessions, "list-sessions", opt.ListSessions, "list all available sessions")
+	f.StringVar(&opt.DeleteSession, "delete-session", opt.DeleteSession, "delete a session by ID")
+
 	return nil
 }
 
@@ -320,6 +338,14 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 			return fmt.Errorf("failed to start MCP server: %w", err)
 		}
 		return nil // MCP server mode blocks, so we return here
+	}
+
+	if opt.ListSessions {
+		return handleListSessions()
+	}
+
+	if opt.DeleteSession != "" {
+		return handleDeleteSession(opt.DeleteSession)
 	}
 
 	if err := handleCustomTools(opt.ToolConfigPaths); err != nil {
@@ -353,6 +379,64 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 	}
 	defer llmClient.Close()
 
+	// Initialize session management
+	var currentSession *sessions.Session
+	var sessionManager *sessions.SessionManager
+
+	sessionManager, err = sessions.NewSessionManager()
+	if err != nil {
+		return fmt.Errorf("failed to create session manager: %w", err)
+	}
+
+	// Handle session creation or loading
+	if opt.NewSession {
+		// Create a new session
+		meta := sessions.Metadata{
+			ProviderID: opt.ProviderID,
+			ModelID:    opt.ModelID,
+		}
+		currentSession, err = sessionManager.NewSession(meta)
+		if err != nil {
+			return fmt.Errorf("failed to create a new session: %w", err)
+		}
+		klog.Infof("Created new session: %s\n", currentSession.ID)
+	} else {
+		// Load existing session
+		var sessionID string
+		if opt.SessionID == "" || opt.SessionID == "latest" {
+			// Get the latest session
+			currentSession, err = sessionManager.GetLatestSession()
+			if err != nil {
+				return fmt.Errorf("failed to get latest session: %w", err)
+			}
+			if currentSession == nil {
+				// No sessions exist, create a new one
+				meta := sessions.Metadata{
+					ProviderID: opt.ProviderID,
+					ModelID:    opt.ModelID,
+				}
+				currentSession, err = sessionManager.NewSession(meta)
+				if err != nil {
+					return fmt.Errorf("failed to create new session: %w", err)
+				}
+				klog.Infof("Created new session: %s\n", currentSession.ID)
+			}
+		} else {
+			sessionID = opt.SessionID
+			currentSession, err = sessionManager.FindSessionByID(sessionID)
+			if err != nil {
+				return fmt.Errorf("session %s not found: %w", sessionID, err)
+			}
+		}
+
+		if currentSession != nil {
+			// Update last accessed time
+			if err := currentSession.UpdateLastAccessed(); err != nil {
+				klog.Warningf("Failed to update session last accessed time: %v", err)
+			}
+		}
+	}
+
 	var recorder journal.Recorder
 	if opt.TracePath != "" {
 		var fileRecorder journal.Recorder
@@ -383,6 +467,7 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 		MCPClientEnabled:   opt.MCPClient,
 		RunOnce:            opt.Quiet,
 		InitialQuery:       queryFromCmd,
+		ChatMessageStore:   currentSession,
 	}
 
 	err = k8sAgent.Init(ctx)
@@ -591,4 +676,84 @@ func startMCPServer(ctx context.Context, opt Options) error {
 		return fmt.Errorf("creating mcp server: %w", err)
 	}
 	return mcpServer.Serve(ctx)
+}
+
+// handleListSessions lists all available sessions with their metadata.
+func handleListSessions() error {
+	manager, err := sessions.NewSessionManager()
+	if err != nil {
+		return fmt.Errorf("failed to create session manager: %w", err)
+	}
+
+	sessionList, err := manager.ListSessions()
+	if err != nil {
+		return fmt.Errorf("failed to list sessions: %w", err)
+	}
+
+	if len(sessionList) == 0 {
+		fmt.Println("No sessions found.")
+		return nil
+	}
+
+	fmt.Println("Available sessions:")
+	fmt.Println("ID\t\tCreated\t\t\tLast Accessed\t\tModel\t\tProvider")
+	fmt.Println("--\t\t-------\t\t\t-------------\t\t-----\t\t--------")
+
+	for _, session := range sessionList {
+		metadata, err := session.LoadMetadata()
+		if err != nil {
+			fmt.Printf("%s\t\t<error loading metadata>\n", session.ID)
+			continue
+		}
+
+		fmt.Printf("%s\t%s\t%s\t%s\t%s\n",
+			session.ID,
+			metadata.CreatedAt.Format("2006-01-02 15:04:05"),
+			metadata.LastAccessed.Format("2006-01-02 15:04:05"),
+			metadata.ModelID,
+			metadata.ProviderID)
+	}
+
+	return nil
+}
+
+// handleDeleteSession deletes a session by ID.
+func handleDeleteSession(sessionID string) error {
+	manager, err := sessions.NewSessionManager()
+	if err != nil {
+		return fmt.Errorf("failed to create session manager: %w", err)
+	}
+
+	// Check if session exists
+	session, err := manager.FindSessionByID(sessionID)
+	if err != nil {
+		return fmt.Errorf("session %s not found: %w", sessionID, err)
+	}
+
+	// Load metadata for confirmation
+	metadata, err := session.LoadMetadata()
+	if err != nil {
+		return fmt.Errorf("failed to load session metadata: %w", err)
+	}
+
+	fmt.Printf("Deleting session %s:\n", sessionID)
+	fmt.Printf("  Model: %s\n", metadata.ModelID)
+	fmt.Printf("  Provider: %s\n", metadata.ProviderID)
+	fmt.Printf("  Created: %s\n", metadata.CreatedAt.Format("2006-01-02 15:04:05"))
+
+	fmt.Print("Are you sure you want to delete this session? (y/N): ")
+	var response string
+	fmt.Scanln(&response)
+
+	if response != "y" && response != "Y" {
+		fmt.Println("Deletion cancelled.")
+		return nil
+	}
+
+	if err := manager.DeleteSession(sessionID); err != nil {
+		return fmt.Errorf("failed to delete session: %w", err)
+	}
+
+	fmt.Printf("Session %s deleted successfully.\n", sessionID)
+	return nil
 }

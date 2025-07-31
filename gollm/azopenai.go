@@ -30,6 +30,8 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/cognitiveservices/armcognitiveservices"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/subscription/armsubscription"
+
+	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/api"
 )
 
 func init() {
@@ -266,6 +268,10 @@ func (c *AzureOpenAIChat) Send(ctx context.Context, contents ...any) (ChatRespon
 func (c *AzureOpenAIChat) IsRetryableError(err error) bool {
 	// TODO: Implement this
 	return false
+}
+
+func (c *AzureOpenAIChat) Initialize(messages []*api.Message) error {
+	return fmt.Errorf("Initialize not yet implemented for azopenai")
 }
 
 func (c *AzureOpenAIChat) SendStreaming(ctx context.Context, contents ...any) (ChatResponseIterator, error) {

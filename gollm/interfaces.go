@@ -20,6 +20,8 @@ import (
 	"fmt"
 	"io"
 	"iter"
+
+	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/api"
 )
 
 // Client is a client for a language model.
@@ -57,6 +59,9 @@ type Chat interface {
 
 	// IsRetryableError returns true if the error is retryable.
 	IsRetryableError(error) bool
+
+	// Initialize initializes the chat with a previous conversation history.
+	Initialize(messages []*api.Message) error
 }
 
 // CompletionRequest is a request to generate a completion for a given prompt.

@@ -24,6 +24,8 @@ import (
 	openai "github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
 	"k8s.io/klog/v2"
+
+	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/api"
 )
 
 // Register the Grok provider factory on package initialization.
@@ -376,6 +378,10 @@ func (cs *grokChatSession) IsRetryableError(err error) bool {
 		return false
 	}
 	return DefaultIsRetryableError(err)
+}
+
+func (cs *grokChatSession) Initialize(history []*api.Message) error {
+	return fmt.Errorf("LoadHistory not yet implemented for grok")
 }
 
 // --- Helper structs for ChatResponse interface ---

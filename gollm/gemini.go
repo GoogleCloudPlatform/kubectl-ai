@@ -29,6 +29,8 @@ import (
 
 	"google.golang.org/genai"
 
+	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/api"
+
 	"k8s.io/klog/v2"
 )
 
@@ -472,6 +474,40 @@ func (c *GeminiChat) SendStreaming(ctx context.Context, contents ...any) (ChatRe
 			}
 		}
 	}, nil
+}
+
+func (c *GeminiChat) Initialize(messages []*api.Message) error {
+	klog.Info("Initializing gemini chat")
+	c.history = make([]*genai.Content, 0, len(messages))
+	for _, msg := range messages {
+		content, err := c.messageToContent(msg)
+		if err != nil {
+			continue
+		}
+		c.history = append(c.history, content)
+	}
+	return nil
+}
+
+func (c *GeminiChat) messageToContent(msg *api.Message) (*genai.Content, error) {
+	var role string
+	switch msg.Source {
+	case api.MessageSourceUser:
+		role = "user"
+	case api.MessageSourceModel:
+		role = "model"
+	case api.MessageSourceAgent:
+		role = "user" // Treat agent messages as user messages for Gemini history
+	default:
+		return nil, fmt.Errorf("unknown message source: %s", msg.Source)
+	}
+
+	parts, err := c.partsToGemini(msg.Payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert message payload to parts: %w", err)
+	}
+
+	return &genai.Content{Role: role, Parts: parts}, nil
 }
 
 // GeminiChatResponse is a response from the Gemini API.
