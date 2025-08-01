@@ -17,6 +17,7 @@ package ui
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -251,8 +252,12 @@ func (u *TerminalUI) handleMessage(msg *api.Message) {
 		styleOptions = append(styleOptions, foreground(colorGreen))
 		text = fmt.Sprintf("  Running: %s\n", msg.Payload.(string))
 	case api.MessageTypeToolCallResponse:
-		// TODO: we should print the tool call result here
-		return
+		styleOptions = append(styleOptions, foreground(colorGreen))
+		output := formatToolCallResponse(msg.Payload)
+		if output == "" {
+			return
+		}
+		text = fmt.Sprintf("%s\n", output)
 	case api.MessageTypeUserInputRequest:
 		text = msg.Payload.(string)
 		klog.Infof("Received user input request with payload: %q", text)
@@ -419,4 +424,45 @@ func (u *TerminalUI) handleMessage(msg *api.Message) {
 
 func (u *TerminalUI) ClearScreen() {
 	fmt.Print("\033[H\033[2J")
+}
+
+func formatToolCallResponse(payload any) string {
+	if payload == nil {
+		return ""
+	}
+
+	// If payload is a JSON string try to unmarshal first
+	if s, ok := payload.(string); ok {
+		var m map[string]any
+		if err := json.Unmarshal([]byte(s), &m); err == nil {
+			return formatToolCallResponse(m)
+		}
+		return truncateString(s, 1000)
+	}
+
+	if m, ok := payload.(map[string]any); ok {
+		if stdout, ok := m["stdout"]; ok {
+			if outStr, ok := stdout.(string); ok {
+				return truncateString(outStr, 1000)
+			}
+		}
+		b, err := json.MarshalIndent(m, "", "  ")
+		if err == nil {
+			return truncateString(string(b), 1000)
+		}
+		return fmt.Sprint(m)
+	}
+
+	b, err := json.MarshalIndent(payload, "", "  ")
+	if err == nil {
+		return truncateString(string(b), 1000)
+	}
+	return fmt.Sprint(payload)
+}
+
+func truncateString(s string, limit int) string {
+	if len(s) <= limit {
+		return s
+	}
+	return s[:limit] + "..."
 }
