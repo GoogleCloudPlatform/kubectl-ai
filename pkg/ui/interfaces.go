@@ -27,6 +27,9 @@ type UI interface {
 
 	// Run starts the UI and blocks until the context is done.
 	Run(ctx context.Context) error
+
+	// Close cleans up any resources used by the UI.
+	Close() error
 }
 
 // Type is the type of user interface.
