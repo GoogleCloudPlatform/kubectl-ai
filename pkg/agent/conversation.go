@@ -219,6 +219,18 @@ func (s *Agent) Init(ctx context.Context) error {
 		},
 	)
 
+	if s.MCPClientEnabled {
+		if err := s.InitializeMCPClient(ctx); err != nil {
+			klog.Errorf("Failed to initialize MCP client: %v", err)
+			return fmt.Errorf("failed to initialize MCP client: %w", err)
+		}
+
+		// Update MCP status in session
+		if err := s.UpdateMCPStatus(ctx, s.MCPClientEnabled); err != nil {
+			klog.Warningf("Failed to update MCP status: %v", err)
+		}
+	}
+
 	if !s.EnableToolUseShim {
 		var functionDefinitions []*gollm.FunctionDefinition
 		for _, tool := range s.Tools.AllTools() {
@@ -233,19 +245,6 @@ func (s *Agent) Init(ctx context.Context) error {
 		}
 	}
 	s.workDir = workDir
-
-	// Initialize MCP client if enabled
-	if s.MCPClientEnabled {
-		if err := s.InitializeMCPClient(ctx); err != nil {
-			klog.Errorf("Failed to initialize MCP client: %v", err)
-			return fmt.Errorf("failed to initialize MCP client: %w", err)
-		}
-
-		// Update MCP status in session
-		if err := s.UpdateMCPStatus(ctx, s.MCPClientEnabled); err != nil {
-			klog.Warningf("Failed to update MCP status: %v", err)
-		}
-	}
 
 	return nil
 }
@@ -378,6 +377,7 @@ func (c *Agent) Run(ctx context.Context, initialQuery string) error {
 							c.setAgentState(api.AgentStateDone)
 							c.pendingFunctionCalls = []ToolCallAnalysis{}
 							c.session.LastModified = time.Now()
+							c.addMessage(api.MessageSourceAgent, api.MessageTypeError, "Error: "+err.Error())
 							// In RunOnce mode, exit on tool execution error
 							if c.RunOnce {
 								c.setAgentState(api.AgentStateExited)
@@ -625,6 +625,9 @@ func (c *Agent) handleMetaQuery(ctx context.Context, query string) (answer strin
 		c.session.Messages = []*api.Message{}
 		c.sessionMu.Unlock()
 		return "Cleared the conversation.", true, nil
+	case "exit", "quit":
+		c.setAgentState(api.AgentStateExited)
+		return "It has been a pleasure assisting you. Have a great day!", true, nil
 	case "model":
 		return "Current model is `" + c.Model + "`", true, nil
 	case "models":
@@ -664,8 +667,10 @@ func (c *Agent) DispatchToolCalls(ctx context.Context) error {
 			Kubeconfig: c.Kubeconfig,
 			WorkDir:    c.workDir,
 		})
+
 		if err != nil {
 			log.Error(err, "error executing action", "output", output)
+			c.addMessage(api.MessageSourceAgent, api.MessageTypeToolCallResponse, err.Error())
 			return err
 		}
 
