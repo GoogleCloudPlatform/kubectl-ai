@@ -111,6 +111,9 @@ type Agent struct {
 
 	// mcpManager manages MCP client connections
 	mcpManager *mcp.Manager
+
+	// mcpResourceContext holds external context from MCP resources
+	mcpResourceContext string
 }
 
 func (s *Agent) Session() *api.Session {
@@ -199,9 +202,22 @@ func (s *Agent) Init(ctx context.Context) error {
 
 	log.Info("Created temporary working directory", "workDir", workDir)
 
+	if s.MCPClientEnabled {
+		if err := s.InitializeMCPClient(ctx); err != nil {
+			klog.Errorf("Failed to initialize MCP client: %v", err)
+			return fmt.Errorf("failed to initialize MCP client: %w", err)
+		}
+
+		// Update MCP status in session
+		if err := s.UpdateMCPStatus(ctx, s.MCPClientEnabled); err != nil {
+			klog.Warningf("Failed to update MCP status: %v", err)
+		}
+	}
+
 	systemPrompt, err := s.generatePrompt(ctx, defaultSystemPromptTemplate, PromptData{
 		Tools:             s.Tools,
 		EnableToolUseShim: s.EnableToolUseShim,
+		MCPResourceText:   s.mcpResourceContext,
 	})
 	if err != nil {
 		return fmt.Errorf("generating system prompt: %w", err)
@@ -218,18 +234,6 @@ func (s *Agent) Init(ctx context.Context) error {
 			Jitter:         true,
 		},
 	)
-
-	if s.MCPClientEnabled {
-		if err := s.InitializeMCPClient(ctx); err != nil {
-			klog.Errorf("Failed to initialize MCP client: %v", err)
-			return fmt.Errorf("failed to initialize MCP client: %w", err)
-		}
-
-		// Update MCP status in session
-		if err := s.UpdateMCPStatus(ctx, s.MCPClientEnabled); err != nil {
-			klog.Warningf("Failed to update MCP status: %v", err)
-		}
-	}
 
 	if !s.EnableToolUseShim {
 		var functionDefinitions []*gollm.FunctionDefinition
@@ -819,6 +823,8 @@ type PromptData struct {
 	Tools tools.Tools
 
 	EnableToolUseShim bool
+
+	MCPResourceText string
 }
 
 func (a *PromptData) ToolsAsJSON() string {
