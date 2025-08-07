@@ -268,6 +268,8 @@ extraPromptPaths: []            # Additional prompt template paths
 
 # Debug and trace settings
 tracePath: "/tmp/kubectl-ai-trace.txt" # Path to trace file
+logFilePath: "/tmp/kubectl-ai.log"     # Path to log file (empty or '/dev/null' to disable)
+stderrThreshold: "ERROR"               # Minimum log level to output to stderr (INFO, WARNING, ERROR, FATAL)
 ```
 
 </details>
@@ -321,14 +323,15 @@ A custom tool definition for `helm` could look like the following example:
     Use `helm --help` or `helm <subcommand> --help` to see full syntax, available flags, and examples for each command.
 ```
 
-## Docker Quick Start 
+## Docker Quick Start
+
 This project provides a Docker image that gives you a standalone environment for running kubectl-ai, including against a GKE cluster.
 
 ### Running the container against GKE
 
 #### Step 1: Build the Image
 
-Clone the repository and build the image with the following command 
+Clone the repository and build the image with the following command
 
 ```bash
 git clone https://github.com/GoogleCloudPlatform/kubectl-ai.git
@@ -337,15 +340,18 @@ docker build -t kubectl-ai:latest -f images/kubectl-ai/Dockerfile .
 ```
 
 #### Step 2: Connect to Your GKE Cluster
+
 Set up application default credentials and connect to your GKE cluster.
+
 ```bash
 gcloud auth application-default login # If in a gcloud shell this is not necessary
 gcloud container clusters get-credentials <cluster-name> --zone <zone>
 ```
 
 #### Step 3: Run the kubectl-ai container
-Below is a sample command that can be used to launch the container with a locally hosted web-ui. Be sure to replace the placeholder values with your specific Google Cloud project ID and location. Note you 
-do not need to mount the gcloud config directory if you're on a cloudshell machine. 
+
+Below is a sample command that can be used to launch the container with a locally hosted web-ui. Be sure to replace the placeholder values with your specific Google Cloud project ID and location. Note you
+do not need to mount the gcloud config directory if you're on a cloudshell machine.
 
 ```bash
 docker run --rm -it -p 8080:8080 -v ~/.kube:/root/.kube -v ~/.config/gcloud:/root/.config/gcloud -e GOOGLE_CLOUD_LOCATION=us-central1 -e GOOGLE_CLOUD_PROJECT=my-gcp-project kubectl-ai:latest --llm-provider vertexai --ui-listen-address 0.0.0.0:8080 --ui-type web

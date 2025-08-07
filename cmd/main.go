@@ -50,12 +50,17 @@ var (
 	date    = "unknown"
 )
 
-func BuildRootCommand(opt *Options) (*cobra.Command, error) {
+func BuildRootCommand(opt *Options, klogFlags *flag.FlagSet) (*cobra.Command, error) {
 	rootCmd := &cobra.Command{
 		Use:   "kubectl-ai",
 		Short: "A CLI tool to interact with Kubernetes using natural language",
 		Long:  "kubectl-ai is a command-line tool that allows you to interact with your Kubernetes cluster using natural language queries. It leverages large language models to understand your intent and translate it into kubectl",
 		Args:  cobra.MaximumNArgs(1), // Only one positional arg is allowed.
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			// Configure logging after flags are parsed
+			configureLogging(klogFlags, opt.LogFilePath, opt.StderrThreshold)
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return RunRootCommand(cmd.Context(), *opt, args)
 		},
@@ -105,6 +110,8 @@ type Options struct {
 	PromptTemplateFilePath string   `json:"promptTemplateFilePath,omitempty"`
 	ExtraPromptPaths       []string `json:"extraPromptPaths,omitempty"`
 	TracePath              string   `json:"tracePath,omitempty"`
+	LogFilePath            string   `json:"logFilePath,omitempty"`
+	StderrThreshold        string   `json:"stderrThreshold,omitempty"`
 	RemoveWorkDir          bool     `json:"removeWorkDir,omitempty"`
 	ToolConfigPaths        []string `json:"toolConfigPaths,omitempty"`
 
@@ -146,6 +153,8 @@ func (o *Options) InitDefaults() {
 	o.PromptTemplateFilePath = ""
 	o.ExtraPromptPaths = []string{}
 	o.TracePath = filepath.Join(os.TempDir(), "kubectl-ai-trace.txt")
+	o.LogFilePath = filepath.Join(os.TempDir(), "kubectl-ai.log")
+	o.StderrThreshold = "ERROR"
 	o.RemoveWorkDir = false
 	o.ToolConfigPaths = defaultToolConfigPaths
 	// Default to terminal UI
@@ -235,27 +244,22 @@ func main() {
 }
 
 func run(ctx context.Context) error {
-	// klog setup must happen before Cobra parses any flags
-
-	// add commandline flags for logging
-	klogFlags := flag.NewFlagSet("klog", flag.ExitOnError)
-	klog.InitFlags(klogFlags)
-
-	klogFlags.Set("logtostderr", "false")
-	klogFlags.Set("log_file", filepath.Join(os.TempDir(), "kubectl-ai.log"))
-
-	defer klog.Flush()
-
 	var opt Options
-
 	opt.InitDefaults()
 
-	// load YAML config values
+	// load YAML config values early to get log configuration
 	if err := opt.LoadConfigurationFile(); err != nil {
 		return fmt.Errorf("failed to load config file: %w", err)
 	}
 
-	rootCmd, err := BuildRootCommand(&opt)
+	// klog setup must happen before Cobra parses any flags
+	// add commandline flags for logging
+	klogFlags := flag.NewFlagSet("klog", flag.ExitOnError)
+	klog.InitFlags(klogFlags)
+
+	defer klog.Flush()
+
+	rootCmd, err := BuildRootCommand(&opt, klogFlags)
 	if err != nil {
 		return err
 	}
@@ -281,6 +285,8 @@ func (opt *Options) bindCLIFlags(f *pflag.FlagSet) error {
 	f.StringVar(&opt.PromptTemplateFilePath, "prompt-template-file-path", opt.PromptTemplateFilePath, "path to custom prompt template file")
 	f.StringArrayVar(&opt.ExtraPromptPaths, "extra-prompt-paths", opt.ExtraPromptPaths, "extra prompt template paths")
 	f.StringVar(&opt.TracePath, "trace-path", opt.TracePath, "path to the trace file")
+	f.StringVar(&opt.LogFilePath, "log-file-path", opt.LogFilePath, "path to the log file (empty or '/dev/null' to disable logging)")
+	f.StringVar(&opt.StderrThreshold, "stderr-threshold", opt.StderrThreshold, "minimum log level to output to stderr (INFO, WARNING, ERROR, FATAL)")
 	f.BoolVar(&opt.RemoveWorkDir, "remove-workdir", opt.RemoveWorkDir, "remove the temporary working directory after execution")
 
 	f.StringVar(&opt.ProviderID, "llm-provider", opt.ProviderID, "language model provider")
@@ -591,4 +597,18 @@ func startMCPServer(ctx context.Context, opt Options) error {
 		return fmt.Errorf("creating mcp server: %w", err)
 	}
 	return mcpServer.Serve(ctx)
+}
+
+func configureLogging(klogFlags *flag.FlagSet, logFilePath string, stderrThreshold string) {
+	if logFilePath == "" || logFilePath == "/dev/null" {
+		// Disable file logging - only log to stderr if needed
+		klogFlags.Set("logtostderr", "true")
+		klogFlags.Set("stderrthreshold", "FATAL") // Only log fatal errors
+	} else {
+		klogFlags.Set("logtostderr", "false")
+		klogFlags.Set("log_file", logFilePath)
+		if stderrThreshold != "" {
+			klogFlags.Set("stderrthreshold", stderrThreshold)
+		}
+	}
 }
