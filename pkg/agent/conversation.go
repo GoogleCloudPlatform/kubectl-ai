@@ -305,6 +305,12 @@ func (c *Agent) Run(ctx context.Context, initialQuery string) error {
 				c.pendingFunctionCalls = []ToolCallAnalysis{}
 				c.addMessage(api.MessageSourceAgent, api.MessageTypeError, "Error: "+err.Error())
 			} else if handled {
+				// initialQuery is the 'exit' or 'quit' metaquery
+				if c.AgentState() == api.AgentStateExited {
+					c.addMessage(api.MessageSourceAgent, api.MessageTypeText, answer)
+					c.Output <- ctx.Done()
+					return
+				}
 				// we handled the meta query, so we don't need to run the agentic loop
 				c.setAgentState(api.AgentStateDone)
 				c.pendingFunctionCalls = []ToolCallAnalysis{}
@@ -368,6 +374,12 @@ func (c *Agent) Run(ctx context.Context, initialQuery string) error {
 						continue
 					}
 					if handled {
+						// metaquery set the state to 'Exited', so we should exit
+						if c.AgentState() == api.AgentStateExited {
+							c.addMessage(api.MessageSourceAgent, api.MessageTypeText, answer)
+							c.Output <- ctx.Done()
+							return
+						}
 						// we handled the meta query, so we don't need to run the agentic loop
 						c.setAgentState(api.AgentStateDone)
 						c.pendingFunctionCalls = []ToolCallAnalysis{}
