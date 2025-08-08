@@ -18,10 +18,10 @@ Custom tools can be added by following these two steps:
 # Describing the Tool in YAML file
 
 A custom tool can be described by providing the following four pieces of information:
-- name: name of the tool
-- description: "A clear description that helps the LLM understand when to use this tool."
-- command : "your_command" # For example: 'gcloud' or 'gcloud container clusters'
-- command_desc: "Detailed information for the LLM, including command syntax and usage examples."
+- **name**: name of the tool
+- **description**: "A clear description that helps the LLM understand when to use this tool."
+- **command** : "your_command" # For example: 'gcloud' or 'gcloud container clusters'
+- **command_desc**: "Detailed information for the LLM, including command syntax and usage examples."
 
 Samples are provided in the `pkg/tools/samples` directory. Below is a sample for the `kustomize` tool:
 
@@ -50,7 +50,7 @@ In case, you don't want to use a tool (that is provided in samples), just move t
 When running the `kubectl-ai` binary directly, provide the path to your local tools directory.
 
 ```sh
-./kubectl-ai --custom-tools-config=/path/to/kubectl-ai/pkg/tools/samples
+./kubectl-ai **--custom-tools-config=<path-to-tools-directory>** "your prompt here"
 ```
 
 ### Running with Docker Image
@@ -80,13 +80,13 @@ docker run --rm -it \
 ```
 
 
-## Available Tools
+## Sample Custom Tools
 
-The following custom tools are configured by default.
+The following sample custom tools are configured by default.
 
-| Tool                                                       | Description                                                     | Files                                           |
+| Tool                                                       | Description                                                     | YAML File                                           |
 | :--------------------------------------------------------- | :-------------------------------------------------------------- | :------------------------------------------------------ |
 | Argo CD (`argocd`)      | A declarative, GitOps continuous delivery tool for Kubernetes.  | [argocd.yaml](../pkg/tools/samples/argocd.yaml)         |
-| GitHub CLI (`gh`)               | The official command-line tool to interact with GitHub.         | `gh.yaml`                 |
-| Google Cloud CLI (`gcloud`) | The primary CLI for managing Google Cloud resources.            | `gcloud.yaml`         |
-| Kustomize (`kustomize`)           | A tool to customize Kubernetes resource configurations.         | `kustomize.yaml`   |
+| GitHub CLI (`gh`)               | The official command-line tool to interact with GitHub.         | [gh.yaml](../pkg/tools/samples/gh.yaml)                 |
+| Google Cloud CLI (`gcloud`) | The primary CLI for managing Google Cloud resources.            | [gcloud.yaml](../pkg/tools/samples/gcloud.yaml)               |
+| Kustomize (`kustomize`)           | A tool to customize Kubernetes resource configurations.         | [kustomize.yaml](../pkg/tools/samples/kustomize.yaml)   |
