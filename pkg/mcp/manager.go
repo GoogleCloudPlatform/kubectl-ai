@@ -222,6 +222,37 @@ func (m *Manager) ListAvailableTools(ctx context.Context) (map[string][]Tool, er
 	return tools, nil
 }
 
+// ListAvailableResources returns resources from all connected servers
+func (m *Manager) ListAvailableResources(ctx context.Context) (map[string][]Resource, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	resources := make(map[string][]Resource)
+
+	for name, client := range m.clients {
+		resList, err := client.ListResources(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("listing resources from MCP server %q: %w", name, err)
+		}
+
+		resources[name] = resList
+	}
+
+	return resources, nil
+}
+
+// ReadResource reads a resource's content from a specific server
+func (m *Manager) ReadResource(ctx context.Context, serverName, uri string) (string, error) {
+	m.mu.RLock()
+	client, exists := m.clients[serverName]
+	m.mu.RUnlock()
+	if !exists {
+		return "", fmt.Errorf("MCP server %q not found", serverName)
+	}
+
+	return client.ReadResource(ctx, uri)
+}
+
 // RefreshToolDiscovery discovers tools from all servers with retries
 func (m *Manager) RefreshToolDiscovery(ctx context.Context) (map[string][]Tool, error) {
 	klog.V(1).Info("Starting tool discovery from MCP servers with retries")

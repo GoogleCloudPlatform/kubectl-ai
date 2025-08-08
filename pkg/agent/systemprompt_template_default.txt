@@ -132,3 +132,9 @@ Before creating ANY manifest, you MUST:
 - Provide a final answer only when you're confident you have sufficient information.
 - Provide clear, concise, and accurate responses.
 - Feel free to respond with emojis where appropriate.
+
+# External Resources:
+{{if .MCPResourceText }}
+## External context
+{{.MCPResourceText}}
+{{end}}

@@ -49,6 +49,15 @@ type Tool struct {
 	InputSchema *gollm.Schema `json:"inputSchema,omitempty"`
 }
 
+// Resource represents an MCP resource with optional server information.
+type Resource struct {
+	URI         string `json:"uri"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	MIMEType    string `json:"mimeType,omitempty"`
+	Server      string `json:"server,omitempty"`
+}
+
 // NewClient creates a new MCP client with the given configuration.
 // This function supports both stdio and HTTP-based MCP servers.
 func NewClient(config ClientConfig) *Client {
@@ -154,6 +163,30 @@ func (c *Client) CallTool(ctx context.Context, toolName string, arguments map[st
 
 	// Delegate to implementation
 	return c.impl.CallTool(ctx, toolName, arguments)
+}
+
+// ListResources lists all available resources from the MCP server.
+func (c *Client) ListResources(ctx context.Context) ([]Resource, error) {
+	if err := c.ensureConnected(); err != nil {
+		return nil, err
+	}
+
+	resources, err := c.impl.ListResources(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	klog.V(2).InfoS("Listed resources from MCP server", "count", len(resources), "server", c.Name)
+	return resources, nil
+}
+
+// ReadResource reads the content of a resource from the MCP server.
+func (c *Client) ReadResource(ctx context.Context, uri string) (string, error) {
+	if err := c.ensureConnected(); err != nil {
+		return "", err
+	}
+
+	return c.impl.ReadResource(ctx, uri)
 }
 
 // ===================================================================
@@ -435,4 +468,49 @@ func listClientTools(ctx context.Context, client *mcpclient.Client, serverName s
 	}
 
 	return tools, nil
+}
+
+// listClientResources implements the common ListResources functionality shared by both client types.
+func listClientResources(ctx context.Context, client *mcpclient.Client, serverName string) ([]Resource, error) {
+	if err := ensureClientConnected(client); err != nil {
+		return nil, err
+	}
+
+	result, err := client.ListResources(ctx, mcp.ListResourcesRequest{})
+	if err != nil {
+		return nil, fmt.Errorf("listing resources: %w", err)
+	}
+
+	resources := make([]Resource, 0, len(result.Resources))
+	for _, r := range result.Resources {
+		resources = append(resources, Resource{
+			URI:         r.URI,
+			Name:        r.Name,
+			Description: r.Description,
+			MIMEType:    r.MIMEType,
+			Server:      serverName,
+		})
+	}
+
+	return resources, nil
+}
+
+// readClientResource reads the contents of a resource from the server and returns text.
+func readClientResource(ctx context.Context, client *mcpclient.Client, uri string) (string, error) {
+	if err := ensureClientConnected(client); err != nil {
+		return "", err
+	}
+
+	result, err := client.ReadResource(ctx, mcp.ReadResourceRequest{Params: mcp.ReadResourceParams{URI: uri}})
+	if err != nil {
+		return "", fmt.Errorf("reading resource %s: %w", uri, err)
+	}
+
+	for _, c := range result.Contents {
+		if text, ok := c.(mcp.TextResourceContents); ok {
+			return text.Text, nil
+		}
+	}
+
+	return "", fmt.Errorf("no text content for resource %s", uri)
 }

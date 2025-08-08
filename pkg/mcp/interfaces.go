@@ -38,6 +38,12 @@ type MCPClient interface {
 	// CallTool calls a tool on the MCP server and returns the result as a string
 	CallTool(ctx context.Context, toolName string, arguments map[string]interface{}) (string, error)
 
+	// ListResources lists all available resources from the MCP server
+	ListResources(ctx context.Context) ([]Resource, error)
+
+	// ReadResource reads a resource from the MCP server and returns its text content
+	ReadResource(ctx context.Context, uri string) (string, error)
+
 	// ensureConnected makes sure the client is connected
 	ensureConnected() error
 

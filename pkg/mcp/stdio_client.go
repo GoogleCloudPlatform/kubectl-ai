@@ -141,6 +141,28 @@ func (c *stdioClient) ListTools(ctx context.Context) ([]Tool, error) {
 	return tools, nil
 }
 
+// ListResources lists all available resources from the MCP server
+func (c *stdioClient) ListResources(ctx context.Context) ([]Resource, error) {
+	resources, err := listClientResources(ctx, c.client, c.name)
+	if err != nil {
+		return nil, err
+	}
+
+	klog.V(2).InfoS("Listed resources from stdio MCP server", "count", len(resources), "server", c.name)
+	return resources, nil
+}
+
+// ReadResource reads a resource from the MCP server and returns its text content
+func (c *stdioClient) ReadResource(ctx context.Context, uri string) (string, error) {
+	klog.V(2).InfoS("Reading MCP resource via stdio", "server", c.name, "uri", uri)
+
+	if err := c.ensureConnected(); err != nil {
+		return "", err
+	}
+
+	return readClientResource(ctx, c.client, uri)
+}
+
 // CallTool calls a tool on the MCP server and returns the result as a string
 func (c *stdioClient) CallTool(ctx context.Context, toolName string, arguments map[string]interface{}) (string, error) {
 	klog.V(2).InfoS("Calling MCP tool via stdio", "server", c.name, "tool", toolName)

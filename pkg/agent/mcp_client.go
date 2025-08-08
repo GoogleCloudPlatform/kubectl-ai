@@ -55,6 +55,27 @@ func (a *Agent) InitializeMCPClient(ctx context.Context) error {
 	// Store the manager for later use
 	a.mcpManager = manager
 
+	// Register MCP resources with the agent
+	var resourceTexts []string
+
+	resources, err := manager.ListAvailableResources(ctx)
+	if err != nil {
+		klog.Warningf("Failed to list MCP resources: %v", err)
+	} else {
+		for serverName, resList := range resources {
+			for _, res := range resList {
+				content, err := manager.ReadResource(ctx, serverName, res.URI)
+				if err != nil {
+					klog.Warningf("Failed to read resource %s from server %s: %v", res.URI, serverName, err)
+					continue
+				}
+				resourceTexts = append(resourceTexts, fmt.Sprintf("### %s (%s)\n%s", res.Name, serverName, content))
+			}
+		}
+	}
+
+	a.mcpResourceContext = strings.Join(resourceTexts, "\n\n")
+
 	return nil
 }
 
