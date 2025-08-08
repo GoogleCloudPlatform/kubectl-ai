@@ -1,0 +1,20 @@
+- name: gh
+  description: "The official GitHub command-line tool. Use it to interact with GitHub repositories, pull requests, issues, actions, and more, directly from the terminal."
+  command: "gh"
+  command_desc: |
+    The gh command-line interface for GitHub.
+
+    Core subcommands and usage patterns:
+    - `gh auth login`: Authenticate with a GitHub host. This is required before most other commands.
+    - `gh repo view [repo]`: View a repository.
+    - `gh pr list`: List pull requests in the current repository.
+    - `gh pr view <number>`: View a specific pull request.
+    - `gh pr checkout <number>`: Check out a pull request locally.
+    - `gh pr create [flags]`: Create a new pull request.
+    - `gh pr merge [flags]`: Merge a pull request.
+    - `gh issue list`: List issues in the current repository.
+    - `gh issue view <number>`: View a specific issue.
+    - `gh workflow list`: List workflows in the current repository.
+    - `gh workflow run <workflow-name> [flags]`: Trigger a workflow run.
+
+    Use `gh --help` or `gh <subcommand> --help` for full syntax and available flags.

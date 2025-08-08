@@ -1,0 +1,21 @@
+- name: gcloud
+  description: "The gcloud command-line tool is the primary CLI for Google Cloud. Use it to manage Google Cloud resources, including Google Kubernetes Engine (GKE) clusters, virtual machines, and networking."
+  command: "gcloud"
+  command_desc: |
+    The gcloud CLI manages authentication, local configuration, developer workflow, and interactions with Google Cloud APIs.
+
+    For Kubernetes-related tasks, the `gcloud container clusters` command group is the most relevant.
+
+    Core subcommands and usage patterns:
+    - `gcloud container clusters list [flags]`: List all GKE clusters in the configured project and zone/region.
+    - `gcloud container clusters describe <cluster-name> [flags]`: Get detailed information about a specific GKE cluster.
+    - `gcloud container clusters get-credentials <cluster-name> [flags]`: Fetch cluster endpoint and auth data and configure kubectl to use the cluster. This is essential for connecting to a GKE cluster.
+    - `gcloud container clusters create <cluster-name> [flags]`: Create a new GKE cluster.
+    - `gcloud container clusters delete <cluster-name> [flags]`: Delete an existing GKE cluster.
+
+    You can set the default project, region, and zone using:
+    - `gcloud config set project <project-id>`
+    - `gcloud config set compute/region <region>`
+    - `gcloud config set compute/zone <zone>`
+
+    Use `gcloud --help` or `gcloud <command> <subcommand> --help` for full syntax and available flags.
