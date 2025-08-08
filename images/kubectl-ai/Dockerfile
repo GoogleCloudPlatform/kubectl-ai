@@ -36,4 +36,7 @@ COPY --from=builder /src/kubectl-ai /bin/kubectl-ai
 COPY --from=kubectl-tool /opt/tools/kubectl/ /opt/tools/kubectl/
 RUN ln -sf /opt/tools/kubectl/bin/kubectl /bin/kubectl
 
+# Copy the custom tool configurations into the runtime image.
+COPY pkg/tools/samples /etc/kubectl-ai/tools/
+
 ENTRYPOINT [ "/bin/kubectl-ai" ]

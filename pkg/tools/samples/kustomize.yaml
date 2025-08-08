@@ -1,0 +1,11 @@
+- name: kustomize
+  description: "A tool to customize Kubernetes resource configurations. Use it to render and apply declarative configurations from a directory containing a kustomization.yaml file."
+  command: "kustomize"
+  command_desc: |
+    The kustomize command-line interface.
+    
+    Core subcommands and usage patterns:
+    - `kustomize build <kustomization_dir>`: Prints the customized resources to standard output. This is useful for inspecting the final configuration before applying it.
+    - `kustomize build <kustomization_dir> | kubectl apply -f -`: A common pattern to apply the output directly to the cluster.
+    
+    Note: `kubectl apply -k <dir>` is a shorthand for the pipe command above and is often preferred.

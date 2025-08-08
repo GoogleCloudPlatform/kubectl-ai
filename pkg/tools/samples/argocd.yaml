@@ -1,0 +1,17 @@
+- name: argocd
+  description: "A declarative, GitOps continuous delivery tool for Kubernetes. Use it to manage application deployments from Git repositories."
+  command: "argocd"
+  command_desc: |
+    The argocd command-line interface.
+
+    Core subcommands and usage patterns:
+    - `argocd login <server> [flags]`: Log in to an Argo CD server. This is required before most other commands.
+    - `argocd app list [flags]`: List all applications managed by Argo CD.
+    - `argocd app get <app-name> [flags]`: Get detailed information about a specific application.
+    - `argocd app sync <app-name> [flags]`: Sync an application to its target state defined in the Git repository.
+    - `argocd app history <app-name> [flags]`: View the deployment history of an application.
+    - `argocd app rollback <app-name> <history-id>`: Roll back an application to a previous deployed state.
+    - `argocd app create <app-name> [flags]`: Create a new application.
+    - `argocd app delete <app-name>`: Delete an application.
+
+    Use `argocd --help` or `argocd <command> --help` for full syntax and available flags.
