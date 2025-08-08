@@ -82,12 +82,12 @@ docker run --rm -it \
 
 ## Sample Custom Tools
 
-The following custom tools are configured, use them to extend `kubectl-ai`'s capabilities or add your own custom tool.
+The following custom tools are configured by default. YAML files describing them are available in the `pkg/tools/samples` directory.
 
 
-| Tool                                                       | Description                                                     | Configuration                                           |
+| Tool                                                       | Description                                                     | File                                           |
 | :--------------------------------------------------------- | :-------------------------------------------------------------- | :------------------------------------------------------ |
-| Argo CD (`argocd`)      | A declarative, GitOps continuous delivery tool for Kubernetes.  | argocd.yaml         |
-| GitHub CLI (`gh`)               | The official command-line tool to interact with GitHub.         | gh.yaml                 |
-| Google Cloud CLI (`gcloud`) | The primary CLI for managing Google Cloud resources.            | gcloud.yaml         |
-| Kustomize (`kustomize`)           | A tool to customize Kubernetes resource configurations.         | kustomize.yaml   |
+| Argo CD (`argocd`)      | A declarative, GitOps continuous delivery tool for Kubernetes.  | `argocd.yaml`         |
+| GitHub CLI (`gh`)               | The official command-line tool to interact with GitHub.         | `gh.yaml`                 |
+| Google Cloud CLI (`gcloud`) | The primary CLI for managing Google Cloud resources.            | `gcloud.yaml`         |
+| Kustomize (`kustomize`)           | A tool to customize Kubernetes resource configurations.         | `kustomize.yaml`   |
