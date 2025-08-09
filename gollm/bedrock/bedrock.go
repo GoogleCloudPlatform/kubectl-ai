@@ -356,17 +356,22 @@ func (cs *bedrockChatSession) addMessage(role types.ConversationRole, contentBlo
 }
 
 func (cs *bedrockChatSession) addTextMessage(role types.ConversationRole, content string) {
-	if content == "" {
-		return
-	}
-	textBlock := &types.ContentBlockMemberText{Value: content}
-	cs.addMessage(role, textBlock)
+    if content == "" {
+            return
+    }
+    textBlock := &types.ContentBlockMemberText{Value: content}
+    cs.addMessage(role, textBlock)
+}
+
+func (cs *bedrockChatSession) addToolUseMessage(role types.ConversationRole, toolCall gollm.FunctionCall) {
+    toolUseBlock := cs.createToolUseBlock(toolCall)
+    cs.addMessage(role, toolUseBlock)
 }
 
 func (cs *bedrockChatSession) addToolResults(toolResults []types.ContentBlock) {
-	if len(toolResults) > 0 {
-		cs.addMessage(types.ConversationRoleUser, toolResults...)
-	}
+    if len(toolResults) > 0 {
+            cs.addMessage(types.ConversationRoleUser, toolResults...)
+    }
 }
 
 func (cs *bedrockChatSession) addAssistantResponse(response *bedrockChatResponse) {
@@ -614,6 +619,9 @@ func (cs *bedrockChatSession) createStreamingIterator(output *bedrockruntime.Con
 
 		var fullContent strings.Builder
 		var usage any
+		var toolCalls []gollm.FunctionCall
+		var currentToolCall *gollm.FunctionCall
+		var toolInputBuilder strings.Builder
 
 		for event := range output.GetStream().Events() {
 			switch e := event.(type) {
@@ -622,6 +630,17 @@ func (cs *bedrockChatSession) createStreamingIterator(output *bedrockruntime.Con
 
 			case *types.ConverseStreamOutputMemberContentBlockStart:
 				klog.V(3).Info("Stream: Content block started")
+				if e.Value.Start != nil {
+					if toolUse, ok := e.Value.Start.(*types.ContentBlockStartMemberToolUse); ok {
+						// Start of a new tool use block
+						currentToolCall = &gollm.FunctionCall{
+							ID:   aws.ToString(toolUse.Value.ToolUseId),
+							Name: aws.ToString(toolUse.Value.Name),
+						}
+						toolInputBuilder.Reset()
+						klog.V(2).Infof("Stream: Tool use started - Name: %s, ID: %s", currentToolCall.Name, currentToolCall.ID)
+					}
+				}
 
 			case *types.ConverseStreamOutputMemberContentBlockDelta:
 				if delta := e.Value.Delta; delta != nil {
@@ -640,16 +659,60 @@ func (cs *bedrockChatSession) createStreamingIterator(output *bedrockruntime.Con
 						if !yield(response, nil) {
 							return
 						}
+					} else if toolUseDelta, ok := delta.(*types.ContentBlockDeltaMemberToolUse); ok {
+						// Accumulate tool use input
+						if toolUseDelta.Value != nil {
+							toolInputBuilder.WriteString(toolUseDelta.Value)
+						}
 					}
 				}
 
 			case *types.ConverseStreamOutputMemberContentBlockStop:
 				klog.V(3).Info("Stream: Content block stopped")
+				// If we were building a tool call, finalize it
+				if currentToolCall != nil {
+					// Parse the accumulated JSON input
+					if toolInputBuilder.Len() > 0 {
+						var args map[string]any
+						if err := json.Unmarshal([]byte(toolInputBuilder.String()), &args); err != nil {
+							klog.Errorf("Failed to parse tool input JSON: %v", err)
+							currentToolCall.Arguments = map[string]any{"error": "Failed to parse input"}
+						} else {
+							currentToolCall.Arguments = args
+						}
+					} else {
+						currentToolCall.Arguments = map[string]any{}
+					}
+					toolCalls = append(toolCalls, *currentToolCall)
+					klog.V(2).Infof("Stream: Tool use completed - Name: %s, Args: %v", currentToolCall.Name, currentToolCall.Arguments)
+					currentToolCall = nil
+					toolInputBuilder.Reset()
+				}
 
 			case *types.ConverseStreamOutputMemberMessageStop:
 				klog.V(2).Info("Stream: Message completed")
 				if fullContent.Len() > 0 {
 					cs.addTextMessage(types.ConversationRoleAssistant, fullContent.String())
+				}
+				
+				// If we have tool calls, yield them
+				if len(toolCalls) > 0 {
+					// Add tool use messages to conversation
+					for _, toolCall := range toolCalls {
+						cs.addToolUseMessage(types.ConversationRoleAssistant, toolCall)
+					}
+					
+					response := &bedrockChatResponse{
+						content:   "",
+						usage:     nil,
+						toolCalls: toolCalls,
+						model:     cs.model,
+						provider:  "bedrock",
+					}
+					
+					if !yield(response, nil) {
+						return
+					}
 				}
 
 			case *types.ConverseStreamOutputMemberMetadata:
