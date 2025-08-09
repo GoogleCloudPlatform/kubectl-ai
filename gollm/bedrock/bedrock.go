@@ -438,8 +438,8 @@ func (cs *bedrockChatSession) buildConverseInput() *bedrockruntime.ConverseInput
 		if len(tools) > 0 {
 			input.ToolConfig = &types.ToolConfiguration{
 				Tools: tools,
-				ToolChoice: &types.ToolChoiceMemberAuto{
-					Value: types.AutoToolChoice{},
+				ToolChoice: &types.ToolChoiceMemberAny{
+					Value: types.AnyToolChoice{},
 				},
 			}
 		}
@@ -470,8 +470,8 @@ func (cs *bedrockChatSession) buildConverseStreamInput() *bedrockruntime.Convers
 		if len(tools) > 0 {
 			input.ToolConfig = &types.ToolConfiguration{
 				Tools: tools,
-				ToolChoice: &types.ToolChoiceMemberAuto{
-					Value: types.AutoToolChoice{},
+				ToolChoice: &types.ToolChoiceMemberAny{
+					Value: types.AnyToolChoice{},
 				},
 			}
 		}
