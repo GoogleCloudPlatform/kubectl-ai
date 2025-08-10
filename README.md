@@ -262,6 +262,10 @@ You can also extend its capabilities by defining your own custom tools. By defau
 
 To specify tools configuration files or directories containing tools configuration files, use:
 
+```sh
+./kubectl-ai --custom-tools-config=<path-to-tools-directory> "your prompt here"
+```
+
 For further details on how to configure your own tools, [go here](docs/tools.md).
 
 ## Docker Quick Start 

@@ -50,7 +50,7 @@ In case, you don't want to use a tool (that is provided in samples), just move t
 When running the `kubectl-ai` binary directly, provide the path to your local tools directory.
 
 ```sh
-./kubectl-ai **--custom-tools-config=<path-to-tools-directory>** "your prompt here"
+./kubectl-ai --custom-tools-config=<path-to-tools-directory> "your prompt here"
 ```
 
 ### Running with Docker Image
