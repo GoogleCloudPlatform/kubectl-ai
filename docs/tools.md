@@ -86,7 +86,7 @@ The following sample custom tools are configured by default.
 
 | Tool                                                       | Description                                                     | YAML File                                           |
 | :--------------------------------------------------------- | :-------------------------------------------------------------- | :------------------------------------------------------ |
-| Argo CD (`argocd`)      | A declarative, GitOps continuous delivery tool for Kubernetes.  | [argocd.yaml](../pkg/tools/samples/argocd.yaml)         |
-| GitHub CLI (`gh`)               | The official command-line tool to interact with GitHub.         | [gh.yaml](../pkg/tools/samples/gh.yaml)                 |
-| Google Cloud CLI (`gcloud`) | The primary CLI for managing Google Cloud resources.            | [gcloud.yaml](../pkg/tools/samples/gcloud.yaml)               |
-| Kustomize (`kustomize`)           | A tool to customize Kubernetes resource configurations.         | [kustomize.yaml](../pkg/tools/samples/kustomize.yaml)   |
+| Argo CD (`argocd`)      | A declarative, GitOps continuous delivery tool for Kubernetes.  | [argocd.yaml](./tool-samples/argocd.yaml)         |
+| GitHub CLI (`gh`)               | The official command-line tool to interact with GitHub.         | [gh.yaml](./tool-samples/gh.yaml)                 |
+| Google Cloud CLI (`gcloud`) | The primary CLI for managing Google Cloud resources.            | [gcloud.yaml](./tool-samples/gcloud.yaml)               |
+| Kustomize (`kustomize`)           | A tool to customize Kubernetes resource configurations.         | [kustomize.yaml](./tool-samples/kustomize.yaml)   |
