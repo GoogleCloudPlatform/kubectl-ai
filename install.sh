@@ -9,6 +9,12 @@ for cmd in curl tar; do
   fi
 done
 
+# Set the insecure SSL argument
+INSECURE_ARG=""
+if [ -n "${INSECURE:-}" ]; then
+  INSECURE_ARG="--insecure"
+fi
+
 REPO="GoogleCloudPlatform/kubectl-ai"
 BINARY="kubectl-ai"
 
@@ -51,8 +57,12 @@ if [ -n "${GITHUB_TOKEN:-}" ]; then
   auth_hdr="Authorization: token $GITHUB_TOKEN"
 else
   auth_hdr=""
+
 fi
-LATEST_TAG=$(curl -s -H "$auth_hdr" \
+if [ -n "${INSECURE:-}" ]; then
+  echo "Warning: INSECURE is set, SSL certificate validation will be skipped for GitHub API requests."
+fi
+LATEST_TAG=$(curl $INSECURE_ARG -s -H "$auth_hdr" \
   "https://api.github.com/repos/$REPO/releases/latest" \
   | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p')
 if [ -z "$LATEST_TAG" ]; then
@@ -64,16 +74,33 @@ fi
 TARBALL="kubectl-ai_${OS}_${ARCH}.tar.gz"
 URL="https://github.com/$REPO/releases/download/$LATEST_TAG/$TARBALL"
 
-# Download and extract
-echo "Downloading $URL ..."
-curl -fSL --retry 3 "$URL" -o "$TARBALL"
-tar --no-same-owner -xzf "$TARBALL"
+# Create temp dir and set cleanup trap
+TEMP_DIR="$(mktemp -d)"
+cleanup() {
+  if [ -n "${TEMP_DIR:-}" ] && [ -d "$TEMP_DIR" ]; then
+    rm -rf "$TEMP_DIR"
+  fi
+}
+trap cleanup EXIT INT TERM
 
-# Move binary to /usr/local/bin (may require sudo)
-echo "Installing $BINARY to /usr/local/bin (may require sudo)..."
-sudo install -m 0755 "$BINARY" /usr/local/bin/
+# Download and extract in temp dir; install from there
+(
+  cd "$TEMP_DIR"
+  echo "Downloading $URL ..."
+  CURL_FLAGS="-fSL --retry 3"
+  if [ -n "${INSECURE:-}" ]; then
+    echo "Warning: INSECURE is set, SSL certificate validation will be skipped for downloads."
+  fi
+  curl $INSECURE_ARG $CURL_FLAGS "$URL" -o "$TARBALL"
+  tar --no-same-owner -xzf "$TARBALL"
 
-# Clean up
-rm "$TARBALL"
+  if [ ! -f "$BINARY" ]; then
+    echo "Error: expected binary '$BINARY' not found after extraction."
+    exit 1
+  fi
+
+  echo "Installing $BINARY to /usr/local/bin (may require sudo)..."
+  sudo install -m 0755 "$BINARY" /usr/local/bin/
+)
 
 echo "✅ $BINARY installed successfully! Run '$BINARY --help' to get started."
