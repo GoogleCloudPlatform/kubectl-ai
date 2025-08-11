@@ -645,7 +645,7 @@ func (cs *bedrockChatSession) createStreamingIterator(output *bedrockruntime.Con
 
 		assembler := newToolStreamAssembler()
 
-        for event := range output.GetStream().Events() {
+		for event := range output.GetStream().Events() {
 			switch e := event.(type) {
 			case *types.ConverseStreamOutputMemberMessageStart:
 				assembler.onMessageStart()
@@ -658,27 +658,27 @@ func (cs *bedrockChatSession) createStreamingIterator(output *bedrockruntime.Con
 						return
 					}
 				}
-            case *types.ConverseStreamOutputMemberContentBlockStop:
-                // Buffer tool calls; do not add to history yet
-                assembler.onContentBlockStop(e.Value)
+			case *types.ConverseStreamOutputMemberContentBlockStop:
+				// Buffer tool calls; do not add to history yet
+				assembler.onContentBlockStop(e.Value)
 			case *types.ConverseStreamOutputMemberMessageStop:
-                content, calls := assembler.finalizeMessage()
-                // Build a single assistant message that includes both text and tool uses
-                var blocks []types.ContentBlock
-                if content != "" {
-                    blocks = append(blocks, &types.ContentBlockMemberText{Value: content})
-                }
-                for _, call := range calls {
-                    blocks = append(blocks, cs.createToolUseBlock(call))
-                }
-                if len(blocks) > 0 {
-                    cs.addMessage(types.ConversationRoleAssistant, blocks...)
-                }
-                if len(calls) > 0 {
-                    if !yield(&bedrockChatResponse{toolCalls: calls, model: cs.model, provider: "bedrock"}, nil) {
-                        return
-                    }
-                }
+				content, calls := assembler.finalizeMessage()
+				// Build a single assistant message that includes both text and tool uses
+				var blocks []types.ContentBlock
+				if content != "" {
+					blocks = append(blocks, &types.ContentBlockMemberText{Value: content})
+				}
+				for _, call := range calls {
+					blocks = append(blocks, cs.createToolUseBlock(call))
+				}
+				if len(blocks) > 0 {
+					cs.addMessage(types.ConversationRoleAssistant, blocks...)
+				}
+				if len(calls) > 0 {
+					if !yield(&bedrockChatResponse{toolCalls: calls, model: cs.model, provider: "bedrock"}, nil) {
+						return
+					}
+				}
 			case *types.ConverseStreamOutputMemberMetadata:
 				if usage := assembler.onMetadata(e.Value); usage != nil {
 					if cs.client.clientOpts.UsageCallback != nil {
@@ -756,25 +756,11 @@ func (a *toolStreamAssembler) onContentBlockDelta(evt types.ContentBlockDeltaEve
 	if toolDelta, ok := evt.Delta.(*types.ContentBlockDeltaMemberToolUse); ok {
 		// Accumulate tool input JSON
 		input := aws.ToString(toolDelta.Value.Input)
-		// ContentBlockDeltaEvent does not carry index, so append to the only active tool if exactly one.
-		// If multiple tools are active, we cannot disambiguate without index; prefer latest started.
-		if len(a.activeTools) == 1 {
-			for _, at := range a.activeTools {
-				at.inputBuilder.WriteString(input)
-				break
-			}
-		} else if len(a.activeTools) > 1 {
-			// Best-effort: append to the most recent active tool
-			var lastIdx int32 = -1
-			for idx := range a.activeTools {
-				if idx > lastIdx {
-					lastIdx = idx
-				}
-			}
-			if lastIdx != -1 {
-				a.activeTools[lastIdx].inputBuilder.WriteString(input)
-			}
-		}
+        if evt.ContentBlockIndex != nil {
+            if at, ok := a.activeTools[*evt.ContentBlockIndex]; ok {
+                at.inputBuilder.WriteString(input)
+            }
+        }
 		return ""
 	}
 	return ""
@@ -808,13 +794,13 @@ func (a *toolStreamAssembler) onContentBlockStop(evt types.ContentBlockStopEvent
 }
 
 func (a *toolStreamAssembler) finalizeMessage() (string, []gollm.FunctionCall) {
-    content := a.fullContent.String()
-    calls := a.pendingCalls
-    // reset for next message
-    a.fullContent.Reset()
-    a.pendingCalls = a.pendingCalls[:0]
-    a.activeTools = make(map[int32]*activeTool)
-    return content, calls
+	content := a.fullContent.String()
+	calls := a.pendingCalls
+	// reset for next message
+	a.fullContent.Reset()
+	a.pendingCalls = a.pendingCalls[:0]
+	a.activeTools = make(map[int32]*activeTool)
+	return content, calls
 }
 
 func (a *toolStreamAssembler) onMetadata(evt types.ConverseStreamMetadataEvent) any {
