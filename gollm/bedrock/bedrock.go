@@ -274,24 +274,37 @@ func (cs *bedrockChatSession) SendStreaming(ctx context.Context, contents ...any
 	}
 
 	cs.addTextMessage(types.ConversationRoleUser, userMessage)
-	input := cs.buildConverseStreamInput()
+	input := cs.buildConverseInput()
 
-	klog.V(2).Infof("Starting ConverseStream for model: %s", cs.model)
-	
-	// Debug log the input
+	// Log tool configuration for debugging
 	if input.ToolConfig != nil {
-		klog.Infof("ConverseStream: Sending request with %d tools, ToolChoice type: %T", len(input.ToolConfig.Tools), input.ToolConfig.ToolChoice)
+		klog.Infof("Converse (fallback non-streaming): Sending request with %d tools, ToolChoice type: %T", len(input.ToolConfig.Tools), input.ToolConfig.ToolChoice)
 	} else {
-		klog.Infof("ConverseStream: No tools configured in request")
+		klog.Infof("Converse (fallback non-streaming): No tools configured in request")
 	}
 
-	output, err := cs.client.runtimeClient.ConverseStream(ctx, input)
+	klog.V(2).Infof("Starting Converse (non-streaming) for model: %s", cs.model)
+	output, err := cs.client.runtimeClient.Converse(ctx, input)
 	if err != nil {
 		cs.removeLastMessage()
-		return nil, fmt.Errorf("ConverseStream failed: %w", err)
+		return nil, fmt.Errorf("Converse failed: %w", err)
 	}
 
-	return cs.createStreamingIterator(output), nil
+	response := cs.parseConverseOutput(&output.Output)
+	response.usage = output.Usage
+
+	if cs.client.clientOpts.UsageCallback != nil {
+		if structuredUsage := convertAWSUsage(output.Usage, cs.model, "bedrock"); structuredUsage != nil {
+			cs.client.clientOpts.UsageCallback("bedrock", cs.model, *structuredUsage)
+		}
+	}
+
+	cs.addAssistantResponse(response)
+
+	// Return a simple one-shot iterator
+	return func(yield func(gollm.ChatResponse, error) bool) {
+		yield(response, nil)
+	}, nil
 }
 
 func (cs *bedrockChatSession) processContents(contents ...any) (string, error) {
@@ -649,131 +662,41 @@ func (cs *bedrockChatSession) createStreamingIterator(output *bedrockruntime.Con
 
 		var fullContent strings.Builder
 		var usage any
-		var toolCalls []gollm.FunctionCall
-		var currentToolCall *gollm.FunctionCall
-		var toolInputBuilder strings.Builder
 
 		for event := range output.GetStream().Events() {
 			switch e := event.(type) {
 			case *types.ConverseStreamOutputMemberMessageStart:
 				klog.V(3).Info("Stream: Message started")
-
-			case *types.ConverseStreamOutputMemberContentBlockStart:
-				klog.Infof("Stream: Content block started, e.Value: %+v", e.Value)
-				if e.Value.Start != nil {
-					klog.Infof("Stream: ContentBlockStart type: %T", e.Value.Start)
-					if toolUse, ok := e.Value.Start.(*types.ContentBlockStartMemberToolUse); ok {
-						// Start of a new tool use block
-						currentToolCall = &gollm.FunctionCall{
-							ID:   aws.ToString(toolUse.Value.ToolUseId),
-							Name: aws.ToString(toolUse.Value.Name),
-						}
-						toolInputBuilder.Reset()
-						klog.Infof("Stream: Tool use started - Name: %s, ID: %s", currentToolCall.Name, currentToolCall.ID)
-					} else {
-						klog.Infof("Stream: Not a tool use start, got: %T", e.Value.Start)
-					}
-				} else {
-					klog.Infof("Stream: e.Value.Start is nil")
-				}
-
 			case *types.ConverseStreamOutputMemberContentBlockDelta:
 				if delta := e.Value.Delta; delta != nil {
 					if textDelta, ok := delta.(*types.ContentBlockDeltaMemberText); ok {
 						text := textDelta.Value
 						fullContent.WriteString(text)
-
-						response := &bedrockChatResponse{
-							content:   text,
-							usage:     nil,
-							toolCalls: []gollm.FunctionCall{},
-							model:     cs.model,
-							provider:  "bedrock",
-						}
-
+						response := &bedrockChatResponse{content: text, model: cs.model, provider: "bedrock"}
 						if !yield(response, nil) {
 							return
 						}
-					} else if toolUseDelta, ok := delta.(*types.ContentBlockDeltaMemberToolUse); ok {
-						// Accumulate tool use input
-						if toolUseDelta.Value != nil {
-							toolInputBuilder.WriteString(toolUseDelta.Value)
-						}
 					}
 				}
-
-			case *types.ConverseStreamOutputMemberContentBlockStop:
-				klog.V(3).Info("Stream: Content block stopped")
-				// If we were building a tool call, finalize it
-				if currentToolCall != nil {
-					// Parse the accumulated JSON input
-					if toolInputBuilder.Len() > 0 {
-						var args map[string]any
-						if err := json.Unmarshal([]byte(toolInputBuilder.String()), &args); err != nil {
-							klog.Errorf("Failed to parse tool input JSON: %v", err)
-							currentToolCall.Arguments = map[string]any{"error": "Failed to parse input"}
-						} else {
-							currentToolCall.Arguments = args
-						}
-					} else {
-						currentToolCall.Arguments = map[string]any{}
-					}
-					toolCalls = append(toolCalls, *currentToolCall)
-					klog.V(2).Infof("Stream: Tool use completed - Name: %s, Args: %v", currentToolCall.Name, currentToolCall.Arguments)
-					currentToolCall = nil
-					toolInputBuilder.Reset()
-				}
-
 			case *types.ConverseStreamOutputMemberMessageStop:
 				klog.V(2).Info("Stream: Message completed")
 				if fullContent.Len() > 0 {
 					cs.addTextMessage(types.ConversationRoleAssistant, fullContent.String())
 				}
-
-				// If we have tool calls, yield them
-				if len(toolCalls) > 0 {
-					// Add tool use messages to conversation
-					for _, toolCall := range toolCalls {
-						cs.addToolUseMessage(types.ConversationRoleAssistant, toolCall)
-					}
-
-					response := &bedrockChatResponse{
-						content:   "",
-						usage:     nil,
-						toolCalls: toolCalls,
-						model:     cs.model,
-						provider:  "bedrock",
-					}
-
-					if !yield(response, nil) {
-						return
-					}
-				}
-
 			case *types.ConverseStreamOutputMemberMetadata:
 				if e.Value.Usage != nil {
 					usage = e.Value.Usage
-
 					if cs.client.clientOpts.UsageCallback != nil {
 						if structuredUsage := convertAWSUsage(usage, cs.model, "bedrock"); structuredUsage != nil {
 							cs.client.clientOpts.UsageCallback("bedrock", cs.model, *structuredUsage)
 							klog.V(2).Infof("Usage callback invoked for streaming: %d tokens", structuredUsage.TotalTokens)
 						}
 					}
-
-					finalResponse := &bedrockChatResponse{
-						content:   "",
-						usage:     usage,
-						toolCalls: []gollm.FunctionCall{},
-						model:     cs.model,
-						provider:  "bedrock",
-					}
-
+					finalResponse := &bedrockChatResponse{usage: usage, model: cs.model, provider: "bedrock"}
 					if !yield(finalResponse, nil) {
 						return
 					}
 				}
-
 			default:
 				klog.V(3).Infof("Stream: Unknown event type: %T", e)
 			}
