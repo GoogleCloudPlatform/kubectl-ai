@@ -245,7 +245,7 @@ func (cs *bedrockChatSession) Send(ctx context.Context, contents ...any) (gollm.
 	output, err := cs.client.runtimeClient.Converse(ctx, input)
 	if err != nil {
 		cs.removeLastMessage()
-		return nil, fmt.Errorf("Converse API failed: %w", err)
+		return nil, fmt.Errorf("converse api failed: %w", err)
 	}
 
 	response := cs.parseConverseOutput(&output.Output)
@@ -756,11 +756,11 @@ func (a *toolStreamAssembler) onContentBlockDelta(evt types.ContentBlockDeltaEve
 	if toolDelta, ok := evt.Delta.(*types.ContentBlockDeltaMemberToolUse); ok {
 		// Accumulate tool input JSON
 		input := aws.ToString(toolDelta.Value.Input)
-        if evt.ContentBlockIndex != nil {
-            if at, ok := a.activeTools[*evt.ContentBlockIndex]; ok {
-                at.inputBuilder.WriteString(input)
-            }
-        }
+		if evt.ContentBlockIndex != nil {
+			if at, ok := a.activeTools[*evt.ContentBlockIndex]; ok {
+				at.inputBuilder.WriteString(input)
+			}
+		}
 		return ""
 	}
 	return ""
