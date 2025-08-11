@@ -263,31 +263,31 @@ func (cs *bedrockChatSession) Send(ctx context.Context, contents ...any) (gollm.
 }
 
 func (cs *bedrockChatSession) SendStreaming(ctx context.Context, contents ...any) (gollm.ChatResponseIterator, error) {
-    if !isModelSupported(cs.model) {
-        return nil, fmt.Errorf("%s: %s. Supported models: %v", ErrMsgUnsupportedModel, cs.model, getSupportedModels())
-    }
+	if !isModelSupported(cs.model) {
+		return nil, fmt.Errorf("%s: %s. Supported models: %v", ErrMsgUnsupportedModel, cs.model, getSupportedModels())
+	}
 
-    userMessage, err := cs.processContents(contents...)
-    if err != nil {
-        return nil, err
-    }
+	userMessage, err := cs.processContents(contents...)
+	if err != nil {
+		return nil, err
+	}
 
-    cs.addTextMessage(types.ConversationRoleUser, userMessage)
-    input := cs.buildConverseStreamInput()
+	cs.addTextMessage(types.ConversationRoleUser, userMessage)
+	input := cs.buildConverseStreamInput()
 
-    if input.ToolConfig != nil {
-        klog.Infof("ConverseStream: Sending request with %d tools, ToolChoice type: %T", len(input.ToolConfig.Tools), input.ToolConfig.ToolChoice)
-    } else {
-        klog.Infof("ConverseStream: No tools configured in request")
-    }
+	if input.ToolConfig != nil {
+		klog.Infof("ConverseStream: Sending request with %d tools, ToolChoice type: %T", len(input.ToolConfig.Tools), input.ToolConfig.ToolChoice)
+	} else {
+		klog.Infof("ConverseStream: No tools configured in request")
+	}
 
-    klog.V(2).Infof("Starting ConverseStream for model: %s", cs.model)
-    output, err := cs.client.runtimeClient.ConverseStream(ctx, input)
-    if err != nil {
-        cs.removeLastMessage()
-        return nil, fmt.Errorf("ConverseStream failed: %w", err)
-    }
-    return cs.createStreamingIterator(output), nil
+	klog.V(2).Infof("Starting ConverseStream for model: %s", cs.model)
+	output, err := cs.client.runtimeClient.ConverseStream(ctx, input)
+	if err != nil {
+		cs.removeLastMessage()
+		return nil, fmt.Errorf("ConverseStream failed: %w", err)
+	}
+	return cs.createStreamingIterator(output), nil
 }
 
 func (cs *bedrockChatSession) processContents(contents ...any) (string, error) {
@@ -643,171 +643,183 @@ func (cs *bedrockChatSession) createStreamingIterator(output *bedrockruntime.Con
 
 		defer output.GetStream().Close()
 
-        assembler := newToolStreamAssembler()
+		assembler := newToolStreamAssembler()
 
         for event := range output.GetStream().Events() {
-            switch e := event.(type) {
-            case *types.ConverseStreamOutputMemberMessageStart:
-                assembler.onMessageStart()
-            case *types.ConverseStreamOutputMemberContentBlockStart:
-                assembler.onContentBlockStart(e.Value)
-            case *types.ConverseStreamOutputMemberContentBlockDelta:
-                // Yield incremental text if any
-                if text := assembler.onContentBlockDelta(e.Value); text != "" {
-                    if !yield(&bedrockChatResponse{content: text, model: cs.model, provider: "bedrock"}, nil) {
-                        return
-                    }
-                }
+			switch e := event.(type) {
+			case *types.ConverseStreamOutputMemberMessageStart:
+				assembler.onMessageStart()
+			case *types.ConverseStreamOutputMemberContentBlockStart:
+				assembler.onContentBlockStart(e.Value)
+			case *types.ConverseStreamOutputMemberContentBlockDelta:
+				// Yield incremental text if any
+				if text := assembler.onContentBlockDelta(e.Value); text != "" {
+					if !yield(&bedrockChatResponse{content: text, model: cs.model, provider: "bedrock"}, nil) {
+						return
+					}
+				}
             case *types.ConverseStreamOutputMemberContentBlockStop:
-                if calls := assembler.onContentBlockStop(e.Value); len(calls) > 0 {
-                    // Add tool use messages to conversation and yield
-                    for _, call := range calls {
-                        cs.addToolUseMessage(types.ConversationRoleAssistant, call)
-                    }
+                // Buffer tool calls; do not add to history yet
+                assembler.onContentBlockStop(e.Value)
+			case *types.ConverseStreamOutputMemberMessageStop:
+                content, calls := assembler.finalizeMessage()
+                // Build a single assistant message that includes both text and tool uses
+                var blocks []types.ContentBlock
+                if content != "" {
+                    blocks = append(blocks, &types.ContentBlockMemberText{Value: content})
+                }
+                for _, call := range calls {
+                    blocks = append(blocks, cs.createToolUseBlock(call))
+                }
+                if len(blocks) > 0 {
+                    cs.addMessage(types.ConversationRoleAssistant, blocks...)
+                }
+                if len(calls) > 0 {
                     if !yield(&bedrockChatResponse{toolCalls: calls, model: cs.model, provider: "bedrock"}, nil) {
                         return
                     }
                 }
-            case *types.ConverseStreamOutputMemberMessageStop:
-                content := assembler.onMessageStop()
-                if content != "" {
-                    cs.addTextMessage(types.ConversationRoleAssistant, content)
-                }
-            case *types.ConverseStreamOutputMemberMetadata:
-                if usage := assembler.onMetadata(e.Value); usage != nil {
-                    if cs.client.clientOpts.UsageCallback != nil {
-                        if structuredUsage := convertAWSUsage(usage, cs.model, "bedrock"); structuredUsage != nil {
-                            cs.client.clientOpts.UsageCallback("bedrock", cs.model, *structuredUsage)
-                            klog.V(2).Infof("Usage callback invoked for streaming: %d tokens", structuredUsage.TotalTokens)
-                        }
-                    }
-                    if !yield(&bedrockChatResponse{usage: usage, model: cs.model, provider: "bedrock"}, nil) {
-                        return
-                    }
-                }
-            default:
-                klog.V(3).Infof("Stream: Unknown event type: %T", e)
-            }
-        }
+			case *types.ConverseStreamOutputMemberMetadata:
+				if usage := assembler.onMetadata(e.Value); usage != nil {
+					if cs.client.clientOpts.UsageCallback != nil {
+						if structuredUsage := convertAWSUsage(usage, cs.model, "bedrock"); structuredUsage != nil {
+							cs.client.clientOpts.UsageCallback("bedrock", cs.model, *structuredUsage)
+							klog.V(2).Infof("Usage callback invoked for streaming: %d tokens", structuredUsage.TotalTokens)
+						}
+					}
+					if !yield(&bedrockChatResponse{usage: usage, model: cs.model, provider: "bedrock"}, nil) {
+						return
+					}
+				}
+			default:
+				klog.V(3).Infof("Stream: Unknown event type: %T", e)
+			}
+		}
 
-        if err := output.GetStream().Err(); err != nil {
-            yield(nil, fmt.Errorf("stream error: %w", err))
-        }
+		if err := output.GetStream().Err(); err != nil {
+			yield(nil, fmt.Errorf("stream error: %w", err))
+		}
 	}
 }
 
 // toolStreamAssembler assembles Bedrock streaming events into text and tool calls.
 type toolStreamAssembler struct {
-    fullContent   strings.Builder
-    // Track active tool-use by content block index
-    activeTools   map[int32]*activeTool
-    pendingCalls  []gollm.FunctionCall
-    pendingUsage  any
+	fullContent strings.Builder
+	// Track active tool-use by content block index
+	activeTools  map[int32]*activeTool
+	pendingCalls []gollm.FunctionCall
+	pendingUsage any
 }
 
 type activeTool struct {
-    call         gollm.FunctionCall
-    inputBuilder strings.Builder
+	call         gollm.FunctionCall
+	inputBuilder strings.Builder
 }
 
 func newToolStreamAssembler() *toolStreamAssembler {
-    return &toolStreamAssembler{
-        activeTools:  make(map[int32]*activeTool),
-        pendingCalls: make([]gollm.FunctionCall, 0),
-    }
+	return &toolStreamAssembler{
+		activeTools:  make(map[int32]*activeTool),
+		pendingCalls: make([]gollm.FunctionCall, 0),
+	}
 }
 
 func (a *toolStreamAssembler) onMessageStart() {
-    // reset per-message state
-    a.fullContent.Reset()
-    a.pendingCalls = a.pendingCalls[:0]
-    a.activeTools = make(map[int32]*activeTool)
+	// reset per-message state
+	a.fullContent.Reset()
+	a.pendingCalls = a.pendingCalls[:0]
+	a.activeTools = make(map[int32]*activeTool)
 }
 
 func (a *toolStreamAssembler) onContentBlockStart(evt types.ContentBlockStartEvent) {
-    if start, ok := evt.Start.(*types.ContentBlockStartMemberToolUse); ok {
-        idx := int32(0)
-        if evt.ContentBlockIndex != nil {
-            idx = *evt.ContentBlockIndex
-        }
-        call := gollm.FunctionCall{
-            ID:   aws.ToString(start.Value.ToolUseId),
-            Name: aws.ToString(start.Value.Name),
-        }
-        a.activeTools[idx] = &activeTool{call: call}
-    }
+	if start, ok := evt.Start.(*types.ContentBlockStartMemberToolUse); ok {
+		idx := int32(0)
+		if evt.ContentBlockIndex != nil {
+			idx = *evt.ContentBlockIndex
+		}
+		call := gollm.FunctionCall{
+			ID:   aws.ToString(start.Value.ToolUseId),
+			Name: aws.ToString(start.Value.Name),
+		}
+		a.activeTools[idx] = &activeTool{call: call}
+	}
 }
 
 // Returns incremental text to yield if present
 func (a *toolStreamAssembler) onContentBlockDelta(evt types.ContentBlockDeltaEvent) string {
-    if textDelta, ok := evt.Delta.(*types.ContentBlockDeltaMemberText); ok {
-        text := textDelta.Value
-        if text != "" {
-            a.fullContent.WriteString(text)
-        }
-        return text
-    }
-    if toolDelta, ok := evt.Delta.(*types.ContentBlockDeltaMemberToolUse); ok {
-        // Accumulate tool input JSON
-        input := aws.ToString(toolDelta.Value.Input)
-        // ContentBlockDeltaEvent does not carry index, so append to the only active tool if exactly one.
-        // If multiple tools are active, we cannot disambiguate without index; prefer latest started.
-        if len(a.activeTools) == 1 {
-            for _, at := range a.activeTools {
-                at.inputBuilder.WriteString(input)
-                break
-            }
-        } else if len(a.activeTools) > 1 {
-            // Best-effort: append to the most recent active tool
-            var lastIdx int32 = -1
-            for idx := range a.activeTools {
-                if idx > lastIdx {
-                    lastIdx = idx
-                }
-            }
-            if lastIdx != -1 {
-                a.activeTools[lastIdx].inputBuilder.WriteString(input)
-            }
-        }
-        return ""
-    }
-    return ""
+	if textDelta, ok := evt.Delta.(*types.ContentBlockDeltaMemberText); ok {
+		text := textDelta.Value
+		if text != "" {
+			a.fullContent.WriteString(text)
+		}
+		return text
+	}
+	if toolDelta, ok := evt.Delta.(*types.ContentBlockDeltaMemberToolUse); ok {
+		// Accumulate tool input JSON
+		input := aws.ToString(toolDelta.Value.Input)
+		// ContentBlockDeltaEvent does not carry index, so append to the only active tool if exactly one.
+		// If multiple tools are active, we cannot disambiguate without index; prefer latest started.
+		if len(a.activeTools) == 1 {
+			for _, at := range a.activeTools {
+				at.inputBuilder.WriteString(input)
+				break
+			}
+		} else if len(a.activeTools) > 1 {
+			// Best-effort: append to the most recent active tool
+			var lastIdx int32 = -1
+			for idx := range a.activeTools {
+				if idx > lastIdx {
+					lastIdx = idx
+				}
+			}
+			if lastIdx != -1 {
+				a.activeTools[lastIdx].inputBuilder.WriteString(input)
+			}
+		}
+		return ""
+	}
+	return ""
 }
 
 // Finalize any tool calls on block stop; returns calls to yield
 func (a *toolStreamAssembler) onContentBlockStop(evt types.ContentBlockStopEvent) []gollm.FunctionCall {
-    if evt.ContentBlockIndex == nil {
-        return nil
-    }
-    idx := *evt.ContentBlockIndex
-    at, ok := a.activeTools[idx]
-    if !ok {
-        return nil
-    }
-    // Parse accumulated JSON
-    inputStr := at.inputBuilder.String()
-    if inputStr != "" {
-        var args map[string]any
-        if err := json.Unmarshal([]byte(inputStr), &args); err != nil {
-            at.call.Arguments = map[string]any{"error": "Failed to parse input"}
-        } else {
-            at.call.Arguments = args
-        }
-    } else {
-        at.call.Arguments = map[string]any{}
-    }
-    a.pendingCalls = append(a.pendingCalls, at.call)
-    delete(a.activeTools, idx)
-    return []gollm.FunctionCall{at.call}
+	if evt.ContentBlockIndex == nil {
+		return nil
+	}
+	idx := *evt.ContentBlockIndex
+	at, ok := a.activeTools[idx]
+	if !ok {
+		return nil
+	}
+	// Parse accumulated JSON
+	inputStr := at.inputBuilder.String()
+	if inputStr != "" {
+		var args map[string]any
+		if err := json.Unmarshal([]byte(inputStr), &args); err != nil {
+			at.call.Arguments = map[string]any{"error": "Failed to parse input"}
+		} else {
+			at.call.Arguments = args
+		}
+	} else {
+		at.call.Arguments = map[string]any{}
+	}
+	a.pendingCalls = append(a.pendingCalls, at.call)
+	delete(a.activeTools, idx)
+	return []gollm.FunctionCall{at.call}
 }
 
-func (a *toolStreamAssembler) onMessageStop() string {
-    return a.fullContent.String()
+func (a *toolStreamAssembler) finalizeMessage() (string, []gollm.FunctionCall) {
+    content := a.fullContent.String()
+    calls := a.pendingCalls
+    // reset for next message
+    a.fullContent.Reset()
+    a.pendingCalls = a.pendingCalls[:0]
+    a.activeTools = make(map[int32]*activeTool)
+    return content, calls
 }
 
 func (a *toolStreamAssembler) onMetadata(evt types.ConverseStreamMetadataEvent) any {
-    a.pendingUsage = evt.Usage
-    return a.pendingUsage
+	a.pendingUsage = evt.Usage
+	return a.pendingUsage
 }
 
 func (cs *bedrockChatSession) IsRetryableError(err error) bool {
