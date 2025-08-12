@@ -60,7 +60,21 @@ else
 
 fi
 if [ -n "${INSECURE:-}" ]; then
-  echo "Warning: INSECURE is set, SSL certificate validation will be skipped for GitHub API requests."
+  echo "⚠️  SECURITY WARNING: INSECURE is set, SSL certificate validation will be skipped!"
+  echo "   This makes you vulnerable to man-in-the-middle attacks and other security risks."
+  echo "   Only proceed if you understand the security implications and trust your network."
+  echo ""
+  echo "   Continue with unsafe download? (yes/no)"
+  read -r response
+  case "$response" in
+    [yY][eE][sS]|[yY])
+      echo "Proceeding with insecure connection..."
+      ;;
+    *)
+      echo "Installation aborted for security reasons."
+      exit 1
+      ;;
+  esac
 fi
 LATEST_TAG=$(curl $INSECURE_ARG -s -H "$auth_hdr" \
   "https://api.github.com/repos/$REPO/releases/latest" \
@@ -89,7 +103,7 @@ trap cleanup EXIT INT TERM
   echo "Downloading $URL ..."
   CURL_FLAGS="-fSL --retry 3"
   if [ -n "${INSECURE:-}" ]; then
-    echo "Warning: INSECURE is set, SSL certificate validation will be skipped for downloads."
+    echo "⚠️  SSL certificate validation will be skipped for this download."
   fi
   curl $INSECURE_ARG $CURL_FLAGS "$URL" -o "$TARBALL"
   tar --no-same-owner -xzf "$TARBALL"
