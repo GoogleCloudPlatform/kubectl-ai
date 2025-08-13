@@ -124,8 +124,8 @@ type Options struct {
 	ListSessions  bool   `json:"listSessions,omitempty"`
 	DeleteSession string `json:"deleteSession,omitempty"`
 
-	// NoTruncateOutput is a flag to disable truncation of tool output in the terminal UI.
-	NoTruncateOutput bool `json:"noTruncateOutput,omitempty"`
+	// ShowToolOutput is a flag to disable truncation of tool output in the terminal UI.
+	ShowToolOutput bool `json:"showToolOutput,omitempty"`
 }
 
 var defaultToolConfigPaths = []string{
@@ -176,8 +176,8 @@ func (o *Options) InitDefaults() {
 	o.ListSessions = false
 	o.DeleteSession = ""
 
-	// By default, truncate long tool outputs
-	o.NoTruncateOutput = false
+	// By default, hide tool outputs
+	o.ShowToolOutput = false
 }
 
 func (o *Options) LoadConfiguration(b []byte) error {
@@ -216,8 +216,7 @@ func (o *Options) LoadConfigurationFile() error {
 			} else {
 				fmt.Fprintf(os.Stderr, "warning: could not load defaults from %q: %v\n", configPath, err)
 			}
-		}
-		if len(configBytes) > 0 {
+		} else if len(configBytes) > 0 {
 			if err := o.LoadConfiguration(configBytes); err != nil {
 				fmt.Fprintf(os.Stderr, "warning: error loading configuration from %q: %v\n", configPath, err)
 			}
@@ -316,7 +315,7 @@ func (opt *Options) bindCLIFlags(f *pflag.FlagSet) error {
 	f.Var(&opt.UIType, "ui-type", "user interface type to use. Supported values: terminal, web, tui.")
 	f.StringVar(&opt.UIListenAddress, "ui-listen-address", opt.UIListenAddress, "address to listen for the HTML UI.")
 	f.BoolVar(&opt.SkipVerifySSL, "skip-verify-ssl", opt.SkipVerifySSL, "skip verifying the SSL certificate of the LLM provider")
-	f.BoolVar(&opt.NoTruncateOutput, "no-truncate-output", opt.NoTruncateOutput, "disable truncation of tool output in the terminal UI")
+	f.BoolVar(&opt.ShowToolOutput, "show-tool-output", opt.ShowToolOutput, "show tool output in the terminal UI")
 
 	f.StringVar(&opt.ResumeSession, "resume-session", opt.ResumeSession, "ID of session to resume (use 'latest' for the most recent session)")
 	f.BoolVar(&opt.NewSession, "new-session", opt.NewSession, "create a new session")
@@ -492,7 +491,7 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 	case ui.UITypeTerminal:
 		// since stdin is already consumed, we use TTY for taking input from user
 		useTTYForInput := hasInputData
-		userInterface, err = ui.NewTerminalUI(k8sAgent, useTTYForInput, opt.NoTruncateOutput, recorder)
+		userInterface, err = ui.NewTerminalUI(k8sAgent, useTTYForInput, opt.ShowToolOutput, recorder)
 		if err != nil {
 			return fmt.Errorf("creating terminal UI: %w", err)
 		}

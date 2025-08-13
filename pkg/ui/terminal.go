@@ -77,8 +77,8 @@ type TerminalUI struct {
 	// in such cases, stdin is already consumed and closed and reading input results in IO error.
 	// In such cases, we open /dev/tty and use it for taking input.
 	useTTYForInput bool
-	// noTruncateOutput disables truncation of tool output.
-	noTruncateOutput bool
+	// showToolOutput disables truncation of tool output.
+	showToolOutput bool
 
 	agent *agent.Agent
 }
@@ -110,7 +110,7 @@ func getCustomTerminalWidth() int {
 	return 0
 }
 
-func NewTerminalUI(agent *agent.Agent, useTTYForInput bool, noTruncateOutput bool, journal journal.Recorder) (*TerminalUI, error) {
+func NewTerminalUI(agent *agent.Agent, useTTYForInput bool, showToolOutput bool, journal journal.Recorder) (*TerminalUI, error) {
 	width := getCustomTerminalWidth()
 
 	options := []glamour.TermRendererOption{
@@ -134,7 +134,7 @@ func NewTerminalUI(agent *agent.Agent, useTTYForInput bool, noTruncateOutput boo
 		journal:          journal,
 		useTTYForInput:   useTTYForInput, // Store this flag
 		agent:            agent,
-		noTruncateOutput: noTruncateOutput,
+		showToolOutput:   showToolOutput,
 	}
 
 	return u, nil
@@ -254,8 +254,11 @@ func (u *TerminalUI) handleMessage(msg *api.Message) {
 		text = msg.Payload.(string)
 	case api.MessageTypeToolCallRequest:
 		styleOptions = append(styleOptions, foreground(colorGreen))
-		text = fmt.Sprintf("\nRunning: %s\n", msg.Payload.(string))
+		text = fmt.Sprintf("\n  Running: %s\n", msg.Payload.(string))
 	case api.MessageTypeToolCallResponse:
+		if !u.showToolOutput {
+			return
+		}
 		styleOptions = append(styleOptions, renderMarkdown())
 		output, err := tools.ToolResultToMap(msg.Payload)
 
@@ -266,10 +269,8 @@ func (u *TerminalUI) handleMessage(msg *api.Message) {
 		}
 
 		responseText := formatToolCallResponse(output)
-		if !u.noTruncateOutput {
-			responseText = truncateString(responseText, 250)
-		}
 		text = fmt.Sprintf("%s\n", responseText)
+
 	case api.MessageTypeUserInputRequest:
 		text = msg.Payload.(string)
 		klog.Infof("Received user input request with payload: %q", text)
@@ -450,11 +451,4 @@ func formatToolCallResponse(payload map[string]any) string {
 	}
 
 	return fmt.Sprint(payload)
-}
-
-func truncateString(s string, limit int) string {
-	if len(s) <= limit {
-		return s
-	}
-	return s[:limit] + "..."
 }
