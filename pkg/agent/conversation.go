@@ -362,6 +362,10 @@ func (c *Agent) Run(ctx context.Context, initialQuery string) error {
 						log.Error(nil, "Received unexpected input from channel", "userInput", userInput)
 						return
 					}
+					if strings.TrimSpace(query.Query) == "" {
+						log.Info("No query provided, skipping agentic loop")
+						continue
+					}
 					c.addMessage(api.MessageSourceUser, api.MessageTypeText, query.Query)
 					// we don't need the agentic loop for meta queries
 					// for ex. model, tools, etc.

@@ -282,12 +282,20 @@ func (u *TerminalUI) handleMessage(msg *api.Message) {
 				klog.Errorf("Failed to get TTY reader: %v", err)
 				return
 			}
-			fmt.Print("\n>>> ") // Print prompt manually
-			query, err = tReader.ReadString('\n')
-			if err != nil {
-				klog.Errorf("Error reading from TTY: %v", err)
-				u.agent.Input <- fmt.Errorf("error reading from TTY: %w", err)
-				return
+			// keep reading input until we get a non-empty query
+			for {
+				var err error
+				fmt.Print("\n>>> ") // Print prompt manually
+				query, err = tReader.ReadString('\n')
+				if err != nil {
+					klog.Errorf("Error reading from TTY: %v", err)
+					u.agent.Input <- fmt.Errorf("error reading from TTY: %w", err)
+					return
+				}
+				if strings.TrimSpace(query) == "" {
+					continue
+				}
+				break
 			}
 			klog.Infof("Sending TTY input to agent: %q", query)
 			u.agent.Input <- &api.UserInputResponse{Query: query}
@@ -298,21 +306,28 @@ func (u *TerminalUI) handleMessage(msg *api.Message) {
 				u.agent.Input <- fmt.Errorf("error creating readline instance: %w", err)
 				return
 			}
-			rlInstance.SetPrompt(">>> ") // Ensure correct prompt
-			query, err = rlInstance.Readline()
-			if err != nil {
-				klog.Infof("Readline error: %v", err)
-				switch err {
-				case readline.ErrInterrupt: // Handle Ctrl+C
-					u.agent.Input <- io.EOF
-				case io.EOF: // Handle Ctrl+D
-					u.agent.Input <- io.EOF
-				default:
-					u.agent.Input <- err
+			// keep reading input until we get a non-empty query
+			for {
+				rlInstance.SetPrompt(">>> ") // Ensure correct prompt
+				query, err = rlInstance.Readline()
+				if err != nil {
+					klog.Infof("Readline error: %v", err)
+					switch err {
+					case readline.ErrInterrupt: // Handle Ctrl+C
+						u.agent.Input <- io.EOF
+					case io.EOF: // Handle Ctrl+D
+						u.agent.Input <- io.EOF
+					default:
+						u.agent.Input <- err
+					}
+					break
 				}
-			} else {
+				if strings.TrimSpace(query) == "" {
+					continue
+				}
 				klog.Infof("Sending readline input to agent: %q", query)
 				u.agent.Input <- &api.UserInputResponse{Query: query}
+				break
 			}
 		}
 		if query == "clear" || query == "reset" {
