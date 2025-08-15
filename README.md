@@ -268,7 +268,7 @@ removeWorkdir: false             # Remove temporary working directory after exec
 kubeconfig: "~/.kube/config"      # Path to kubeconfig file
 
 # UI configuration
-userInterface: "terminal"         # UI mode: "terminal" or "html"
+uiType: "terminal"                # UI mode: "terminal" or "web"
 uiListenAddress: "localhost:8888" # Address for HTML UI server
 
 # Prompt configuration
