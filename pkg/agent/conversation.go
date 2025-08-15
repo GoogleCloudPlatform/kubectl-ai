@@ -387,7 +387,17 @@ func (c *Agent) Run(ctx context.Context, initialQuery string) error {
 						// we handled the meta query, so we don't need to run the agentic loop
 						c.setAgentState(api.AgentStateDone)
 						c.pendingFunctionCalls = []ToolCallAnalysis{}
-						c.addMessage(api.MessageSourceAgent, api.MessageTypeText, answer)
+						if query.Query != "clear" && query.Query != "reset" {
+							c.addMessage(api.MessageSourceAgent, api.MessageTypeText, answer)
+						} else {
+							c.Output <- &api.Message{
+								ID:        uuid.New().String(),
+								Source:    api.MessageSourceAgent,
+								Type:      api.MessageTypeText,
+								Payload:   answer,
+								Timestamp: time.Now(),
+							}
+						}
 						continue
 					}
 
@@ -471,6 +481,7 @@ func (c *Agent) Run(ctx context.Context, initialQuery string) error {
 					log.Error(err, "error sending streaming LLM response")
 					c.setAgentState(api.AgentStateDone)
 					c.pendingFunctionCalls = []ToolCallAnalysis{}
+					c.addMessage(api.MessageSourceAgent, api.MessageTypeError, "Error: "+err.Error())
 					continue
 				}
 
