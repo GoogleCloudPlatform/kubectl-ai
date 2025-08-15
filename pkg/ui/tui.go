@@ -232,7 +232,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.viewport.Width = msg.Width
 		m.textarea.SetWidth(msg.Width)
-		if m.agent.Session().AgentState == api.AgentStateWaitingForInput {
+		if m.agent.GetSession().AgentState == api.AgentStateWaitingForInput {
 			m.list.SetWidth(msg.Width)
 			// m.viewport.Height = msg.Height - m.list.Height() - lipgloss.Height(gap)
 			// TODO: keeping the height of the viewport the same as the height of the textarea for now to avoid jerky UI
@@ -250,7 +250,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyCtrlC, tea.KeyEsc, tea.KeyCtrlD:
 			return m, tea.Quit
 		case tea.KeyEnter:
-			if m.agent.Session().AgentState == api.AgentStateWaitingForInput {
+			if m.agent.GetSession().AgentState == api.AgentStateWaitingForInput {
 				i, ok := m.list.SelectedItem().(item)
 				if ok {
 					m.choice = string(i)
@@ -271,7 +271,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewport.GotoBottom()
 		}
 	case *api.Message:
-		m.messages = m.agent.Session().AllMessages()
+		m.messages = m.agent.GetSession().AllMessages()
 		m.viewport.SetContent(strings.Join(m.renderedMessages(), "\n"))
 		m.viewport.GotoBottom()
 
@@ -286,7 +286,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) renderedMessages() []string {
-	allMessages := m.agent.Session().AllMessages()
+	allMessages := m.agent.GetSession().AllMessages()
 
 	var messages []string
 	for _, message := range allMessages {
@@ -307,7 +307,7 @@ func (m model) View() string {
 		m.viewport.View(),
 		gap,
 	)
-	if m.agent.Session().AgentState == api.AgentStateWaitingForInput {
+	if m.agent.GetSession().AgentState == api.AgentStateWaitingForInput {
 		var choiceRequest *api.UserChoiceRequest
 		if len(m.messages) > 0 {
 			if lastMsg := m.messages[len(m.messages)-1]; lastMsg.Type == api.MessageTypeUserChoiceRequest {

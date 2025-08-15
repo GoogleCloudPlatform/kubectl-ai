@@ -16,80 +16,37 @@ package sessions
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
-	"time"
 
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/api"
-	"sigs.k8s.io/yaml"
 )
 
 const (
-	metadataFileName = "metadata.yaml"
-	historyFileName  = "history.json"
+	historyFileName = "history.json"
 )
 
-// Metadata contains metadata about a session
-type Metadata struct {
-	ProviderID   string    `json:"providerID"`
-	ModelID      string    `json:"modelID"`
-	CreatedAt    time.Time `json:"createdAt"`
-	LastAccessed time.Time `json:"lastAccessed"`
-}
-
-// Session represents a single chat session.
-type Session struct {
-	ID   string
+// FileChatMessageStore is a file-based implementation of the api.ChatMessageStore interface.
+type FileChatMessageStore struct {
 	Path string
 	mu   sync.Mutex
 }
 
+// NewFileChatMessageStore creates a new FileChatMessageStore.
+func NewFileChatMessageStore(path string) *FileChatMessageStore {
+	return &FileChatMessageStore{
+		Path: path,
+	}
+}
+
 // HistoryPath returns the path to the history file for the session.
-func (s *Session) HistoryPath() string {
+func (s *FileChatMessageStore) HistoryPath() string {
 	return filepath.Join(s.Path, historyFileName)
 }
 
-// MetadataPath returns the path to the metadata file for the session.
-func (s *Session) MetadataPath() string {
-	return filepath.Join(s.Path, metadataFileName)
-}
-
-// LoadMetadata loads the metadata for the session.
-func (s *Session) LoadMetadata() (*Metadata, error) {
-	b, err := os.ReadFile(s.MetadataPath())
-	if err != nil {
-		return nil, err
-	}
-	var m Metadata
-	if err := yaml.Unmarshal(b, &m); err != nil {
-		return nil, err
-	}
-	return &m, nil
-}
-
-// SaveMetadata saves the metadata for the session.
-func (s *Session) SaveMetadata(m *Metadata) error {
-	b, err := yaml.Marshal(m)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(s.MetadataPath(), b, 0644)
-}
-
-// UpdateLastAccessed updates the last accessed timestamp in the metadata.
-func (s *Session) UpdateLastAccessed() error {
-	m, err := s.LoadMetadata()
-	if err != nil {
-		return err
-	}
-	m.LastAccessed = time.Now()
-	return s.SaveMetadata(m)
-}
-
 // AddChatMessage appends a new message to the history and persists it to the sessions's history file.
-func (s *Session) AddChatMessage(msg *api.Message) error {
+func (s *FileChatMessageStore) AddChatMessage(msg *api.Message) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -111,7 +68,7 @@ func (s *Session) AddChatMessage(msg *api.Message) error {
 }
 
 // SetChatMessages replaces the current messages with a new set of messages and overwrites the session's history file.
-func (s *Session) SetChatMessages(newMessages []*api.Message) error {
+func (s *FileChatMessageStore) SetChatMessages(newMessages []*api.Message) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -134,7 +91,7 @@ func (s *Session) SetChatMessages(newMessages []*api.Message) error {
 }
 
 // ChatMessages returns all messages from the session's history file.
-func (s *Session) ChatMessages() []*api.Message {
+func (s *FileChatMessageStore) ChatMessages() []*api.Message {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -159,7 +116,7 @@ func (s *Session) ChatMessages() []*api.Message {
 }
 
 // ClearChatMessages removes all records from the history and truncates the session's history file.
-func (s *Session) ClearChatMessages() error {
+func (s *FileChatMessageStore) ClearChatMessages() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -169,17 +126,4 @@ func (s *Session) ClearChatMessages() error {
 		return err
 	}
 	return f.Close()
-}
-
-func (s *Session) String() (string, error) {
-	metadata, err := s.LoadMetadata()
-	if err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("Current session:\n\nID: %s\nCreated: %s\nLast Accessed: %s\nModel: %s\nProvider: %s\n\n",
-		s.ID,
-		metadata.CreatedAt.Format("2006-01-02 15:04:05"),
-		metadata.LastAccessed.Format("2006-01-02 15:04:05"),
-		metadata.ModelID,
-		metadata.ProviderID), nil
 }

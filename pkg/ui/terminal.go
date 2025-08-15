@@ -158,7 +158,7 @@ func (u *TerminalUI) Run(ctx context.Context) error {
 				u.handleMessage(msg.(*api.Message))
 
 				// Check if agent has exited in RunOnce mode
-				if u.agent.Session().AgentState == api.AgentStateExited {
+				if u.agent.GetSession().AgentState == api.AgentStateExited {
 					klog.Info("Agent has exited, terminating UI")
 					close(agentExited)
 					return

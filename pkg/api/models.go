@@ -20,7 +20,8 @@ import (
 
 type Session struct {
 	ID           string
-	Messages     []*Message
+	ProviderID   string
+	ModelID      string
 	AgentState   AgentState
 	CreatedAt    time.Time
 	LastModified time.Time
