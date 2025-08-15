@@ -464,6 +464,7 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 
 	k8sAgent := &agent.Agent{
 		Model:              opt.ModelID,
+		Provider:           opt.ProviderID,
 		Kubeconfig:         opt.KubeConfigPath,
 		LLM:                llmClient,
 		MaxIterations:      opt.MaxIterations,

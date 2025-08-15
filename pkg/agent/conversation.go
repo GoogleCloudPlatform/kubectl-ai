@@ -76,6 +76,7 @@ type Agent struct {
 	// to be combined with PromptTemplateFile
 	ExtraPromptPaths []string
 	Model            string
+	Provider         string
 
 	RemoveWorkDir bool
 
@@ -354,6 +355,24 @@ func (c *Agent) Run(ctx context.Context, initialQuery string) error {
 					log.Info("Received input from channel", "userInput", userInput)
 					if userInput == io.EOF {
 						log.Info("Agent loop done, EOF received")
+						if _, ok := c.ChatMessageStore.(*sessions.InMemoryChatStore); ok {
+							c.addMessage(api.MessageSourceAgent, api.MessageTypeText, "Save session before quitting? (y/n)")
+							c.addMessage(api.MessageSourceAgent, api.MessageTypeUserInputRequest, ">>>")
+							response := <-c.Input
+							resp, ok := response.(*api.UserInputResponse)
+							if ok {
+								if resp.Query == "y" || resp.Query == "yes" {
+									sessionID, err := c.SaveSession()
+									if err != nil {
+										log.Error(err, "error saving session")
+									} else {
+										c.addMessage(api.MessageSourceAgent, api.MessageTypeText, "Session saved as "+sessionID)
+									}
+								} else {
+									c.addMessage(api.MessageSourceAgent, api.MessageTypeText, "Quitting without saving session.")
+								}
+							}
+						}
 						c.setAgentState(api.AgentStateExited)
 						return
 					}
@@ -702,6 +721,13 @@ func (c *Agent) handleMetaQuery(ctx context.Context, query string) (answer strin
 		}
 		return "Session not found (session persistence not enabled)", true, nil
 
+	case "save-session":
+		savedSessionID, err := c.SaveSession()
+		if err != nil {
+			return "", false, fmt.Errorf("failed to save session: %w", err)
+		}
+		return "Saved session as " + savedSessionID, true, nil
+
 	case "sessions":
 		manager, err := sessions.NewSessionManager()
 		if err != nil {
@@ -742,6 +768,41 @@ func (c *Agent) handleMetaQuery(ctx context.Context, query string) (answer strin
 	}
 
 	return "", false, nil
+}
+
+func (c *Agent) SaveSession() (string, error) {
+	c.sessionMu.Lock()
+	defer c.sessionMu.Unlock()
+
+	manager, err := sessions.NewSessionManager()
+	if err != nil {
+		return "", fmt.Errorf("failed to create session manager: %w", err)
+	}
+	foundSession, _ := manager.FindSessionByID(c.session.ID)
+	if foundSession != nil {
+		return "", fmt.Errorf("session with ID %s already exists", foundSession.ID)
+	}
+	metadata := sessions.Metadata{
+		CreatedAt:    time.Now(),
+		LastAccessed: time.Now(),
+		ModelID:      c.Model,
+		ProviderID:   c.Provider,
+	}
+	newSession, err := manager.NewSession(metadata)
+	if err != nil {
+		return "", fmt.Errorf("failed to create new session: %w", err)
+	}
+
+	messages := c.ChatMessageStore.ChatMessages()
+	if err := newSession.SetChatMessages(messages); err != nil {
+		return "", fmt.Errorf("failed to save chat messages to new session: %w", err)
+	}
+
+	c.ChatMessageStore = newSession
+	c.session.ChatMessageStore = newSession
+	c.llmChat.Initialize(c.ChatMessageStore.ChatMessages())
+
+	return newSession.ID, nil
 }
 
 func (c *Agent) listModels(ctx context.Context) ([]string, error) {
