@@ -119,10 +119,11 @@ type Options struct {
 	SkipVerifySSL bool `json:"skipVerifySSL,omitempty"`
 
 	// Session management options
-	ResumeSession string `json:"resumeSession,omitempty"`
-	NewSession    bool   `json:"newSession,omitempty"`
-	ListSessions  bool   `json:"listSessions,omitempty"`
-	DeleteSession string `json:"deleteSession,omitempty"`
+	ResumeSession  string `json:"resumeSession,omitempty"`
+	NewSession     bool   `json:"newSession,omitempty"`
+	ListSessions   bool   `json:"listSessions,omitempty"`
+	DeleteSession  string `json:"deleteSession,omitempty"`
+	SessionBackend string `json:"sessionBackend,omitempty"`
 
 	// ShowToolOutput is a flag to disable truncation of tool output in the terminal UI.
 	ShowToolOutput bool `json:"showToolOutput,omitempty"`
@@ -175,6 +176,7 @@ func (o *Options) InitDefaults() {
 	o.NewSession = false
 	o.ListSessions = false
 	o.DeleteSession = ""
+	o.SessionBackend = "memory"
 
 	// By default, hide tool outputs
 	o.ShowToolOutput = false
@@ -321,6 +323,7 @@ func (opt *Options) bindCLIFlags(f *pflag.FlagSet) error {
 	f.BoolVar(&opt.NewSession, "new-session", opt.NewSession, "create a new session")
 	f.BoolVar(&opt.ListSessions, "list-sessions", opt.ListSessions, "list all available sessions")
 	f.StringVar(&opt.DeleteSession, "delete-session", opt.DeleteSession, "delete a session by ID")
+	f.StringVar(&opt.SessionBackend, "session-backend", opt.SessionBackend, "session backend to use (memory or filesystem)")
 
 	return nil
 }
@@ -346,11 +349,11 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 	}
 
 	if opt.ListSessions {
-		return handleListSessions()
+		return handleListSessions(opt)
 	}
 
 	if opt.DeleteSession != "" {
-		return handleDeleteSession(opt.DeleteSession)
+		return handleDeleteSession(opt)
 	}
 
 	if err := handleCustomTools(opt.ToolConfigPaths); err != nil {
@@ -385,12 +388,12 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 	defer llmClient.Close()
 
 	// Initialize session management
-	var chatStore api.ChatMessageStore
+	var session *api.Session
 	var sessionManager *sessions.SessionManager
 
 	// TODO: Remove this when session persistence is default
 	if opt.NewSession || opt.ResumeSession != "" {
-		sessionManager, err = sessions.NewSessionManager()
+		sessionManager, err = sessions.NewSessionManager(opt.SessionBackend)
 		if err != nil {
 			return fmt.Errorf("failed to create session manager: %w", err)
 		}
@@ -402,49 +405,47 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 				ProviderID: opt.ProviderID,
 				ModelID:    opt.ModelID,
 			}
-			chatStore, err = sessionManager.NewSession(meta)
+			session, err = sessionManager.NewSession(meta)
 			if err != nil {
 				return fmt.Errorf("failed to create a new session: %w", err)
 			}
-			klog.Infof("Created new session: %s\n", chatStore.(*sessions.Session).ID)
+			klog.Infof("Created new session: %s\n", session.ID)
 		} else {
 			// Load existing session
 			var sessionID string
 			if opt.ResumeSession == "" || opt.ResumeSession == "latest" {
 				// Get the latest session
-				chatStore, err = sessionManager.GetLatestSession()
+				session, err = sessionManager.GetLatestSession()
 				if err != nil {
 					return fmt.Errorf("failed to get latest session: %w", err)
 				}
-				if chatStore == nil {
+				if session == nil {
 					// No sessions exist, create a new one
 					meta := sessions.Metadata{
 						ProviderID: opt.ProviderID,
 						ModelID:    opt.ModelID,
 					}
-					chatStore, err = sessionManager.NewSession(meta)
+					session, err = sessionManager.NewSession(meta)
 					if err != nil {
 						return fmt.Errorf("failed to create new session: %w", err)
 					}
-					klog.Infof("Created new session: %s\n", chatStore.(*sessions.Session).ID)
+					klog.Infof("Created new session: %s\n", session.ID)
 				}
 			} else {
 				sessionID = opt.ResumeSession
-				chatStore, err = sessionManager.FindSessionByID(sessionID)
+				session, err = sessionManager.FindSessionByID(sessionID)
 				if err != nil {
 					return fmt.Errorf("session %s not found: %w", sessionID, err)
 				}
 			}
 
-			if chatStore != nil {
+			if session != nil {
 				// Update last accessed time
-				if err := chatStore.(*sessions.Session).UpdateLastAccessed(); err != nil {
+				if err := sessionManager.UpdateLastAccessed(session); err != nil {
 					klog.Warningf("Failed to update session last accessed time: %v", err)
 				}
 			}
 		}
-	} else {
-		chatStore = sessions.NewInMemoryChatStore()
 	}
 
 	var recorder journal.Recorder
@@ -477,7 +478,8 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 		MCPClientEnabled:   opt.MCPClient,
 		RunOnce:            opt.Quiet,
 		InitialQuery:       queryFromCmd,
-		ChatMessageStore:   chatStore,
+		Session:            session,
+		SessionBackend:     opt.SessionBackend,
 	}
 
 	err = k8sAgent.Init(ctx)
@@ -689,8 +691,8 @@ func startMCPServer(ctx context.Context, opt Options) error {
 }
 
 // handleListSessions lists all available sessions with their metadata.
-func handleListSessions() error {
-	manager, err := sessions.NewSessionManager()
+func handleListSessions(opt Options) error {
+	manager, err := sessions.NewSessionManager(opt.SessionBackend)
 	if err != nil {
 		return fmt.Errorf("failed to create session manager: %w", err)
 	}
@@ -710,46 +712,35 @@ func handleListSessions() error {
 	fmt.Println("--\t\t-------\t\t\t-------------\t\t-----\t\t--------")
 
 	for _, session := range sessionList {
-		metadata, err := session.LoadMetadata()
-		if err != nil {
-			fmt.Printf("%s\t\t<error loading metadata>\n", session.ID)
-			continue
-		}
-
 		fmt.Printf("%s\t%s\t%s\t%s\t%s\n",
 			session.ID,
-			metadata.CreatedAt.Format("2006-01-02 15:04:05"),
-			metadata.LastAccessed.Format("2006-01-02 15:04:05"),
-			metadata.ModelID,
-			metadata.ProviderID)
+			session.CreatedAt.Format("2006-01-02 15:04:05"),
+			session.LastModified.Format("2006-01-02 15:04:05"),
+			session.ModelID,
+			session.ProviderID)
 	}
 
 	return nil
 }
 
 // handleDeleteSession deletes a session by ID.
-func handleDeleteSession(sessionID string) error {
-	manager, err := sessions.NewSessionManager()
+func handleDeleteSession(opt Options) error {
+	manager, err := sessions.NewSessionManager(opt.SessionBackend)
 	if err != nil {
 		return fmt.Errorf("failed to create session manager: %w", err)
 	}
 
-	// Check if session exists
+	sessionID := opt.DeleteSession
 	session, err := manager.FindSessionByID(sessionID)
 	if err != nil {
 		return fmt.Errorf("session %s not found: %w", sessionID, err)
 	}
 
-	// Load metadata for confirmation
-	metadata, err := session.LoadMetadata()
-	if err != nil {
-		return fmt.Errorf("failed to load session metadata: %w", err)
-	}
-
 	fmt.Printf("Deleting session %s:\n", sessionID)
-	fmt.Printf("  Model: %s\n", metadata.ModelID)
-	fmt.Printf("  Provider: %s\n", metadata.ProviderID)
-	fmt.Printf("  Created: %s\n", metadata.CreatedAt.Format("2006-01-02 15:04:05"))
+	fmt.Printf("  Model: %s\n", session.ModelID)
+	fmt.Printf("  Provider: %s\n", session.ProviderID)
+	fmt.Printf("  Created: %s\n", session.CreatedAt.Format("2006-01-02 15:04:05"))
+	fmt.Printf("  Last Accessed: %s\n", session.LastModified.Format("2006-01-02 15:04:05"))
 
 	fmt.Print("Are you sure you want to delete this session? (y/N): ")
 	var response string

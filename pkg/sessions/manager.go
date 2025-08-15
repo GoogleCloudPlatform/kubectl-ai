@@ -17,92 +17,53 @@ package sessions
 import (
 	"fmt"
 	"math/rand"
-	"os"
-	"path/filepath"
-	"sort"
 	"time"
+
+	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/api"
 )
 
-const (
-	sessionsDirName = "sessions"
-	timeFormat      = "20060102"
-)
-
-// SessionManager manages the chat sessions.
+// SessionManager manages chat sessions.
 type SessionManager struct {
-	BasePath string
+	store Store
 }
 
-// NewSessionManager creates a new SessionManager.
-func NewSessionManager() (*SessionManager, error) {
-	homeDir, err := os.UserHomeDir()
+// NewSessionManager creates a new SessionManager with the specified backend.
+func NewSessionManager(backend string) (*SessionManager, error) {
+	store, err := NewStore(backend)
 	if err != nil {
 		return nil, err
 	}
-	basePath := filepath.Join(homeDir, ".kubectl-ai", sessionsDirName)
-	if err := os.MkdirAll(basePath, 0755); err != nil {
-		return nil, err
-	}
-	return &SessionManager{
-		BasePath: basePath,
-	}, nil
+	return &SessionManager{store: store}, nil
 }
 
 // NewSession creates a new session.
-func (sm *SessionManager) NewSession(meta Metadata) (*Session, error) {
+func (sm *SessionManager) NewSession(meta Metadata) (*api.Session, error) {
 	// Generate a unique session ID with date prefix and random suffix
 	suffix := fmt.Sprintf("%04d", rand.Intn(1000))
-	sessionID := time.Now().Format(timeFormat) + "-" + suffix
-	sessionPath := filepath.Join(sm.BasePath, sessionID)
+	sessionID := time.Now().Format("20060102") + "-" + suffix
+	session := &api.Session{
+		ID:           sessionID,
+		ProviderID:   meta.ProviderID,
+		ModelID:      meta.ModelID,
+		AgentState:   api.AgentStateIdle,
+		CreatedAt:    time.Now(),
+		LastModified: time.Now(),
+	}
 
-	if err := os.MkdirAll(sessionPath, 0755); err != nil {
+	if err := sm.store.CreateSession(session); err != nil {
 		return nil, err
 	}
-
-	s := &Session{
-		ID:   sessionID,
-		Path: sessionPath,
-	}
-
-	// Set creation and last accessed times
-	meta.CreatedAt = time.Now()
-	meta.LastAccessed = time.Now()
-
-	if err := s.SaveMetadata(&meta); err != nil {
-		return nil, err
-	}
-	return s, nil
+	return session, nil
 }
 
-// ListSessions lists all the sessions.
-func (sm *SessionManager) ListSessions() ([]*Session, error) {
-	entries, err := os.ReadDir(sm.BasePath)
-	if err != nil {
-		return nil, err
-	}
-
-	var sessions []*Session
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		sessions = append(sessions, &Session{
-			ID:   entry.Name(),
-			Path: filepath.Join(sm.BasePath, entry.Name()),
-		})
-	}
-
-	// Sort sessions by name, which will sort by date (newest first)
-	sort.Slice(sessions, func(i, j int) bool {
-		return sessions[i].ID > sessions[j].ID
-	})
-
-	return sessions, nil
+// ListSessions lists all available sessions.
+func (sm *SessionManager) ListSessions() ([]*api.Session, error) {
+	return sm.store.ListSessions()
 }
 
-// GetLatestSession returns the latest session
-func (sm *SessionManager) GetLatestSession() (*Session, error) {
-	sessions, err := sm.ListSessions()
+// GetLatestSession returns the latest session.
+func (sm *SessionManager) GetLatestSession() (*api.Session, error) {
+	sessions, err := sm.store.ListSessions()
 	if err != nil {
 		return nil, err
 	}
@@ -112,41 +73,18 @@ func (sm *SessionManager) GetLatestSession() (*Session, error) {
 	return sessions[0], nil
 }
 
-// FindSessionByID finds a ession by its ID.
-func (sm *SessionManager) FindSessionByID(id string) (*Session, error) {
-	sessions, err := sm.ListSessions()
-	if err != nil {
-		return nil, err
-	}
-	for _, s := range sessions {
-		if s.ID == id {
-			return s, nil
-		}
-	}
-	return nil, fmt.Errorf("session with ID %q not found", id)
+// FindSessionByID finds a session by its ID.
+func (sm *SessionManager) FindSessionByID(id string) (*api.Session, error) {
+	return sm.store.GetSession(id)
 }
 
-// DeleteSession deletes a session and all its data.
+// DeleteSession deletes a session by its ID.
 func (sm *SessionManager) DeleteSession(id string) error {
-	session, err := sm.FindSessionByID(id)
-	if err != nil {
-		return err
-	}
-
-	return os.RemoveAll(session.Path)
+	return sm.store.DeleteSession(id)
 }
 
-// GetSessionInfo returns detailed information about a session including metadata.
-func (sm *SessionManager) GetSessionInfo(id string) (*Session, *Metadata, error) {
-	session, err := sm.FindSessionByID(id)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	meta, err := session.LoadMetadata()
-	if err != nil {
-		return nil, nil, err
-	}
-
-	return session, meta, nil
+// UpdateLastAccessed updates the last accessed timestamp for a session.
+func (sm *SessionManager) UpdateLastAccessed(session *api.Session) error {
+	session.LastModified = time.Now()
+	return sm.store.UpdateSession(session)
 }
