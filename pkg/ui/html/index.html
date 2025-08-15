@@ -266,6 +266,7 @@
             const [input, setInput] = useState('');
             const [agentState, setAgentState] = useState('idle');
             const [isConnected, setIsConnected] = useState(false);
+            const [contextRemaining, setContextRemaining] = useState(100);
             const [expandedOutputs, setExpandedOutputs] = useState(new Set());
             const [isDarkMode, setIsDarkMode] = useState(() => {
                 // Check for saved preference first
@@ -350,7 +351,20 @@
                 eventSource.onmessage = (event) => {
                     try {
                         const data = JSON.parse(event.data);
-                        setMessages(data.messages || []);
+                        const incoming = data.messages || [];
+                        let ctx = null;
+                        const filtered = [];
+                        for (const m of incoming) {
+                            if (m.Type === 'usage-metadata' && m.Payload && typeof m.Payload.contextPercentRemaining === 'number') {
+                                ctx = m.Payload.contextPercentRemaining;
+                            } else {
+                                filtered.push(m);
+                            }
+                        }
+                        if (ctx !== null) {
+                            setContextRemaining((prev) => prev === null ? ctx : Math.min(prev, ctx));
+                        }
+                        setMessages(filtered);
                         setAgentState(data.agentState || 'idle');
                     } catch (error) {
                         console.error('Error parsing server data:', error);
@@ -722,6 +736,13 @@
 
             const statusInfo = getAgentStatusInfo();
 
+            const getContextBarColor = () => {
+                if (contextRemaining === null) return '';
+                if (contextRemaining > 50) return 'bg-emerald-500';
+                if (contextRemaining > 20) return 'bg-amber-500';
+                return 'bg-red-500';
+            };
+
             return (
                 <div className={`flex flex-col h-screen ${isDarkMode ? 'bg-gradient-to-br from-slate-900 to-gray-900' : 'bg-gradient-to-br from-slate-50 to-blue-50'}`}>
                     {/* Header */}
@@ -749,12 +770,18 @@
                                         {isConnected ? 'Connected' : 'Connecting...'}
                                     </span>
                                 </div>
+                                <div className="flex items-center space-x-2 w-40">
+                                    <div className={`${isDarkMode ? 'bg-gray-700' : 'bg-gray-200'} h-2 rounded-full w-full`}>
+                                        <div className={`${getContextBarColor()} h-2 rounded-full`} style={{ width: `${contextRemaining}%` }}></div>
+                                    </div>
+                                    <span className={`text-xs font-medium ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>{contextRemaining.toFixed(1)}%</span>
+                                </div>
                                 {/* Dark Mode Toggle */}
                                 <button
                                     onClick={toggleDarkMode}
                                     className={`p-2 rounded-lg transition-colors duration-200 ${
-                                        isDarkMode 
-                                            ? 'bg-gray-700 hover:bg-gray-600 text-yellow-400' 
+                                        isDarkMode
+                                            ? 'bg-gray-700 hover:bg-gray-600 text-yellow-400'
                                             : 'bg-gray-100 hover:bg-gray-200 text-gray-600'
                                     }`}
                                     title={isDarkMode ? 'Switch to light mode' : 'Switch to dark mode'}

@@ -52,6 +52,7 @@ const (
 	MessageTypeUserInputResponse  MessageType = "user-input-response"
 	MessageTypeUserChoiceRequest  MessageType = "user-choice-request"
 	MessageTypeUserChoiceResponse MessageType = "user-choice-response"
+	MessageTypeUsageMetadata      MessageType = "usage-metadata"
 )
 
 type Message struct {
@@ -60,6 +61,10 @@ type Message struct {
 	Type      MessageType
 	Payload   any
 	Timestamp time.Time
+}
+
+type UsageMetadata struct {
+	ContextPercentRemaining float64 `json:"contextPercentRemaining,omitempty"`
 }
 
 type MessageSource string
