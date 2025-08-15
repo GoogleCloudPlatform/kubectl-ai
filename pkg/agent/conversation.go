@@ -741,6 +741,41 @@ func (c *Agent) handleMetaQuery(ctx context.Context, query string) (answer strin
 		return availableSessions, true, nil
 	}
 
+	if strings.HasPrefix(query, "resume-session") {
+		parts := strings.Split(query, " ")
+		if len(parts) != 2 {
+			return "Invalid command. Usage: resume-session <session_id>", true, nil
+		}
+		sessionID := parts[1]
+
+		manager, err := sessions.NewSessionManager()
+		if err != nil {
+			return "", false, fmt.Errorf("failed to create session manager: %w", err)
+		}
+
+		session, err := manager.FindSessionByID(sessionID)
+		if err != nil {
+			return "", false, fmt.Errorf("failed to get session: %w", err)
+		}
+
+		c.sessionMu.Lock()
+		c.ChatMessageStore = session
+		c.session.ChatMessageStore = session
+		c.session.Messages = session.ChatMessages()
+		metadata, err := session.LoadMetadata()
+		if err != nil {
+			c.sessionMu.Unlock()
+			return "", false, fmt.Errorf("failed to load session metadata: %w", err)
+		}
+		c.session.ID = session.ID
+		c.session.CreatedAt = metadata.CreatedAt
+		c.session.LastModified = metadata.LastAccessed
+		c.llmChat.Initialize(c.session.ChatMessageStore.ChatMessages())
+		c.sessionMu.Unlock()
+
+		return fmt.Sprintf("Resumed session %s.", sessionID), true, nil
+	}
+
 	return "", false, nil
 }
 
