@@ -273,7 +273,7 @@ func (u *HTMLUserInterface) handlePOSTSendMessage(w http.ResponseWriter, req *ht
 }
 
 func (u *HTMLUserInterface) getCurrentStateJSON() ([]byte, error) {
-	allMessages := u.agent.Session().AllMessages()
+	allMessages := u.agent.GetSession().AllMessages()
 	// Create a copy of the messages to avoid race conditions
 	var messages []*api.Message
 	for _, message := range allMessages {
@@ -283,7 +283,7 @@ func (u *HTMLUserInterface) getCurrentStateJSON() ([]byte, error) {
 		messages = append(messages, message)
 	}
 
-	agentState := u.agent.Session().AgentState
+	agentState := u.agent.GetSession().AgentState
 
 	data := map[string]interface{}{
 		"messages":   messages,
