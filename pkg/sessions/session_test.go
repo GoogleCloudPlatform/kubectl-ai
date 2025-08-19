@@ -196,7 +196,6 @@ func TestCorruptedMetadata(t *testing.T) {
 }
 
 // TestCorruptedHistory tests handling of corrupted history file
-/*
 func TestCorruptedHistory(t *testing.T) {
 	tempDir, err := os.MkdirTemp("", "session-test-*")
 	require.NoError(t, err)
@@ -232,7 +231,7 @@ func TestCorruptedHistory(t *testing.T) {
 	messages := session.ChatMessages()
 	assert.Equal(t, 1, len(messages))
 	assert.Equal(t, "Valid message", messages[0].Payload)
-}*/
+}
 
 // TestConcurrentAccess tests concurrent access to a session
 func TestConcurrentAccess(t *testing.T) {
@@ -334,6 +333,9 @@ func TestGetLatestSession(t *testing.T) {
 		require.NoError(t, err)
 		time.Sleep(time.Millisecond) // Ensure different timestamps
 	}
+
+	// List sessions for correct order
+	manager.ListSessions()
 
 	// Get latest session
 	latest, err := manager.GetLatestSession()
