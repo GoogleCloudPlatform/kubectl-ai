@@ -391,8 +391,21 @@ func processToolResponse(result any) (string, error) {
 
 		// Handle error response
 		if isError {
-			// Try to extract error message if possible
-			return "", fmt.Errorf("tool returned an error: %+v", result)
+			// Extract error message
+			errorMsg := fmt.Sprintf("%+v", result)
+			
+			// Try to get message from Content field
+			contentField := rv.FieldByName("Content")
+			if contentField.IsValid() && contentField.Len() > 0 {
+				if content := contentField.Index(0).Interface(); content != nil {
+					if textContent, ok := mcp.AsTextContent(content); ok {
+						errorMsg = textContent.Text
+					}
+				}
+			}
+			
+			// Return JSON error data instead of Go error
+			return fmt.Sprintf(`{"error": true, "message": %q, "status": "failed"}`, errorMsg), nil
 		}
 	}
 
