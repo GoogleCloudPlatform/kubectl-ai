@@ -13,6 +13,7 @@ kubectl-ai --mcp-client --quiet "scan rbac and send urgent report to incident-te
 ```
 
 **Architecture Components:**
+
 - **kubectl-ai**: Central orchestrator interpreting natural language commands
 - **Permiflow**: RBAC security scanning and analysis
 - **Resend**: Automated email delivery service
@@ -45,9 +46,10 @@ sequenceDiagram
 ## Execution Flow
 
 The command execution follows this sequence:
+
 1. **kubectl-ai** parses the natural language request
 2. [**Permiflow**](https://github.com/tutran-se/permiflow) performs comprehensive RBAC analysis across cluster resources
-4. [**Resend**](https://github.com/resend/mcp-send-email) formats and delivers the security report via email
+3. [**Resend**](https://github.com/resend/mcp-send-email) formats and delivers the security report via email
 
 **Extensibility**: The architecture supports additional MCP servers for Slack notifications, Jira ticket creation, compliance databases, and custom integrations.
 
@@ -141,11 +143,13 @@ Servers:
 ### Advanced Workflows
 
 **Multi-Channel Incident Response:**
+
 ```bash
 "scan rbac, create jira ticket, email security team, post to slack"
 ```
 
 **Compliance Automation:**
+
 ```bash
 "scan vulnerabilities, update compliance database, email leadership"
 ```

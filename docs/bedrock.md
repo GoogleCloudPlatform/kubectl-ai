@@ -34,6 +34,7 @@ export BEDROCK_MODEL="us.anthropic.claude-3-7-sonnet-20250219-v1:0"
 See [AWS Bedrock documentation](https://docs.aws.amazon.com/bedrock/latest/userguide/model-ids.html) for current model availability and regional support.
 
 Currently supported:
+
 - Claude Sonnet 4: `us.anthropic.claude-sonnet-4-20250514-v1:0` (default)
 - Claude 3.7 Sonnet: `us.anthropic.claude-3-7-sonnet-20250219-v1:0`
 
