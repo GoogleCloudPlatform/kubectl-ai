@@ -113,8 +113,9 @@ trap cleanup EXIT INT TERM
     exit 1
   fi
 
-  echo "Installing $BINARY to /usr/local/bin (may require sudo)..."
-  sudo install -m 0755 "$BINARY" /usr/local/bin/
+  INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
+  echo "Installing $BINARY to $INSTALL_DIR (may require sudo)..."
+  sudo install -m 0755 "$BINARY" "$INSTALL_DIR/"
 )
 
 echo "✅ $BINARY installed successfully! Run '$BINARY --help' to get started."
