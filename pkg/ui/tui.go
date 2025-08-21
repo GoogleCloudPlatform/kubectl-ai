@@ -128,6 +128,13 @@ func (u *TUI) Run(ctx context.Context) error {
 func (u *TUI) ClearScreen() {
 }
 
+func (u *TUI) Close() error {
+	if u.program != nil {
+		u.program.Quit()
+	}
+	return nil
+}
+
 type resultMsg struct {
 	duration time.Duration
 	food     string
