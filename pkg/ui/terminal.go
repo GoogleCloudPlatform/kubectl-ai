@@ -29,7 +29,6 @@ import (
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/agent"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/api"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/journal"
-	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/sessions"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/tools"
 	"github.com/charmbracelet/glamour"
 	"github.com/chzyer/readline"
@@ -233,26 +232,6 @@ func (u *TerminalUI) Close() error {
 	return errors.Join(errs...)
 }
 
-// handleExit handles the logic for exiting the application, including prompting to save the session.
-// It takes a readLineFunc to abstract the input method (readline or tty).
-func (u *TerminalUI) handleExit(readLineFunc func(prompt string) (string, error)) {
-	if _, ok := u.agent.ChatMessageStore.(*sessions.InMemoryChatStore); ok {
-		answer, err := readLineFunc("Save session before quitting? (y/n) ")
-		if err != nil {
-			// This happens on Ctrl+C or Ctrl+D during the save prompt
-			fmt.Println("\nQuitting without saving session.")
-		} else {
-			answer = strings.TrimSpace(strings.ToLower(answer))
-			if answer == "y" || answer == "yes" {
-				u.agent.Input <- &api.UserInputResponse{Query: "save-session"}
-			} else {
-				fmt.Println("Quitting without saving session.")
-			}
-		}
-	}
-	u.agent.Input <- io.EOF
-}
-
 func (u *TerminalUI) handleMessage(msg *api.Message) {
 	text := ""
 	var styleOptions []styleOption
@@ -309,13 +288,6 @@ func (u *TerminalUI) handleMessage(msg *api.Message) {
 				fmt.Print("\n>>> ") // Print prompt manually
 				query, err = tReader.ReadString('\n')
 				if err != nil {
-					if err == io.EOF {
-						u.handleExit(func(prompt string) (string, error) {
-							fmt.Print("\n" + prompt)
-							return tReader.ReadString('\n')
-						})
-						return // exit handleMessage
-					}
 					klog.Errorf("Error reading from TTY: %v", err)
 					u.agent.Input <- fmt.Errorf("error reading from TTY: %w", err)
 					return
@@ -341,11 +313,10 @@ func (u *TerminalUI) handleMessage(msg *api.Message) {
 				if err != nil {
 					klog.Infof("Readline error: %v", err)
 					switch err {
-					case readline.ErrInterrupt, io.EOF: // Handle Ctrl+C or Ctrl+D
-						u.handleExit(func(prompt string) (string, error) {
-							rlInstance.SetPrompt(prompt)
-							return rlInstance.Readline()
-						})
+					case readline.ErrInterrupt: // Handle Ctrl+C
+						u.agent.Input <- io.EOF
+					case io.EOF: // Handle Ctrl+D
+						u.agent.Input <- io.EOF
 					default:
 						u.agent.Input <- err
 					}
