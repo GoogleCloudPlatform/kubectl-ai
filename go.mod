@@ -18,7 +18,8 @@ require (
 	github.com/mark3labs/mcp-go v0.31.0
 	github.com/spf13/cobra v1.9.1
 	github.com/spf13/pflag v1.0.6
-	golang.org/x/sync v0.13.0
+	go.uber.org/mock v0.6.0
+	golang.org/x/sync v0.16.0
 	golang.org/x/term v0.31.0
 	k8s.io/klog/v2 v2.130.1
 	mvdan.cc/sh/v3 v3.11.0
