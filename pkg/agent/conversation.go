@@ -494,6 +494,7 @@ func (c *Agent) Run(ctx context.Context, initialQuery string) error {
 				// accumulator for streamed text
 				var streamedText string
 				var llmError error
+				var usageMetadata any
 
 				for response, err := range stream {
 					if err != nil {
@@ -518,6 +519,10 @@ func (c *Agent) Run(ctx context.Context, initialQuery string) error {
 					}
 
 					candidate := response.Candidates()[0]
+
+					if meta := response.UsageMetadata(); meta != nil {
+						usageMetadata = meta
+					}
 
 					for _, part := range candidate.Parts() {
 						// Check if it's a text response
@@ -545,6 +550,12 @@ func (c *Agent) Run(ctx context.Context, initialQuery string) error {
 				if streamedText != "" {
 					c.addMessage(api.MessageSourceModel, api.MessageTypeText, streamedText)
 				}
+
+				if pct, ok := gollm.ContextPercentRemaining(c.Model, usageMetadata); ok {
+					// c.addMessage(api.MessageSourceAgent, api.MessageTypeText, fmt.Sprintf("Context remaining: %.1f%%", pct))
+					c.addMessage(api.MessageSourceAgent, api.MessageTypeUsageMetadata, api.UsageMetadata{ContextPercentRemaining: pct})
+				}
+
 				// If no function calls to be made, we're done
 				if len(functionCalls) == 0 {
 					log.Info("No function calls to be made, so most likely the task is completed, so we're done.")
