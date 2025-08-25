@@ -847,7 +847,7 @@
                                         }}
                                         placeholder={getInputPlaceholder()}
                                         disabled={!canSendMessage}
-                                        className={`w-full px-4 py-3 pr-12 border rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-colors resize-none overflow-y-auto max-h-40 custom-scrollbar ${
+                                        className={`w-full px-4 py-3 pr-12 border rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-colors resize-none overflow-y-auto max-h-40 custom-scrollbar align-bottom ${
                                             isDarkMode 
                                                 ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
                                                 : 'bg-white border-gray-300 text-gray-900 placeholder-gray-400'
@@ -863,7 +863,7 @@
                                 <button
                                     type="submit"
                                     disabled={!canSendMessage || !input.trim()}
-                                    className="px-6 py-3 bg-gradient-to-r from-brand-500 to-brand-600 text-white rounded-xl hover:from-brand-600 hover:to-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 font-medium shadow-sm"
+                                    className="px-6 py-3 bg-gradient-to-r from-brand-500 to-brand-600 text-white rounded-xl hover:from-brand-600 hover:to-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 font-medium shadow-sm self-end"
                                 >
                                     Send
                                 </button>
