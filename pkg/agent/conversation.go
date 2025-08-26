@@ -931,13 +931,7 @@ func (c *Agent) analyzeToolCalls(ctx context.Context, toolCalls []gollm.Function
 		if err != nil {
 			toolCallAnalysis[i].IsInteractiveError = err
 		}
-		modifiesResourceStr := toolCall.GetTool().CheckModifiesResource(call.Arguments)
-		if modifiesResourceStr == "unknown" {
-			if llmModifies, ok := call.Arguments["modifies_resource"].(string); ok {
-				modifiesResourceStr = llmModifies
-			}
-		}
-		toolCallAnalysis[i].ModifiesResourceStr = modifiesResourceStr
+		toolCallAnalysis[i].ModifiesResourceStr = toolCall.GetTool().CheckModifiesResource(call.Arguments)
 		toolCallAnalysis[i].ParsedToolCall = toolCall
 	}
 	return toolCallAnalysis, nil
