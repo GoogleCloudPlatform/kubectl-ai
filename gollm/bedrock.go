@@ -349,7 +349,7 @@ func (c *bedrockChat) SendStreaming(ctx context.Context, contents ...any) (ChatR
 				if partial, exists := partialTools[idx]; exists {
 					// Parse the JSON to extract arguments for function call
 					inputJSON := partial.input.String()
-					
+
 					var args map[string]any
 					if inputJSON != "" {
 						if err := json.Unmarshal([]byte(inputJSON), &args); err != nil {
@@ -358,7 +358,7 @@ func (c *bedrockChat) SendStreaming(ctx context.Context, contents ...any) (ChatR
 					} else {
 						args = make(map[string]any)
 					}
-					
+
 					// Create ToolUseBlock for conversation history
 					// Use the accumulated JSON string to create proper Input document
 					toolUse := types.ToolUseBlock{
@@ -367,7 +367,7 @@ func (c *bedrockChat) SendStreaming(ctx context.Context, contents ...any) (ChatR
 						Input:     document.NewLazyDocument(args),
 					}
 					completedTools = append(completedTools, toolUse)
-					
+
 					// Yield tool immediately with parsed arguments
 					response := &bedrockStreamResponse{
 						content:       "",
@@ -379,7 +379,7 @@ func (c *bedrockChat) SendStreaming(ctx context.Context, contents ...any) (ChatR
 					if !yield(response, nil) {
 						return
 					}
-					
+
 					delete(partialTools, idx)
 				}
 
@@ -402,13 +402,13 @@ func (c *bedrockChat) SendStreaming(ctx context.Context, contents ...any) (ChatR
 			assistantMessage.Content = append(assistantMessage.Content,
 				&types.ContentBlockMemberText{Value: fullContent.String()})
 		}
-		
+
 		// Include completed tools in conversation history
 		for _, tool := range completedTools {
 			assistantMessage.Content = append(assistantMessage.Content,
 				&types.ContentBlockMemberToolUse{Value: tool})
 		}
-		
+
 		// Only add to history if there's content or tools
 		if len(assistantMessage.Content) > 0 {
 			c.messages = append(c.messages, assistantMessage)
@@ -425,7 +425,7 @@ func (c *bedrockChat) SendStreaming(ctx context.Context, contents ...any) (ChatR
 // following AWS Bedrock Converse API patterns
 func (c *bedrockChat) addContentsToHistory(contents []any) error {
 	var contentBlocks []types.ContentBlock
-	
+
 	for _, content := range contents {
 		switch c := content.(type) {
 		case string:
@@ -443,13 +443,13 @@ func (c *bedrockChat) addContentsToHistory(contents []any) error {
 				}
 				// Check for status field
 				if statusVal, hasStatus := c.Result["status"]; hasStatus {
-					if statusStr, isString := statusVal.(string); isString && 
-					   (statusStr == "failed" || statusStr == "error") {
+					if statusStr, isString := statusVal.(string); isString &&
+						(statusStr == "failed" || statusStr == "error") {
 						status = types.ToolResultStatusError
 					}
 				}
 			}
-			
+
 			// Convert to AWS Bedrock ToolResultBlock format per official docs
 			toolResult := types.ToolResultBlock{
 				ToolUseId: aws.String(c.ID),
@@ -465,7 +465,7 @@ func (c *bedrockChat) addContentsToHistory(contents []any) error {
 			return fmt.Errorf("unhandled content type: %T", content)
 		}
 	}
-	
+
 	if len(contentBlocks) > 0 {
 		// Add user message with all content blocks to conversation history
 		c.messages = append(c.messages, types.Message{
@@ -473,7 +473,7 @@ func (c *bedrockChat) addContentsToHistory(contents []any) error {
 			Content: contentBlocks,
 		})
 	}
-	
+
 	return nil
 }
 
@@ -643,12 +643,12 @@ func (c *bedrockStreamCandidate) String() string {
 // Parts returns the parts of the streaming candidate
 func (c *bedrockStreamCandidate) Parts() []Part {
 	var parts []Part
-	
+
 	// Handle text content
 	if c.content != "" {
 		parts = append(parts, &bedrockTextPart{text: c.content})
 	}
-	
+
 	// Handle tool calls with streaming args
 	for i, toolUse := range c.toolUses {
 		var args map[string]any
@@ -660,7 +660,7 @@ func (c *bedrockStreamCandidate) Parts() []Part {
 			args:    args,
 		})
 	}
-	
+
 	return parts
 }
 

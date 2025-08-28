@@ -393,7 +393,7 @@ func processToolResponse(result any) (string, error) {
 		if isError {
 			// Extract error message
 			errorMsg := fmt.Sprintf("%+v", result)
-			
+
 			// Try to get message from Content field
 			contentField := rv.FieldByName("Content")
 			if contentField.IsValid() && contentField.Len() > 0 {
@@ -403,7 +403,7 @@ func processToolResponse(result any) (string, error) {
 					}
 				}
 			}
-			
+
 			// Return JSON error data instead of Go error
 			return fmt.Sprintf(`{"error": true, "message": %q, "status": "failed"}`, errorMsg), nil
 		}
