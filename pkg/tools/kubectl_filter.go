@@ -71,6 +71,7 @@ func kubectlModifiesResource(command string) string {
 
 	hasReadCommand := false
 	foundWrite := false
+	numCmds := 0
 
 	// Single pass through all command calls
 	syntax.Walk(file, func(node syntax.Node) bool {
@@ -87,9 +88,20 @@ func kubectlModifiesResource(command string) string {
 			if result == "no" {
 				hasReadCommand = true
 			}
+			numCmds++
+			if numCmds > 1 {
+				return false // Stop walking if more then one command is found
+			}
 		}
 		return true
 	})
+
+	if numCmds > 1 {
+		// if it's a composite bash command, we should err on the side of caution and return unknown
+		// to prevent exfilteration attacks https://simonwillison.net/2025/Jun/16/the-lethal-trifecta/
+		klog.Infof("KubectlModifiesResource result: unknown for command: %q, multiple commands (%d) found", command, numCmds)
+		return "unknown"
+	}
 
 	// Return results based on what we found
 	if foundWrite {
