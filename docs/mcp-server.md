@@ -67,6 +67,7 @@ The server handles external MCP connection failures gracefully:
 Configure Claude Desktop to use kubectl-ai as an MCP server:
 
 **Basic usage (built-in tools only):**
+
 ```json
 {
   "mcpServers": {
@@ -79,6 +80,7 @@ Configure Claude Desktop to use kubectl-ai as an MCP server:
 ```
 
 **Enhanced usage (with external tools):**
+
 ```json
 {
   "mcpServers": {
@@ -123,7 +125,7 @@ Additional tools available depend on configured MCP servers:
 
 ## Architecture
 
-```
+```txt
 ┌─────────────────┐    ┌───────────────────┐    ┌─────────────────┐
 │   MCP Client    │───▶│ kubectl-ai Server │───▶│ External Tools  │
 │  (Claude, etc.) │    │                   │    │ (filesystem,    │
@@ -135,6 +137,7 @@ Additional tools available depend on configured MCP servers:
 ```
 
 The kubectl-ai MCP server acts as both:
+
 - An **MCP Server** (exposing tools to clients)
 - An **MCP Client** (consuming tools from other servers, when `--external-tools` is enabled)
 
@@ -167,6 +170,7 @@ kubectl-ai --mcp-server --external-tools -v=2
 ```
 
 This will show:
+
 - MCP server connection attempts
 - Tool discovery results
 - Tool call routing decisions

@@ -82,8 +82,6 @@ func (c *BedrockClient) Close() error {
 func (c *BedrockClient) StartChat(systemPrompt, model string) Chat {
 	selectedModel := getBedrockModel(model)
 
-	klog.V(1).Infof("Starting new Bedrock chat session with model: %s", selectedModel)
-
 	// Enhance system prompt for tool-use shim compatibility
 	// Detect if tool-use shim is enabled by looking for JSON formatting instructions
 	enhancedPrompt := systemPrompt
@@ -96,8 +94,6 @@ func (c *BedrockClient) StartChat(systemPrompt, model string) Chat {
 		enhancedPrompt += "4. This is critical for proper parsing. Example format:\n"
 		enhancedPrompt += "```json\n{\"thought\": \"your reasoning\", \"action\": {\"name\": \"tool_name\", \"command\": \"command\"}}\n```\n"
 		enhancedPrompt += "Note the comma after the \"thought\" field! Malformed JSON will cause failures."
-
-		klog.V(2).Infof("Enhanced Bedrock prompt with JSON formatting instructions for model: %s", selectedModel)
 	}
 
 	return &bedrockChat{
@@ -146,7 +142,49 @@ type bedrockChat struct {
 }
 
 func (cs *bedrockChat) Initialize(history []*api.Message) error {
-	klog.Warning("chat history persistence is not supported for provider 'bedrock', using in-memory chat history")
+	cs.messages = make([]types.Message, 0, len(history))
+
+	for _, msg := range history {
+		// Convert api.Message to types.Message
+		var role types.ConversationRole
+		switch msg.Source {
+		case api.MessageSourceUser:
+			role = types.ConversationRoleUser
+		case api.MessageSourceModel, api.MessageSourceAgent:
+			role = types.ConversationRoleAssistant
+		default:
+			// Skip unknown message sources
+			continue
+		}
+
+		// Convert payload to string content
+		var content string
+		if msg.Type == api.MessageTypeText && msg.Payload != nil {
+			if textPayload, ok := msg.Payload.(string); ok {
+				content = textPayload
+			} else {
+				// Try to convert other types to string
+				content = fmt.Sprintf("%v", msg.Payload)
+			}
+		} else {
+			// Skip non-text messages for now
+			continue
+		}
+
+		if content == "" {
+			continue
+		}
+
+		bedrockMsg := types.Message{
+			Role: role,
+			Content: []types.ContentBlock{
+				&types.ContentBlockMemberText{Value: content},
+			},
+		}
+
+		cs.messages = append(cs.messages, bedrockMsg)
+	}
+
 	return nil
 }
 
@@ -156,16 +194,10 @@ func (c *bedrockChat) Send(ctx context.Context, contents ...any) (ChatResponse, 
 		return nil, errors.New("no content provided")
 	}
 
-	// Convert content to string
-	message := fmt.Sprintf("%v", contents[0])
-
-	// Add user message to conversation history
-	c.messages = append(c.messages, types.Message{
-		Role: types.ConversationRoleUser,
-		Content: []types.ContentBlock{
-			&types.ContentBlockMemberText{Value: message},
-		},
-	})
+	// Process and append contents to conversation history
+	if err := c.addContentsToHistory(contents); err != nil {
+		return nil, err
+	}
 
 	// Prepare the request
 	input := &bedrockruntime.ConverseInput{
@@ -216,16 +248,10 @@ func (c *bedrockChat) SendStreaming(ctx context.Context, contents ...any) (ChatR
 		return nil, errors.New("no content provided")
 	}
 
-	// Convert content to string
-	message := fmt.Sprintf("%v", contents[0])
-
-	// Add user message to conversation history
-	c.messages = append(c.messages, types.Message{
-		Role: types.ConversationRoleUser,
-		Content: []types.ContentBlock{
-			&types.ContentBlockMemberText{Value: message},
-		},
-	})
+	// Process and append contents to conversation history
+	if err := c.addContentsToHistory(contents); err != nil {
+		return nil, err
+	}
 
 	// Prepare the streaming request
 	input := &bedrockruntime.ConverseStreamInput{
@@ -266,6 +292,15 @@ func (c *bedrockChat) SendStreaming(ctx context.Context, contents ...any) (ChatR
 		assistantMessage.Role = types.ConversationRoleAssistant
 		var fullContent strings.Builder
 
+		// Tool state tracking for streaming
+		type partialTool struct {
+			id    string
+			name  string
+			input strings.Builder
+		}
+		partialTools := make(map[int32]*partialTool)
+		var completedTools []types.ToolUseBlock
+
 		// Process streaming events
 		stream := output.GetStream()
 		for event := range stream.Events() {
@@ -286,10 +321,66 @@ func (c *bedrockChat) SendStreaming(ctx context.Context, contents ...any) (ChatR
 					}
 				}
 
+				// Handle tool input deltas
+				if toolDelta, ok := v.Value.Delta.(*types.ContentBlockDeltaMemberToolUse); ok {
+					idx := aws.ToInt32(v.Value.ContentBlockIndex)
+					if partial, exists := partialTools[idx]; exists {
+						deltaInput := aws.ToString(toolDelta.Value.Input)
+						partial.input.WriteString(deltaInput)
+					}
+				}
+
 			case *types.ConverseStreamOutputMemberContentBlockStart:
 				// Handle content block start (for tool calls)
 				if v.Value.Start != nil {
-					klog.V(3).Infof("Content block started at index: %v", aws.ToInt32(v.Value.ContentBlockIndex))
+					if toolStart, ok := v.Value.Start.(*types.ContentBlockStartMemberToolUse); ok {
+						// Store partial tool for input accumulation
+						idx := aws.ToInt32(v.Value.ContentBlockIndex)
+						partialTools[idx] = &partialTool{
+							id:   aws.ToString(toolStart.Value.ToolUseId),
+							name: aws.ToString(toolStart.Value.Name),
+						}
+					}
+				}
+
+			case *types.ConverseStreamOutputMemberContentBlockStop:
+				// Handle content block stop (tool completion)
+				idx := aws.ToInt32(v.Value.ContentBlockIndex)
+				if partial, exists := partialTools[idx]; exists {
+					// Parse the JSON to extract arguments for function call
+					inputJSON := partial.input.String()
+
+					var args map[string]any
+					if inputJSON != "" {
+						if err := json.Unmarshal([]byte(inputJSON), &args); err != nil {
+							args = make(map[string]any)
+						}
+					} else {
+						args = make(map[string]any)
+					}
+
+					// Create ToolUseBlock for conversation history
+					// Use the accumulated JSON string to create proper Input document
+					toolUse := types.ToolUseBlock{
+						ToolUseId: aws.String(partial.id),
+						Name:      aws.String(partial.name),
+						Input:     document.NewLazyDocument(args),
+					}
+					completedTools = append(completedTools, toolUse)
+
+					// Yield tool immediately with parsed arguments
+					response := &bedrockStreamResponse{
+						content:       "",
+						model:         c.model,
+						done:          false,
+						toolUses:      []types.ToolUseBlock{toolUse},
+						streamingArgs: map[int]map[string]any{0: args},
+					}
+					if !yield(response, nil) {
+						return
+					}
+
+					delete(partialTools, idx)
 				}
 
 			case *types.ConverseStreamOutputMemberMetadata:
@@ -310,6 +401,16 @@ func (c *bedrockChat) SendStreaming(ctx context.Context, contents ...any) (ChatR
 		if fullContent.Len() > 0 {
 			assistantMessage.Content = append(assistantMessage.Content,
 				&types.ContentBlockMemberText{Value: fullContent.String()})
+		}
+
+		// Include completed tools in conversation history
+		for _, tool := range completedTools {
+			assistantMessage.Content = append(assistantMessage.Content,
+				&types.ContentBlockMemberToolUse{Value: tool})
+		}
+
+		// Only add to history if there's content or tools
+		if len(assistantMessage.Content) > 0 {
 			c.messages = append(c.messages, assistantMessage)
 		}
 
@@ -318,6 +419,62 @@ func (c *bedrockChat) SendStreaming(ctx context.Context, contents ...any) (ChatR
 			yield(nil, fmt.Errorf("stream error: %w", err))
 		}
 	}, nil
+}
+
+// addContentsToHistory processes and appends user messages to chat history
+// following AWS Bedrock Converse API patterns
+func (c *bedrockChat) addContentsToHistory(contents []any) error {
+	var contentBlocks []types.ContentBlock
+
+	for _, content := range contents {
+		switch c := content.(type) {
+		case string:
+			// Add text content block
+			contentBlocks = append(contentBlocks, &types.ContentBlockMemberText{Value: c})
+		case FunctionCallResult:
+			// Determine status based on Result content
+			status := types.ToolResultStatusSuccess
+			if c.Result != nil {
+				// Check for error field
+				if errorVal, hasError := c.Result["error"]; hasError {
+					if errorBool, isBool := errorVal.(bool); isBool && errorBool {
+						status = types.ToolResultStatusError
+					}
+				}
+				// Check for status field
+				if statusVal, hasStatus := c.Result["status"]; hasStatus {
+					if statusStr, isString := statusVal.(string); isString &&
+						(statusStr == "failed" || statusStr == "error") {
+						status = types.ToolResultStatusError
+					}
+				}
+			}
+
+			// Convert to AWS Bedrock ToolResultBlock format per official docs
+			toolResult := types.ToolResultBlock{
+				ToolUseId: aws.String(c.ID),
+				Content: []types.ToolResultContentBlock{
+					&types.ToolResultContentBlockMemberJson{
+						Value: document.NewLazyDocument(c.Result),
+					},
+				},
+				Status: status,
+			}
+			contentBlocks = append(contentBlocks, &types.ContentBlockMemberToolResult{Value: toolResult})
+		default:
+			return fmt.Errorf("unhandled content type: %T", content)
+		}
+	}
+
+	if len(contentBlocks) > 0 {
+		// Add user message with all content blocks to conversation history
+		c.messages = append(c.messages, types.Message{
+			Role:    types.ConversationRoleUser,
+			Content: contentBlocks,
+		})
+	}
+
+	return nil
 }
 
 // SetFunctionDefinitions configures the available functions for tool use
@@ -357,6 +514,9 @@ func (c *bedrockChat) SetFunctionDefinitions(functions []*FunctionDefinition) er
 
 	c.toolConfig = &types.ToolConfiguration{
 		Tools: tools,
+		ToolChoice: &types.ToolChoiceMemberAny{
+			Value: types.AnyToolChoice{},
+		},
 	}
 
 	return nil
@@ -400,10 +560,12 @@ func (r *bedrockResponse) Candidates() []Candidate {
 
 // bedrockStreamResponse implements ChatResponse for streaming responses
 type bedrockStreamResponse struct {
-	content string
-	usage   *types.TokenUsage
-	model   string
-	done    bool
+	content       string
+	usage         *types.TokenUsage
+	model         string
+	done          bool
+	toolUses      []types.ToolUseBlock
+	streamingArgs map[int]map[string]any
 }
 
 // UsageMetadata returns the usage metadata from the streaming response
@@ -413,13 +575,15 @@ func (r *bedrockStreamResponse) UsageMetadata() any {
 
 // Candidates returns the candidate responses for streaming
 func (r *bedrockStreamResponse) Candidates() []Candidate {
-	if r.content == "" && r.usage == nil {
+	if r.content == "" && r.usage == nil && len(r.toolUses) == 0 {
 		return []Candidate{}
 	}
 
 	candidate := &bedrockStreamCandidate{
-		content: r.content,
-		model:   r.model,
+		content:       r.content,
+		model:         r.model,
+		toolUses:      r.toolUses,
+		streamingArgs: r.streamingArgs,
 	}
 	return []Candidate{candidate}
 }
@@ -465,8 +629,10 @@ func (c *bedrockCandidate) Parts() []Part {
 
 // bedrockStreamCandidate implements Candidate for streaming responses
 type bedrockStreamCandidate struct {
-	content string
-	model   string
+	content       string
+	model         string
+	toolUses      []types.ToolUseBlock
+	streamingArgs map[int]map[string]any
 }
 
 // String returns a string representation of the streaming candidate
@@ -476,10 +642,26 @@ func (c *bedrockStreamCandidate) String() string {
 
 // Parts returns the parts of the streaming candidate
 func (c *bedrockStreamCandidate) Parts() []Part {
-	if c.content == "" {
-		return []Part{}
+	var parts []Part
+
+	// Handle text content
+	if c.content != "" {
+		parts = append(parts, &bedrockTextPart{text: c.content})
 	}
-	return []Part{&bedrockTextPart{text: c.content}}
+
+	// Handle tool calls with streaming args
+	for i, toolUse := range c.toolUses {
+		var args map[string]any
+		if c.streamingArgs != nil {
+			args = c.streamingArgs[i]
+		}
+		parts = append(parts, &bedrockToolPart{
+			toolUse: &toolUse,
+			args:    args,
+		})
+	}
+
+	return parts
 }
 
 // bedrockTextPart implements Part for text content
@@ -500,6 +682,7 @@ func (p *bedrockTextPart) AsFunctionCalls() ([]FunctionCall, bool) {
 // bedrockToolPart implements Part for tool/function calls
 type bedrockToolPart struct {
 	toolUse *types.ToolUseBlock
+	args    map[string]any // For streaming case when Input can't be unmarshaled
 }
 
 // AsText returns empty string since this is a tool part
@@ -513,13 +696,19 @@ func (p *bedrockToolPart) AsFunctionCalls() ([]FunctionCall, bool) {
 		return nil, false
 	}
 
-	// Convert AWS tool use to gollm function call
+	// Get arguments - prefer pre-parsed args (streaming), fall back to unmarshaling
 	var args map[string]any
-	if p.toolUse.Input != nil {
+	if p.args != nil {
+		// Streaming case - use pre-parsed arguments
+		args = p.args
+	} else if p.toolUse.Input != nil {
+		// Non-streaming case - unmarshal from Input
 		if err := p.toolUse.Input.UnmarshalSmithyDocument(&args); err != nil {
-			klog.Errorf("Failed to unmarshal tool input: %v", err)
+			klog.V(2).Infof("Failed to unmarshal tool input: %v", err)
 			args = make(map[string]any)
 		}
+	} else {
+		args = make(map[string]any)
 	}
 
 	funcCall := FunctionCall{

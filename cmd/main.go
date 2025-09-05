@@ -416,18 +416,6 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 				if err != nil {
 					return fmt.Errorf("failed to get latest session: %w", err)
 				}
-				if chatStore == nil {
-					// No sessions exist, create a new one
-					meta := sessions.Metadata{
-						ProviderID: opt.ProviderID,
-						ModelID:    opt.ModelID,
-					}
-					chatStore, err = sessionManager.NewSession(meta)
-					if err != nil {
-						return fmt.Errorf("failed to create new session: %w", err)
-					}
-					klog.Infof("Created new session: %s\n", chatStore.(*sessions.Session).ID)
-				}
 			} else {
 				sessionID = opt.ResumeSession
 				chatStore, err = sessionManager.FindSessionByID(sessionID)
@@ -464,6 +452,7 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 
 	k8sAgent := &agent.Agent{
 		Model:              opt.ModelID,
+		Provider:           opt.ProviderID,
 		Kubeconfig:         opt.KubeConfigPath,
 		LLM:                llmClient,
 		MaxIterations:      opt.MaxIterations,

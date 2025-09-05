@@ -88,6 +88,12 @@ verify-autogen: ## Verify auto-generated files are up to date
 	@echo "λ Verifying auto-generated files..."
 	./dev/ci/presubmits/verify-autogen.sh
 
+generate:
+	go generate ./internal/mocks
+
+verify-mocks:
+	@echo "λ Verifying mocks..."
+	./dev/ci/presubmits/verify-mocks.sh
 # --- Generation Tasks ---
 generate-actions: ## Generate GitHub Actions workflows
 	@echo "λ Generating GitHub Actions workflows..."

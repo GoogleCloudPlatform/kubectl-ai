@@ -51,28 +51,35 @@
         }
     </script>
     <style>
-        /* Custom scrollbar */
+        /* Modern, subtle scrollbar */
         .custom-scrollbar::-webkit-scrollbar {
-            width: 6px;
+            width: 8px;
+            height: 8px;
         }
         .custom-scrollbar::-webkit-scrollbar-track {
-            background: #f1f5f9;
-        }
-        .dark .custom-scrollbar::-webkit-scrollbar-track {
-            background: #1e293b;
+            background: transparent;
         }
         .custom-scrollbar::-webkit-scrollbar-thumb {
-            background: #cbd5e1;
-            border-radius: 3px;
+            background: #94a3b8;
+            border-radius: 4px;
+            border: 2px solid transparent;
+            background-clip: content-box;
         }
         .dark .custom-scrollbar::-webkit-scrollbar-thumb {
-            background: #475569;
+            background: #52525b;
         }
         .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-            background: #94a3b8;
+            background: #475569;
         }
         .dark .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-            background: #64748b;
+            background: #71717a;
+        }
+        .custom-scrollbar {
+            scrollbar-width: thin;
+            scrollbar-color: #94a3b8 transparent;
+        }
+        .dark .custom-scrollbar {
+            scrollbar-color: #52525b transparent;
         }
 
         /* Dark mode for body background */
@@ -284,6 +291,15 @@
             });
             const messagesEndRef = useRef(null);
             const inputRef = useRef(null);
+
+            // Auto-resize textarea
+            useEffect(() => {
+                if (inputRef.current) {
+                    inputRef.current.style.height = 'auto';
+                    const scrollHeight = inputRef.current.scrollHeight;
+                    inputRef.current.style.height = scrollHeight + 'px';
+                }
+            }, [input]);
 
             const toggleOutput = (messageIndex) => {
                 const newExpanded = new Set(expandedOutputs);
@@ -819,18 +835,24 @@
                         <div className="max-w-4xl mx-auto">
                             <form onSubmit={handleSubmit} className="flex space-x-3">
                                 <div className="flex-1 relative">
-                                    <input
+                                    <textarea
                                         ref={inputRef}
-                                        type="text"
                                         value={input}
                                         onChange={(e) => setInput(e.target.value)}
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter' && !e.shiftKey) {
+                                                e.preventDefault();
+                                                handleSubmit(e);
+                                            }
+                                        }}
                                         placeholder={getInputPlaceholder()}
                                         disabled={!canSendMessage}
-                                        className={`w-full px-4 py-3 pr-12 border rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-colors ${
+                                        className={`w-full px-4 py-3 pr-12 border rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-colors resize-none overflow-y-auto max-h-40 custom-scrollbar align-bottom ${
                                             isDarkMode 
                                                 ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
                                                 : 'bg-white border-gray-300 text-gray-900 placeholder-gray-400'
                                         } ${!canSendMessage ? (isDarkMode ? 'bg-gray-800 text-gray-500' : 'bg-gray-50 text-gray-500') : ''}`}
+                                        rows="1"
                                     />
                                     {agentState === 'running' && (
                                         <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
@@ -841,7 +863,7 @@
                                 <button
                                     type="submit"
                                     disabled={!canSendMessage || !input.trim()}
-                                    className="px-6 py-3 bg-gradient-to-r from-brand-500 to-brand-600 text-white rounded-xl hover:from-brand-600 hover:to-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 font-medium shadow-sm"
+                                    className="px-6 py-3 bg-gradient-to-r from-brand-500 to-brand-600 text-white rounded-xl hover:from-brand-600 hover:to-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 font-medium shadow-sm self-end"
                                 >
                                     Send
                                 </button>

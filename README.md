@@ -2,7 +2,9 @@
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/GoogleCloudPlatform/kubectl-ai)](https://goreportcard.com/report/github.com/GoogleCloudPlatform/kubectl-ai)
 ![GitHub License](https://img.shields.io/github/license/GoogleCloudPlatform/kubectl-ai)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/GoogleCloudPlatform/kubectl-ai)
 [![GitHub stars](https://img.shields.io/github/stars/GoogleCloudPlatform/kubectl-ai.svg)](https://github.com/GoogleCloudPlatform/kubectl-ai/stargazers)
+
 
 `kubectl-ai` acts as an intelligent interface, translating user intent into
 precise Kubernetes operations, making Kubernetes management more accessible and
@@ -444,9 +446,9 @@ Comprehensive evaluation on identical 10-task Kubernetes benchmark with proper C
 |-------|---------|------|--------------|
 | gemini-2.5-flash-preview-04-17 | 10 | 0 | 100% |
 | gemini-2.5-pro-preview-03-25 | 10 | 0 | 100% |
-| gemma-3-27b-it | 8 | 2 | 80% |
 | AWS Bedrock Claude 3.7 Sonnet | 10 | 0 | 100% |
-| AWS Bedrock Claude Sonnet 4 | 9 | 1 | 90% |
+| AWS Bedrock Claude Sonnet 4 | 10 | 0 | 100% |
+| gemma-3-27b-it | 8 | 2 | 80% |
 
 **Test Environment**: Kind cluster v1.27.3 with Calico CNI (full NetworkPolicy support)  
 **Tasks**: create-pod, create-pod-mount-configmaps, create-pod-resources-limits, create-network-policy, fix-crashloop, fix-image-pull, fix-service-routing, list-images-for-pods, scale-deployment, scale-down-deployment

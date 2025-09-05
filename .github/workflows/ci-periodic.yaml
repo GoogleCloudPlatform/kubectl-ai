@@ -30,7 +30,7 @@ jobs:
   run-eval:
     if: github.repository == 'GoogleCloudPlatform/kubectl-ai'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
     # Add "id-token" with the intended permissions.
     permissions:
       contents: "read"
@@ -43,7 +43,7 @@ jobs:
           cluster_name: periodic-eval-cluster
       - name: Run an easy eval
         run: |
-          TEST_ARGS="--llm-provider vertexai --models gemini-2.5-pro --task-pattern=scale-" ./dev/ci/periodics/run-evals.sh
+          TEST_ARGS="--llm-provider vertexai --models gemini-2.5-pro --concurrency=1 --task-pattern=scale-" ./dev/ci/periodics/run-evals.sh
       - name: Analyse results
         run: |
           ./dev/ci/periodics/analyze-evals.sh
