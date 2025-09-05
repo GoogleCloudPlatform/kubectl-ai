@@ -25,34 +25,50 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestSessionPersistence tests the basic save and load functionality
-func TestSessionPersistence(t *testing.T) {
-	// Create a temporary directory for test sessions
+// setupTestManager creates a temporary directory and SessionManager for testing
+func setupTestManager(t *testing.T) (*SessionManager, func()) {
+	t.Helper()
 	tempDir, err := os.MkdirTemp("", "session-test-*")
 	require.NoError(t, err)
-	defer os.RemoveAll(tempDir)
 
-	// Create a session manager
+	cleanup := func() {
+		os.RemoveAll(tempDir)
+	}
+
 	manager := &SessionManager{BasePath: tempDir}
+	return manager, cleanup
+}
 
-	// Create metadata for the session
-	meta := Metadata{
+// createTestMetadata returns standard test metadata
+func createTestMetadata() Metadata {
+	return Metadata{
 		ProviderID: "test-provider",
 		ModelID:    "test-model",
 	}
+}
 
-	// Create a new session
-	session, err := manager.NewSession(meta)
-	require.NoError(t, err)
-
-	// Add some test messages
-	testMessage := &api.Message{
+// createTestMessage creates a test message with the given payload
+func createTestMessage(payload string) *api.Message {
+	return &api.Message{
 		ID:        uuid.New().String(),
 		Source:    api.MessageSourceUser,
 		Type:      api.MessageTypeText,
-		Payload:   "Hello, how can I help?",
+		Payload:   payload,
 		Timestamp: time.Now(),
 	}
+}
+
+// TestSessionPersistence tests the basic save and load functionality
+func TestSessionPersistence(t *testing.T) {
+	manager, cleanup := setupTestManager(t)
+	defer cleanup()
+
+	// Create a new session
+	session, err := manager.NewSession(createTestMetadata())
+	require.NoError(t, err)
+
+	// Add some test messages
+	testMessage := createTestMessage("Hello, how can I help?")
 	err = session.AddChatMessage(testMessage)
 	require.NoError(t, err)
 
@@ -67,36 +83,23 @@ func TestSessionPersistence(t *testing.T) {
 	// Verify metadata
 	loadedMeta, err := loadedSession.LoadMetadata()
 	require.NoError(t, err)
-	assert.Equal(t, meta.ProviderID, loadedMeta.ProviderID)
-	assert.Equal(t, meta.ModelID, loadedMeta.ModelID)
+	expectedMeta := createTestMetadata()
+	assert.Equal(t, expectedMeta.ProviderID, loadedMeta.ProviderID)
+	assert.Equal(t, expectedMeta.ModelID, loadedMeta.ModelID)
 }
 
 // TestCreateNewSession tests the creation of a new session
 func TestCreateNewSession(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "session-test-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(tempDir)
+	manager, cleanup := setupTestManager(t)
+	defer cleanup()
 
-	manager := &SessionManager{BasePath: tempDir}
-
-	meta := Metadata{
-		ProviderID: "test-provider",
-		ModelID:    "test-model",
-	}
-
-	session, err := manager.NewSession(meta)
+	session, err := manager.NewSession(createTestMetadata())
 	require.NoError(t, err)
 	assert.NotEmpty(t, session.ID)
 	assert.NotEmpty(t, session.Path)
 
 	// Verify history file is created after adding a message:
-	testMessage := &api.Message{
-		ID:        uuid.New().String(),
-		Source:    api.MessageSourceUser,
-		Type:      api.MessageTypeText,
-		Payload:   "Test message",
-		Timestamp: time.Now(),
-	}
+	testMessage := createTestMessage("Test message")
 	err = session.AddChatMessage(testMessage)
 	require.NoError(t, err)
 	assert.FileExists(t, session.HistoryPath())
@@ -109,25 +112,20 @@ func TestCreateNewSession(t *testing.T) {
 	// Verify metadata
 	loadedMeta, err := session.LoadMetadata()
 	require.NoError(t, err)
-	assert.Equal(t, meta.ProviderID, loadedMeta.ProviderID)
-	assert.Equal(t, meta.ModelID, loadedMeta.ModelID)
+	expectedMeta := createTestMetadata()
+	assert.Equal(t, expectedMeta.ProviderID, loadedMeta.ProviderID)
+	assert.Equal(t, expectedMeta.ModelID, loadedMeta.ModelID)
 	assert.False(t, loadedMeta.CreatedAt.IsZero())
 	assert.False(t, loadedMeta.LastAccessed.IsZero())
 }
 
 // TestDeleteSession tests session deletion
 func TestDeleteSession(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "session-test-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(tempDir)
-
-	manager := &SessionManager{BasePath: tempDir}
+	manager, cleanup := setupTestManager(t)
+	defer cleanup()
 
 	// Create a session
-	session, err := manager.NewSession(Metadata{
-		ProviderID: "test-provider",
-		ModelID:    "test-model",
-	})
+	session, err := manager.NewSession(createTestMetadata())
 	require.NoError(t, err)
 
 	// Delete the session
@@ -145,18 +143,12 @@ func TestDeleteSession(t *testing.T) {
 
 // TestListSessions tests listing all available sessions
 func TestListSessions(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "session-test-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(tempDir)
-
-	manager := &SessionManager{BasePath: tempDir}
+	manager, cleanup := setupTestManager(t)
+	defer cleanup()
 
 	// Create multiple sessions
 	for i := 0; i < 3; i++ {
-		_, err := manager.NewSession(Metadata{
-			ProviderID: "test-provider",
-			ModelID:    "test-model",
-		})
+		_, err := manager.NewSession(createTestMetadata())
 		require.NoError(t, err)
 	}
 
@@ -173,17 +165,11 @@ func TestListSessions(t *testing.T) {
 
 // TestCorruptedMetadata tests handling of corrupted metadata
 func TestCorruptedMetadata(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "session-test-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(tempDir)
-
-	manager := &SessionManager{BasePath: tempDir}
+	manager, cleanup := setupTestManager(t)
+	defer cleanup()
 
 	// Create a session
-	session, err := manager.NewSession(Metadata{
-		ProviderID: "test-provider",
-		ModelID:    "test-model",
-	})
+	session, err := manager.NewSession(createTestMetadata())
 	require.NoError(t, err)
 
 	// Corrupt the metadata file
@@ -197,27 +183,15 @@ func TestCorruptedMetadata(t *testing.T) {
 
 // TestCorruptedHistory tests handling of corrupted history file
 func TestCorruptedHistory(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "session-test-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(tempDir)
-
-	manager := &SessionManager{BasePath: tempDir}
+	manager, cleanup := setupTestManager(t)
+	defer cleanup()
 
 	// Create a session
-	session, err := manager.NewSession(Metadata{
-		ProviderID: "test-provider",
-		ModelID:    "test-model",
-	})
+	session, err := manager.NewSession(createTestMetadata())
 	require.NoError(t, err)
 
 	// Add a valid message
-	err = session.AddChatMessage(&api.Message{
-		ID:        uuid.New().String(),
-		Source:    api.MessageSourceUser,
-		Type:      api.MessageTypeText,
-		Payload:   "Valid message",
-		Timestamp: time.Now(),
-	})
+	err = session.AddChatMessage(createTestMessage("Valid message"))
 	require.NoError(t, err)
 
 	// Append corrupted JSON to history file
@@ -235,17 +209,11 @@ func TestCorruptedHistory(t *testing.T) {
 
 // TestConcurrentAccess tests concurrent access to a session
 func TestConcurrentAccess(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "session-test-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(tempDir)
-
-	manager := &SessionManager{BasePath: tempDir}
+	manager, cleanup := setupTestManager(t)
+	defer cleanup()
 
 	// Create a session
-	session, err := manager.NewSession(Metadata{
-		ProviderID: "test-provider",
-		ModelID:    "test-model",
-	})
+	session, err := manager.NewSession(createTestMetadata())
 	require.NoError(t, err)
 
 	// Test concurrent reads and writes
@@ -254,13 +222,7 @@ func TestConcurrentAccess(t *testing.T) {
 
 	for i := 0; i < messageCount; i++ {
 		go func(i int) {
-			msg := &api.Message{
-				ID:        uuid.New().String(),
-				Source:    api.MessageSourceUser,
-				Type:      api.MessageTypeText,
-				Payload:   "Concurrent message",
-				Timestamp: time.Now(),
-			}
+			msg := createTestMessage("Concurrent message")
 			err := session.AddChatMessage(msg)
 			assert.NoError(t, err)
 			done <- true
@@ -279,28 +241,16 @@ func TestConcurrentAccess(t *testing.T) {
 
 // TestClearMessages tests clearing all messages from a session
 func TestClearMessages(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "session-test-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(tempDir)
-
-	manager := &SessionManager{BasePath: tempDir}
+	manager, cleanup := setupTestManager(t)
+	defer cleanup()
 
 	// Create a session
-	session, err := manager.NewSession(Metadata{
-		ProviderID: "test-provider",
-		ModelID:    "test-model",
-	})
+	session, err := manager.NewSession(createTestMetadata())
 	require.NoError(t, err)
 
 	// Add some messages
 	for i := 0; i < 3; i++ {
-		err = session.AddChatMessage(&api.Message{
-			ID:        uuid.New().String(),
-			Source:    api.MessageSourceUser,
-			Type:      api.MessageTypeText,
-			Payload:   "Test message",
-			Timestamp: time.Now(),
-		})
+		err = session.AddChatMessage(createTestMessage("Test message"))
 		require.NoError(t, err)
 	}
 
@@ -317,19 +267,14 @@ func TestClearMessages(t *testing.T) {
 
 // TestGetLatestSession tests getting the most recent session
 func TestGetLatestSession(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "session-test-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(tempDir)
-
-	manager := &SessionManager{BasePath: tempDir}
+	manager, cleanup := setupTestManager(t)
+	defer cleanup()
 
 	// Create multiple sessions
 	var lastSession *Session
+	var err error
 	for i := 0; i < 3; i++ {
-		lastSession, err = manager.NewSession(Metadata{
-			ProviderID: "test-provider",
-			ModelID:    "test-model",
-		})
+		lastSession, err = manager.NewSession(createTestMetadata())
 		require.NoError(t, err)
 		time.Sleep(time.Millisecond) // Ensure different timestamps
 	}
@@ -345,17 +290,11 @@ func TestGetLatestSession(t *testing.T) {
 
 // TestUpdateLastAccessed tests updating the last accessed timestamp
 func TestUpdateLastAccessed(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "session-test-*")
-	require.NoError(t, err)
-	defer os.RemoveAll(tempDir)
-
-	manager := &SessionManager{BasePath: tempDir}
+	manager, cleanup := setupTestManager(t)
+	defer cleanup()
 
 	// Create a session
-	session, err := manager.NewSession(Metadata{
-		ProviderID: "test-provider",
-		ModelID:    "test-model",
-	})
+	session, err := manager.NewSession(createTestMetadata())
 	require.NoError(t, err)
 
 	// Get initial last accessed time
