@@ -59,6 +59,10 @@ type Tools struct {
 	tools map[string]Tool
 }
 
+func (t *Tools) Init() {
+	t.tools = make(map[string]Tool)
+}
+
 func (t *Tools) Lookup(name string) Tool {
 	return t.tools[name]
 }

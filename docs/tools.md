@@ -8,16 +8,17 @@ This document outlines how you can add custom tools by detailing the steps and p
 
 This document also outlines the available tools, their locations, and how to use them.
 
-# Adding Custom Tools
+## Adding Custom Tools
 
 Custom tools can be added by following these two steps:
 
 - describing or templating the tool through YAML file
 - enabling the tool in the configuration file by pointing the **--custom-tools-config** to this file / directory
 
-# Describing the Tool in YAML file
+## Describing the Tool in YAML file
 
 A custom tool can be described by providing the following four pieces of information:
+
 - **name**: name of the tool
 - **description**: "A clear description that helps the LLM understand when to use this tool."
 - **command** : "your_command" # For example: 'gcloud' or 'gcloud container clusters'
@@ -78,7 +79,6 @@ docker run --rm -it \
   --custom-tools-config=/my-custom-tools \
   "your prompt here"
 ```
-
 
 ## Sample Custom Tools
 
