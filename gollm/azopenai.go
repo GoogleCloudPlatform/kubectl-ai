@@ -271,8 +271,53 @@ func (c *AzureOpenAIChat) IsRetryableError(err error) bool {
 }
 
 func (c *AzureOpenAIChat) Initialize(messages []*api.Message) error {
-	klog.Warning("chat history persistence is not supported for provider 'azopenai', using in-memory chat history")
+	klog.Info("Initializing Azure OpenAI chat with history")
+	c.history = make([]azopenai.ChatRequestMessageClassification, 0, len(messages))
+	for _, msg := range messages {
+		content, err := c.messageToAzureContent(msg)
+		if err != nil {
+			continue // Skip malformed messages but continue processing
+		}
+		c.history = append(c.history, content)
+	}
 	return nil
+}
+
+func (c *AzureOpenAIChat) messageToAzureContent(msg *api.Message) (azopenai.ChatRequestMessageClassification, error) {
+	var role string
+	switch msg.Source {
+	case api.MessageSourceUser:
+		role = "user"
+	case api.MessageSourceModel:
+		role = "assistant"
+	case api.MessageSourceAgent:
+		role = "user" // Treat agent messages as user messages
+	default:
+		return nil, fmt.Errorf("unknown message source: %s", msg.Source)
+	}
+
+	switch v := msg.Payload.(type) {
+	case string:
+		if role == "user" {
+			return &azopenai.ChatRequestUserMessage{
+				Content: azopenai.NewChatRequestUserMessageContent(v),
+			}, nil
+		} else {
+			return &azopenai.ChatRequestAssistantMessage{
+				Content: azopenai.NewChatRequestAssistantMessageContent(v),
+			}, nil
+		}
+	case FunctionCallResult:
+		// Handle function call results appropriately
+		return &azopenai.ChatRequestUserMessage{
+			Content: azopenai.NewChatRequestUserMessageContent(fmt.Sprintf("Function call result: %s", v.Result)),
+		}, nil
+	default:
+		// Convert unknown types to string representation
+		return &azopenai.ChatRequestUserMessage{
+			Content: azopenai.NewChatRequestUserMessageContent(fmt.Sprintf("%v", v)),
+		}, nil
+	}
 }
 
 func (c *AzureOpenAIChat) SendStreaming(ctx context.Context, contents ...any) (ChatResponseIterator, error) {
