@@ -245,7 +245,7 @@ func convertMCPInputSchema(mcpInputSchema *mcp.ToolInputSchema) (*gollm.Schema, 
 					return nil, fmt.Errorf("converting MCP input schema to tool input schema: %w", err)
 				}
 				gollmSchema.Properties[key] = gollmValue
-			} else if valueMap, ok := value.(map[string]interface{}); ok {
+			} else if valueMap, ok := value.(map[string]interface{}); ok && valueMap != nil {
 				gollmValue, err := convertMCPMapSchema(key, valueMap)
 				if err != nil {
 					return nil, fmt.Errorf("converting MCP input schema to tool input schema: %w", err)
@@ -261,6 +261,10 @@ func convertMCPInputSchema(mcpInputSchema *mcp.ToolInputSchema) (*gollm.Schema, 
 }
 
 func convertMCPMapSchema(key string, schemaMap map[string]interface{}) (*gollm.Schema, error) {
+	if schemaMap == nil {
+		return nil, fmt.Errorf("schema map is nil for key %q", key)
+	}
+
 	gollmSchema := &gollm.Schema{}
 
 	if descriptionObj, ok := schemaMap["description"]; ok {
@@ -302,12 +306,22 @@ func convertMCPMapSchema(key string, schemaMap map[string]interface{}) (*gollm.S
 	case "object":
 		gollmSchema.Type = gollm.TypeObject
 		gollmSchema.Properties = make(map[string]*gollm.Schema)
-		for key, value := range schemaMap["properties"].(map[string]interface{}) {
-			propertySchema, err := convertMCPMapSchema(key, value.(map[string]interface{}))
-			if err != nil {
-				return nil, fmt.Errorf("converting MCP input schema to tool input schema: %w", err)
+		if propertiesObj, ok := schemaMap["properties"]; ok && propertiesObj != nil {
+			properties, ok := propertiesObj.(map[string]interface{})
+			if !ok {
+				return nil, fmt.Errorf("properties field is not a map for key %q: %+v", key, schemaMap)
 			}
-			gollmSchema.Properties[key] = propertySchema
+			for key, value := range properties {
+				valueMap, ok := value.(map[string]interface{})
+				if !ok {
+					return nil, fmt.Errorf("property value is not a map for key %q: %+v", key, value)
+				}
+				propertySchema, err := convertMCPMapSchema(key, valueMap)
+				if err != nil {
+					return nil, fmt.Errorf("converting MCP input schema to tool input schema: %w", err)
+				}
+				gollmSchema.Properties[key] = propertySchema
+			}
 		}
 	default:
 		return nil, fmt.Errorf("unexpected input schema type %q for key %q: %+v", mcpType, key, schemaMap)
