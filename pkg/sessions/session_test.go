@@ -279,9 +279,6 @@ func TestGetLatestSession(t *testing.T) {
 		time.Sleep(time.Millisecond) // Ensure different timestamps
 	}
 
-	// List sessions for correct order
-	manager.ListSessions()
-
 	// Get latest session
 	latest, err := manager.GetLatestSession()
 	require.NoError(t, err)
