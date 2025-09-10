@@ -350,6 +350,7 @@ func (c *Agent) Run(ctx context.Context, initialQuery string) error {
 					if userInput == io.EOF {
 						log.Info("Agent loop done, EOF received")
 						c.setAgentState(api.AgentStateExited)
+						c.addMessage(api.MessageSourceAgent, api.MessageTypeText, "It has been a pleasure assisting you. Have a great day!")
 						return
 					}
 					query, ok := userInput.(*api.UserInputResponse)
@@ -408,6 +409,7 @@ func (c *Agent) Run(ctx context.Context, initialQuery string) error {
 					if userInput == io.EOF {
 						log.Info("Agent loop done, EOF received")
 						c.setAgentState(api.AgentStateExited)
+						c.addMessage(api.MessageSourceAgent, api.MessageTypeText, "It has been a pleasure assisting you. Have a great day!")
 						return
 					}
 					choiceResponse, ok := userInput.(*api.UserChoiceResponse)

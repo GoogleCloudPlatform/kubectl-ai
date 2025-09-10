@@ -288,6 +288,12 @@ func (u *TerminalUI) handleMessage(msg *api.Message) {
 				fmt.Print("\n>>> ") // Print prompt manually
 				query, err = tReader.ReadString('\n')
 				if err != nil {
+					klog.Infof("TTY read error: %v", err)
+					if err == io.EOF {
+						// Handle Ctrl+D gracefully
+						u.agent.Input <- io.EOF
+						return
+					}
 					klog.Errorf("Error reading from TTY: %v", err)
 					u.agent.Input <- fmt.Errorf("error reading from TTY: %w", err)
 					return
@@ -357,6 +363,12 @@ func (u *TerminalUI) handleMessage(msg *api.Message) {
 				fmt.Print("Enter your choice: ")
 				line, err = tReader.ReadString('\n')
 				if err != nil {
+					klog.Infof("TTY read error: %v", err)
+					if err == io.EOF {
+						// Handle Ctrl+D gracefully
+						u.agent.Input <- io.EOF
+						return
+					}
 					klog.Errorf("Error reading from TTY: %v", err)
 					u.agent.Input <- fmt.Errorf("error reading from TTY: %w", err)
 					return
