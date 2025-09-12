@@ -120,6 +120,7 @@ func NewHTMLUserInterface(agent *agent.Agent, listenAddress string, journal jour
 	mux.HandleFunc("GET /messages-stream", u.serveMessagesStream)
 	mux.HandleFunc("POST /send-message", u.handlePOSTSendMessage)
 	mux.HandleFunc("POST /choose-option", u.handlePOSTChooseOption)
+	mux.HandleFunc("POST /cancel-request", u.handlePOSTCancelRequest)
 
 	httpServerListener, err := net.Listen("tcp", listenAddress)
 	if err != nil {
@@ -285,9 +286,11 @@ func (u *HTMLUserInterface) getCurrentStateJSON() ([]byte, error) {
 
 	agentState := u.agent.Session().AgentState
 
+	currentID := u.agent.Session().CurrentRequestID
 	data := map[string]interface{}{
-		"messages":   messages,
-		"agentState": agentState,
+		"messages":         messages,
+		"agentState":       agentState,
+		"currentRequestId": currentID,
 	}
 	return json.Marshal(data)
 }
@@ -319,6 +322,23 @@ func (u *HTMLUserInterface) handlePOSTChooseOption(w http.ResponseWriter, req *h
 	// Send the choice to the agent
 	u.agent.Input <- &api.UserChoiceResponse{Choice: choiceIndex}
 
+	w.WriteHeader(http.StatusOK)
+}
+
+func (u *HTMLUserInterface) handlePOSTCancelRequest(w http.ResponseWriter, req *http.Request) {
+	ctx := req.Context()
+	log := klog.FromContext(ctx)
+	if err := req.ParseForm(); err != nil {
+		log.Error(err, "parsing form")
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	id := req.FormValue("id")
+	if id == "" {
+		http.Error(w, "missing id", http.StatusBadRequest)
+		return
+	}
+	u.agent.CancelRequest(id)
 	w.WriteHeader(http.StatusOK)
 }
 

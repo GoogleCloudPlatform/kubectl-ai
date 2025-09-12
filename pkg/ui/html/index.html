@@ -273,6 +273,8 @@
             const [input, setInput] = useState('');
             const [agentState, setAgentState] = useState('idle');
             const [isConnected, setIsConnected] = useState(false);
+            const [currentRequestId, setCurrentRequestId] = useState(null);
+            const controllerRef = useRef(null);
             const [expandedOutputs, setExpandedOutputs] = useState(new Set());
             const [isDarkMode, setIsDarkMode] = useState(() => {
                 // Check for saved preference first
@@ -355,32 +357,52 @@
                 scrollToBottom();
             }, [messages]);
 
+            const connectStream = () => {
+                const controller = new AbortController();
+                controllerRef.current = controller;
+                fetch('/messages-stream', { signal: controller.signal })
+                    .then(response => {
+                        setIsConnected(true);
+                        const reader = response.body.getReader();
+                        const decoder = new TextDecoder();
+                        let buffer = '';
+                        const read = () => {
+                            reader.read().then(({ done, value }) => {
+                                if (done) return;
+                                buffer += decoder.decode(value, { stream: true });
+                                const parts = buffer.split('\n\n');
+                                buffer = parts.pop();
+                                for (const part of parts) {
+                                    if (part.startsWith('data: ')) {
+                                        try {
+                                            const data = JSON.parse(part.slice(6));
+                                            setMessages(data.messages || []);
+                                            setAgentState(data.agentState || 'idle');
+                                            setCurrentRequestId(data.currentRequestId || null);
+                                        } catch (error) {
+                                            console.error('Error parsing server data:', error);
+                                        }
+                                    }
+                                }
+                                read();
+                            }).catch(err => {
+                                if (err.name === 'AbortError') return;
+                                setIsConnected(false);
+                                console.error('Error reading stream:', err);
+                            });
+                        };
+                        read();
+                    })
+                    .catch(err => {
+                        if (err.name === 'AbortError') return;
+                        setIsConnected(false);
+                        console.error('Error connecting to stream:', err);
+                    });
+            };
+
             useEffect(() => {
-                const eventSource = new EventSource('/messages-stream');
-                
-                eventSource.onopen = () => {
-                    setIsConnected(true);
-                    console.log('Connected to kubectl-ai');
-                };
-
-                eventSource.onmessage = (event) => {
-                    try {
-                        const data = JSON.parse(event.data);
-                        setMessages(data.messages || []);
-                        setAgentState(data.agentState || 'idle');
-                    } catch (error) {
-                        console.error('Error parsing server data:', error);
-                    }
-                };
-
-                eventSource.onerror = () => {
-                    setIsConnected(false);
-                    eventSource.close();
-                };
-
-                return () => {
-                    eventSource.close();
-                };
+                connectStream();
+                return () => controllerRef.current?.abort();
             }, []);
 
             useEffect(() => {
@@ -421,6 +443,21 @@
                 } catch (error) {
                     console.error('Error choosing option:', error);
                 }
+            };
+
+            const cancelRequest = async () => {
+                if (!currentRequestId) return;
+                controllerRef.current?.abort();
+                try {
+                    await fetch('/cancel-request', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: 'id=' + encodeURIComponent(currentRequestId)
+                    });
+                } catch (error) {
+                    console.error('Error cancelling request:', error);
+                }
+                connectStream();
             };
 
             const handleSubmit = (e) => {
@@ -860,13 +897,23 @@
                                         </div>
                                     )}
                                 </div>
-                                <button
-                                    type="submit"
-                                    disabled={!canSendMessage || !input.trim()}
-                                    className="px-6 py-3 bg-gradient-to-r from-brand-500 to-brand-600 text-white rounded-xl hover:from-brand-600 hover:to-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 font-medium shadow-sm self-end"
-                                >
-                                    Send
-                                </button>
+                                {agentState === 'running' ? (
+                                    <button
+                                        type="button"
+                                        onClick={cancelRequest}
+                                        className="px-6 py-3 bg-red-600 text-white rounded-xl hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 transition-all duration-200 font-medium shadow-sm self-end"
+                                    >
+                                        Stop
+                                    </button>
+                                ) : (
+                                    <button
+                                        type="submit"
+                                        disabled={!canSendMessage || !input.trim()}
+                                        className="px-6 py-3 bg-gradient-to-r from-brand-500 to-brand-600 text-white rounded-xl hover:from-brand-600 hover:to-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 font-medium shadow-sm self-end"
+                                    >
+                                        Send
+                                    </button>
+                                )}
                             </form>
                             <div className={`flex items-center justify-center mt-3 text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
                                 <span>💡 Try: "scale nginx to 3 replicas" or "show me pod status"</span>
