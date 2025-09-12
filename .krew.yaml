@@ -1,4 +1,3 @@
-# Generated from: https://rajatjindal.com/tools/krew-release-bot-helper/
 apiVersion: krew.googlecontainertools.github.com/v1alpha2
 kind: Plugin
 metadata:
