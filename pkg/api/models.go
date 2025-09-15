@@ -24,6 +24,10 @@ type Session struct {
 	AgentState   AgentState
 	CreatedAt    time.Time
 	LastModified time.Time
+
+	// ContextPercentRemaining indicates the percentage of the model's context window that is still available.
+	TokensConsumed int64
+
 	// MCP status information
 	MCPStatus *MCPStatus
 	// ChatMessageStore is an interface that allows the session to store and retrieve chat messages.
