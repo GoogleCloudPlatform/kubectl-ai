@@ -106,7 +106,7 @@ run-evals: ## Run evaluations (periodic task)
 
 analyze-evals: ## Analyze evaluations (periodic task)
 	@echo "λ Analyzing evaluations..."
-	./dev/ci/periodics/analyze-evals.sh
+	./dev/ci/periodics/analyze-evals.sh $(ARGS)
 
 # --- Combined Tasks ---
 # 'check' depends on other verification tasks. They will run as prerequisites.

@@ -108,6 +108,7 @@ type AnalyzeConfig struct {
 	InputDir          string
 	OutputFormat      string
 	IgnoreToolUseShim bool
+	ShowFailures      bool
 }
 
 func expandPath(path string) (string, error) {
@@ -288,6 +289,7 @@ func runAnalyze() error {
 	flag.StringVar(&config.InputDir, "input-dir", config.InputDir, "Directory containing evaluation results (required)")
 	flag.StringVar(&config.OutputFormat, "output-format", config.OutputFormat, "Output format (markdown or json)")
 	flag.BoolVar(&config.IgnoreToolUseShim, "ignore-tool-use-shim", true, "Ignore tool use shim")
+	flag.BoolVar(&config.ShowFailures, "show-failures", false, "Show failure details in markdown output")
 	flag.StringVar(&resultsFilePath, "results-filepath", "", "Optional file path to write results to")
 	flag.Parse()
 
@@ -359,6 +361,28 @@ func collectResults(inputDir string) ([]model.TaskResult, error) {
 	}
 
 	return allResults, nil
+}
+
+func printFailureDetails(buffer *strings.Builder, results []model.TaskResult, title string, showModel bool) {
+	hasFailures := false
+	for _, result := range results {
+		if len(result.Failures) > 0 {
+			if !hasFailures {
+				buffer.WriteString(fmt.Sprintf("\n**%s Failure Details**\n\n", title))
+				hasFailures = true
+			}
+			// for the IgnoreToolUseShim case
+			if showModel {
+				buffer.WriteString(fmt.Sprintf("**Task: %s (%s)**\n", result.Task, result.LLMConfig.ModelID))
+			} else {
+				buffer.WriteString(fmt.Sprintf("**Task: %s**\n", result.Task))
+			}
+			for _, failure := range result.Failures {
+				buffer.WriteString(fmt.Sprintf("```\n%s\n```\n", failure.Message))
+			}
+			buffer.WriteString("\n")
+		}
+	}
 }
 
 func printMarkdownResults(config AnalyzeConfig, results []model.TaskResult, resultsFilePath string) error {
@@ -533,6 +557,10 @@ func printMarkdownResults(config AnalyzeConfig, results []model.TaskResult, resu
 			buffer.WriteString(fmt.Sprintf("- Total: %d\n", modelTotalCount))
 			buffer.WriteString(fmt.Sprintf("- Success: %d (%d%%)\n", modelSuccessCount, calculatePercentage(modelSuccessCount, modelTotalCount)))
 			buffer.WriteString(fmt.Sprintf("- Fail: %d (%d%%)\n\n", modelFailCount, calculatePercentage(modelFailCount, modelTotalCount)))
+			// After the summary, print failure details
+			if config.ShowFailures {
+				printFailureDetails(&buffer, modelResults, model, false)
+			}
 		}
 
 	} else {
@@ -597,6 +625,11 @@ func printMarkdownResults(config AnalyzeConfig, results []model.TaskResult, resu
 			buffer.WriteString(fmt.Sprintf("- Total: %d\n", totalCount))
 			buffer.WriteString(fmt.Sprintf("- Success: %d (%d%%)\n", successCount, calculatePercentage(successCount, totalCount)))
 			buffer.WriteString(fmt.Sprintf("- Fail: %d (%d%%)\n\n", failCount, calculatePercentage(failCount, totalCount)))
+
+			// After the summary, print failure details
+			if config.ShowFailures {
+				printFailureDetails(&buffer, toolUseShimStrResults, toolUseShimStr, true)
+			}
 		}
 	}
 

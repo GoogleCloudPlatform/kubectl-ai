@@ -201,6 +201,15 @@ func loadTasks(config EvalConfig) (map[string]Task, error) {
 	return tasks, nil
 }
 
+// getLastNLines returns the last n lines of a string.
+func getLastNLines(s string, n int) (string, bool) {
+	lines := strings.Split(s, "\n")
+	if len(lines) > n {
+		return strings.Join(lines[len(lines)-n:], "\n"), true
+	}
+	return s, false
+}
+
 func evaluateTask(ctx context.Context, config EvalConfig, taskID string, task Task, llmConfig model.LLMConfig, log io.Writer) model.TaskResult {
 	result := model.TaskResult{
 		Task:      taskID,
@@ -209,12 +218,18 @@ func evaluateTask(ctx context.Context, config EvalConfig, taskID string, task Ta
 
 	taskOutputDir := filepath.Join(config.OutputDir, taskID, llmConfig.ID)
 
+	var logBuffer bytes.Buffer
+	multiWriter := io.MultiWriter(&logBuffer)
+	if log != nil {
+		multiWriter = io.MultiWriter(log, &logBuffer)
+	}
+
 	x := &TaskExecution{
 		AgentBin:      config.AgentBin,
 		kubeConfig:    config.KubeConfig,
 		result:        &result,
 		llmConfig:     llmConfig,
-		log:           log,
+		log:           multiWriter,
 		task:          &task,
 		taskID:        taskID,
 		taskOutputDir: taskOutputDir,
@@ -302,7 +317,24 @@ func evaluateTask(ctx context.Context, config EvalConfig, taskID string, task Ta
 		if err == nil {
 			verifierSucceeded = true
 		} else {
-			result.AddFailure("verifier script failed")
+			const maxLogLines = 20
+			logString := logBuffer.String()
+			logTail, truncated := getLastNLines(logString, maxLogLines)
+			// build log file path
+			shimSegment := "shim_disabled"
+			if x.llmConfig.EnableToolUseShim {
+				shimSegment = "shim_enabled"
+			}
+			logPath := filepath.Join(
+				config.OutputDir,
+				taskID,
+				shimSegment+"-"+x.llmConfig.ProviderID+"-"+x.llmConfig.ModelID,
+			)
+			failureMessage := fmt.Sprintf("verifier script failed: %v\n---LOG---\n%s", err, logTail)
+			if truncated {
+				failureMessage += fmt.Sprintf("\n... (log truncated, full log at %s)", logPath)
+			}
+			result.AddFailure(failureMessage)
 		}
 	}
 

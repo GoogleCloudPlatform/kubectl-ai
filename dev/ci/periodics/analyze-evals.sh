@@ -21,5 +21,12 @@ cd "${REPO_ROOT}/k8s-bench"
 go build -o "${BINDIR}/k8s-bench" .
 
 cd "${REPO_ROOT}"
-"${BINDIR}/k8s-bench" analyze --input-dir "${OUTPUT_DIR}" ${TEST_ARGS:-} -results-filepath ${REPO_ROOT}/.build/k8s-bench.md --output-format markdown
+
+# Pass --show-failures flag to the analyze command if it's set
+ANALYZE_ARGS=""
+if [[ "$*" == *"--show-failures"* ]]; then
+    ANALYZE_ARGS="--show-failures"
+fi
+
+"${BINDIR}/k8s-bench" analyze --input-dir "${OUTPUT_DIR}" ${TEST_ARGS:-} -results-filepath ${REPO_ROOT}/.build/k8s-bench.md --output-format markdown ${ANALYZE_ARGS}
 "${BINDIR}/k8s-bench" analyze --input-dir "${OUTPUT_DIR}" ${TEST_ARGS:-} -results-filepath ${REPO_ROOT}/.build/k8s-bench.json --output-format json
