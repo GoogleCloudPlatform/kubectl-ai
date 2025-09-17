@@ -459,6 +459,7 @@ func (x *TaskExecution) runAgent(ctx context.Context) (string, error) {
 		"--model", x.llmConfig.ModelID,
 		"--trace-path", tracePath,
 		"--skip-permissions",
+		"--show-tool-output",
 	}
 
 	stdinReader, stdinWriter := io.Pipe()
