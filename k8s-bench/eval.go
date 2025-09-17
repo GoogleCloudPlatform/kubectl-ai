@@ -334,7 +334,7 @@ func evaluateTask(ctx context.Context, config EvalConfig, taskID string, task Ta
 			if truncated {
 				failureMessage += fmt.Sprintf("\n... (log truncated, full log at %s)", logPath)
 			}
-			result.AddFailure(failureMessage)
+			result.AddFailure("%s", failureMessage)
 		}
 	}
 
