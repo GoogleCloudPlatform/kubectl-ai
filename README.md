@@ -253,7 +253,7 @@ skipVerifySSL: false              # Skip SSL verification for LLM API calls
 
 # Tool and permission settings
 toolConfigPaths: ["~/.config/kubectl-ai/tools.yaml"]  # Custom tools configuration paths
-skipPermissions: false             # Skip confirmation for resource-modifying commands
+approvalPolicy: auto-approve-read # Approval policy: auto-approve-read, paranoid, or yolo
 enableToolUseShim: false        # Enable tool use shim for certain models
 
 # MCP configuration
@@ -282,6 +282,12 @@ tracePath: "/tmp/kubectl-ai-trace.txt" # Path to trace file
 ```
 
 </details>
+
+The `approvalPolicy` setting (or the `--approval-policy` flag) controls how `kubectl-ai` requests permission before executing generated commands:
+
+* `auto-approve-read` (default) skips prompts for commands the agent identifies as read-only.
+* `paranoid` always asks for explicit approval before running any command.
+* `yolo` never asks for approval—use with caution.
 
 All these settings can be configured through either:
 

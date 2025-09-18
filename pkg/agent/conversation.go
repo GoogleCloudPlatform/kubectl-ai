@@ -85,7 +85,7 @@ type Agent struct {
 	// Kubeconfig is the path to the kubeconfig file.
 	Kubeconfig string
 
-	SkipPermissions bool
+	ApprovalPolicy ApprovalPolicy
 
 	Tools tools.Tools
 
@@ -607,7 +607,7 @@ func (c *Agent) Run(ctx context.Context, initialQuery string) error {
 					continue // Skip execution for interactive commands
 				}
 
-				if !c.SkipPermissions && modifiesResourceToolCallIndex >= 0 {
+				if c.shouldRequestApproval(modifiesResourceToolCallIndex) {
 					// In RunOnce mode, exit with error if permission is required
 					if c.RunOnce {
 						var commandDescriptions []string
@@ -615,7 +615,7 @@ func (c *Agent) Run(ctx context.Context, initialQuery string) error {
 							commandDescriptions = append(commandDescriptions, call.ParsedToolCall.Description())
 						}
 						errorMessage := "RunOnce mode cannot handle permission requests. The following commands require approval:\n* " + strings.Join(commandDescriptions, "\n* ")
-						errorMessage += "\nUse --skip-permissions flag to bypass permission checks in RunOnce mode."
+						errorMessage += "\nUse --approval-policy=yolo to bypass permission checks in RunOnce mode."
 
 						log.Error(nil, "RunOnce mode cannot handle permission requests", "commands", commandDescriptions)
 						c.setAgentState(api.AgentStateExited)
@@ -630,13 +630,15 @@ func (c *Agent) Run(ctx context.Context, initialQuery string) error {
 					confirmationPrompt := "The following commands require your approval to run:\n* " + strings.Join(commandDescriptions, "\n* ")
 					confirmationPrompt += "\n\nDo you want to proceed ?"
 
+					options := []api.UserChoiceOption{{Value: "yes", Label: "Yes"}}
+					if c.ApprovalPolicy != ApprovalPolicyParanoid {
+						options = append(options, api.UserChoiceOption{Value: "yes_and_dont_ask_me_again", Label: "Yes, and don't ask me again"})
+					}
+					options = append(options, api.UserChoiceOption{Value: "no", Label: "No"})
+
 					choiceRequest := &api.UserChoiceRequest{
-						Prompt: confirmationPrompt,
-						Options: []api.UserChoiceOption{
-							{Value: "yes", Label: "Yes"},
-							{Value: "yes_and_dont_ask_me_again", Label: "Yes, and don't ask me again"},
-							{Value: "no", Label: "No"},
-						},
+						Prompt:  confirmationPrompt,
+						Options: options,
 					}
 					c.setAgentState(api.AgentStateWaitingForInput)
 					c.addMessage(api.MessageSourceAgent, api.MessageTypeUserChoiceRequest, choiceRequest)
@@ -944,20 +946,29 @@ func (c *Agent) analyzeToolCalls(ctx context.Context, toolCalls []gollm.Function
 	return toolCallAnalysis, nil
 }
 
+func (c *Agent) shouldRequestApproval(modifiesResourceToolCallIndex int) bool {
+	switch c.ApprovalPolicy {
+	case ApprovalPolicyYolo:
+		return false
+	case ApprovalPolicyParanoid:
+		return len(c.pendingFunctionCalls) > 0
+	case ApprovalPolicyAutoApproveRead:
+		fallthrough
+	default:
+		return modifiesResourceToolCallIndex >= 0
+	}
+}
+
 func (c *Agent) handleChoice(ctx context.Context, choice *api.UserChoiceResponse) (dispatchToolCalls bool) {
 	log := klog.FromContext(ctx)
 	// if user input is a choice and use has declined the operation,
 	// we need to abort all pending function calls.
 	// update the currChatContent with the choice and keep the agent loop running.
 
-	// Normalize the input
-	switch choice.Choice {
-	case 1:
-		dispatchToolCalls = true
-	case 2:
-		c.SkipPermissions = true
-		dispatchToolCalls = true
-	case 3:
+	decline := func() {
+		if len(c.pendingFunctionCalls) == 0 {
+			return
+		}
 		c.currChatContent = append(c.currChatContent, gollm.FunctionCallResult{
 			ID:   c.pendingFunctionCalls[0].FunctionCall.ID,
 			Name: c.pendingFunctionCalls[0].FunctionCall.Name,
@@ -970,13 +981,38 @@ func (c *Agent) handleChoice(ctx context.Context, choice *api.UserChoiceResponse
 		c.pendingFunctionCalls = []ToolCallAnalysis{}
 		dispatchToolCalls = false
 		c.addMessage(api.MessageSourceAgent, api.MessageTypeError, "Operation was skipped. User declined to run this operation.")
+	}
+
+	switch c.ApprovalPolicy {
+	case ApprovalPolicyParanoid:
+		switch choice.Choice {
+		case 1:
+			dispatchToolCalls = true
+		case 2:
+			decline()
+		default:
+			err := fmt.Errorf("invalid confirmation choice: %q", choice.Choice)
+			log.Error(err, "Invalid choice received from AskForConfirmation")
+			c.pendingFunctionCalls = []ToolCallAnalysis{}
+			dispatchToolCalls = false
+			c.addMessage(api.MessageSourceAgent, api.MessageTypeError, "Invalid choice received. Cancelling operation.")
+		}
 	default:
-		// This case should technically not be reachable due to AskForConfirmation loop
-		err := fmt.Errorf("invalid confirmation choice: %q", choice.Choice)
-		log.Error(err, "Invalid choice received from AskForConfirmation")
-		c.pendingFunctionCalls = []ToolCallAnalysis{}
-		dispatchToolCalls = false
-		c.addMessage(api.MessageSourceAgent, api.MessageTypeError, "Invalid choice received. Cancelling operation.")
+		switch choice.Choice {
+		case 1:
+			dispatchToolCalls = true
+		case 2:
+			c.ApprovalPolicy = ApprovalPolicyYolo
+			dispatchToolCalls = true
+		case 3:
+			decline()
+		default:
+			err := fmt.Errorf("invalid confirmation choice: %q", choice.Choice)
+			log.Error(err, "Invalid choice received from AskForConfirmation")
+			c.pendingFunctionCalls = []ToolCallAnalysis{}
+			dispatchToolCalls = false
+			c.addMessage(api.MessageSourceAgent, api.MessageTypeError, "Invalid choice received. Cancelling operation.")
+		}
 	}
 	return dispatchToolCalls
 }

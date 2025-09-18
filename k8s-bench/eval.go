@@ -458,7 +458,7 @@ func (x *TaskExecution) runAgent(ctx context.Context) (string, error) {
 		fmt.Sprintf("--quiet=%t", x.llmConfig.Quiet),
 		"--model", x.llmConfig.ModelID,
 		"--trace-path", tracePath,
-		"--skip-permissions",
+		"--approval-policy=yolo",
 		"--show-tool-output",
 	}
 
