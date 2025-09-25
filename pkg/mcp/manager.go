@@ -104,11 +104,13 @@ func (m *Manager) ConnectAll(ctx context.Context) error {
 
 		// Create client config with environment map
 		config := ClientConfig{
-			Name:    serverCfg.Name,
-			Command: serverCfg.Command,
-			Args:    serverCfg.Args,
-			Env:     envSlice,
-			URL:     serverCfg.URL,
+			Name:        serverCfg.Name,
+			Command:     serverCfg.Command,
+			Args:        serverCfg.Args,
+			Auth:        serverCfg.Auth,
+			OAuthConfig: serverCfg.OAuthConfig,
+			Env:         envSlice,
+			URL:         serverCfg.URL,
 		}
 
 		client := NewClient(config)
