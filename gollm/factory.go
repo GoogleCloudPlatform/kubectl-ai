@@ -194,7 +194,9 @@ func DefaultIsRetryableError(err error) bool {
 // This is shared by all providers that need custom HTTP transport.
 func createCustomHTTPClient(skipVerify bool) *http.Client {
 	if !skipVerify {
-		return http.DefaultClient
+		httpClient := http.DefaultClient
+		httpClient.Timeout = 60 * time.Second
+		return httpClient
 	}
 	return &http.Client{
 		Transport: &http.Transport{
@@ -203,6 +205,7 @@ func createCustomHTTPClient(skipVerify bool) *http.Client {
 				InsecureSkipVerify: true,
 			},
 		},
+		Timeout: 60 * time.Second,
 	}
 }
 
