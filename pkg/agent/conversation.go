@@ -555,6 +555,13 @@ func (c *Agent) Run(ctx context.Context, initialQuery string) error {
 					c.currIteration = 0
 					c.pendingFunctionCalls = []ToolCallAnalysis{}
 					log.Info("Agent task completed, transitioning to done state")
+					if streamedText == "" {
+						// If no tool calls to be made and we do not have a response from the LLM
+						// we should let the user know for better diagnostics.
+						// IMPORTANT: This also prevents UIs from getting blocked on reading from the output channel.
+						log.Info("Empty response with no tool calls from LLM.")
+						c.addMessage(api.MessageSourceAgent, api.MessageTypeText, "Empty response from LLM")
+					}
 					continue
 				}
 
