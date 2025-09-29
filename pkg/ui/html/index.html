@@ -266,13 +266,17 @@
 <body class="bg-gradient-to-br from-slate-50 to-blue-50 font-sans">
     <div id="root"></div>
     <script type="text/babel">
-        const { useState, useEffect, useRef } = React;
+        const { useState, useEffect, useRef, useMemo } = React;
+
+        const MAX_TEXTAREA_HEIGHT = 160; // Tailwind max-h-40 (10rem) for textarea auto-resize limit
 
         function App() {
             const [messages, setMessages] = useState([]);
             const [input, setInput] = useState('');
             const [agentState, setAgentState] = useState('idle');
             const [isConnected, setIsConnected] = useState(false);
+            const [currentRequestId, setCurrentRequestId] = useState(null);
+            const controllerRef = useRef(null);
             const [expandedOutputs, setExpandedOutputs] = useState(new Set());
             const [isDarkMode, setIsDarkMode] = useState(() => {
                 // Check for saved preference first
@@ -295,9 +299,12 @@
             // Auto-resize textarea
             useEffect(() => {
                 if (inputRef.current) {
-                    inputRef.current.style.height = 'auto';
-                    const scrollHeight = inputRef.current.scrollHeight;
-                    inputRef.current.style.height = scrollHeight + 'px';
+                    const textarea = inputRef.current;
+                    textarea.style.height = 'auto';
+                    const scrollHeight = textarea.scrollHeight;
+                    const newHeight = Math.min(scrollHeight, MAX_TEXTAREA_HEIGHT);
+                    textarea.style.height = newHeight + 'px';
+                    textarea.style.overflowY = scrollHeight > MAX_TEXTAREA_HEIGHT ? 'auto' : 'hidden';
                 }
             }, [input]);
 
@@ -355,32 +362,88 @@
                 scrollToBottom();
             }, [messages]);
 
-            useEffect(() => {
-                const eventSource = new EventSource('/messages-stream');
-                
-                eventSource.onopen = () => {
-                    setIsConnected(true);
-                    console.log('Connected to kubectl-ai');
-                };
-
-                eventSource.onmessage = (event) => {
-                    try {
-                        const data = JSON.parse(event.data);
-                        setMessages(data.messages || []);
-                        setAgentState(data.agentState || 'idle');
-                    } catch (error) {
-                        console.error('Error parsing server data:', error);
+            const toolRequestStatuses = useMemo(() => {
+                const statuses = new Map();
+                for (let index = 0; index < messages.length; index++) {
+                    const message = messages[index];
+                    if (message.Type !== 'tool-call-request') {
+                        continue;
                     }
-                };
 
-                eventSource.onerror = () => {
-                    setIsConnected(false);
-                    eventSource.close();
-                };
+                    let status = 'executing';
+                    for (let i = index + 1; i < messages.length; i++) {
+                        const nextMessage = messages[i];
+                        if (nextMessage.Type === 'tool-call-request') {
+                            break;
+                        }
+                        if (nextMessage.Type === 'tool-call-response') {
+                            status = 'completed';
+                            break;
+                        }
+                        if (nextMessage.Source === 'agent' && nextMessage.Type === 'text' && typeof nextMessage.Payload === 'string') {
+                            const normalized = nextMessage.Payload.toLowerCase();
+                            if (normalized.includes('cancelled')) {
+                                status = 'cancelled';
+                                break;
+                            }
+                            if (normalized.includes('cancel')) {
+                                status = 'cancelling';
+                            }
+                        }
+                    }
 
-                return () => {
-                    eventSource.close();
-                };
+                    const messageID = message.ID || index;
+                    statuses.set(messageID, status);
+                }
+                return statuses;
+            }, [messages]);
+
+            const connectStream = () => {
+                const controller = new AbortController();
+                controllerRef.current = controller;
+                fetch('/messages-stream', { signal: controller.signal })
+                    .then(response => {
+                        setIsConnected(true);
+                        const reader = response.body.getReader();
+                        const decoder = new TextDecoder();
+                        let buffer = '';
+                        const read = () => {
+                            reader.read().then(({ done, value }) => {
+                                if (done) return;
+                                buffer += decoder.decode(value, { stream: true });
+                                const parts = buffer.split('\n\n');
+                                buffer = parts.pop();
+                                for (const part of parts) {
+                                    if (part.startsWith('data: ')) {
+                                        try {
+                                            const data = JSON.parse(part.slice(6));
+                                            setMessages(data.messages || []);
+                                            setAgentState(data.agentState || 'idle');
+                                            setCurrentRequestId(data.currentRequestId || null);
+                                        } catch (error) {
+                                            console.error('Error parsing server data:', error);
+                                        }
+                                    }
+                                }
+                                read();
+                            }).catch(err => {
+                                if (err.name === 'AbortError') return;
+                                setIsConnected(false);
+                                console.error('Error reading stream:', err);
+                            });
+                        };
+                        read();
+                    })
+                    .catch(err => {
+                        if (err.name === 'AbortError') return;
+                        setIsConnected(false);
+                        console.error('Error connecting to stream:', err);
+                    });
+            };
+
+            useEffect(() => {
+                connectStream();
+                return () => controllerRef.current?.abort();
             }, []);
 
             useEffect(() => {
@@ -421,6 +484,26 @@
                 } catch (error) {
                     console.error('Error choosing option:', error);
                 }
+            };
+
+            const cancelRequest = async () => {
+                controllerRef.current?.abort();
+                setAgentState('idle');
+                setCurrentRequestId(null);
+                try {
+                    const params = new URLSearchParams();
+                    if (currentRequestId) {
+                        params.set('id', currentRequestId);
+                    }
+                    await fetch('/cancel-request', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: params.toString()
+                    });
+                } catch (error) {
+                    console.error('Error cancelling request:', error);
+                }
+                connectStream();
             };
 
             const handleSubmit = (e) => {
@@ -554,13 +637,17 @@
                     
                     case 'tool-call-request':
                         const toolResponse = findToolResponse(index);
-                        const isCompleted = toolResponse !== null;
+                        const messageID = message.ID || index;
+                        const status = toolRequestStatuses.get(messageID) || 'executing';
+                        const isCompleted = status === 'completed' && toolResponse !== null;
+                        const isCancelling = status === 'cancelling' && !isCompleted;
+                        const isCancelled = status === 'cancelled' && !isCompleted;
                         const isOutputExpanded = expandedOutputs.has(index);
-                        
+
                         // Extract stdout from the tool response
                         const getOutputText = (response) => {
                             if (!response || !response.Payload) return '';
-                            
+
                             let payload = response.Payload;
                             if (typeof payload === 'string') {
                                 try {
@@ -569,7 +656,7 @@
                                     return payload; // Return as-is if not valid JSON
                                 }
                             }
-                            
+
                             // Try to extract stdout field, fallback to full payload
                             if (payload && payload.stdout) {
                                 return payload.stdout;
@@ -579,39 +666,67 @@
                                 return String(payload);
                             }
                         };
-                        
+
                         const outputText = isCompleted ? getOutputText(toolResponse) : '';
                         const hasOutput = outputText && outputText.trim().length > 0;
-                        
+
+                        let containerClass;
+                        let labelClass;
+                        let commandClass;
+                        let statusIcon;
+                        let statusLabel;
+
+                        if (isCompleted) {
+                            containerClass = isDarkMode ? 'border-emerald-700 bg-emerald-900/20' : 'border-emerald-200 bg-emerald-50';
+                            labelClass = isDarkMode ? 'text-emerald-300' : 'text-emerald-800';
+                            commandClass = isDarkMode ? 'text-emerald-300 bg-emerald-900/30' : 'text-emerald-700 bg-emerald-100';
+                            statusIcon = <span className={`${isDarkMode ? 'text-emerald-400' : 'text-emerald-600'} text-lg mr-3`}>✅</span>;
+                            statusLabel = 'Completed';
+                        } else if (isCancelled) {
+                            containerClass = isDarkMode ? 'border-red-700 bg-red-900/20' : 'border-red-200 bg-red-50';
+                            labelClass = isDarkMode ? 'text-red-300' : 'text-red-700';
+                            commandClass = isDarkMode ? 'text-red-300 bg-red-900/30' : 'text-red-700 bg-red-100';
+                            statusIcon = <span className={`${isDarkMode ? 'text-red-400' : 'text-red-600'} text-lg mr-3`}>⛔</span>;
+                            statusLabel = 'Cancelled';
+                        } else if (isCancelling) {
+                            containerClass = isDarkMode ? 'border-amber-700 bg-amber-900/20' : 'border-amber-200 bg-amber-50';
+                            labelClass = isDarkMode ? 'text-amber-300' : 'text-amber-700';
+                            commandClass = isDarkMode ? 'text-amber-300 bg-amber-900/30' : 'text-amber-700 bg-amber-100';
+                            statusIcon = <span className={`${isDarkMode ? 'text-amber-400' : 'text-amber-600'} text-lg mr-3`}>⏳</span>;
+                            statusLabel = 'Cancelling';
+                        } else {
+                            containerClass = isDarkMode ? 'border-blue-700 bg-blue-900/20' : 'border-blue-200 bg-blue-50';
+                            labelClass = isDarkMode ? 'text-blue-300' : 'text-blue-800';
+                            commandClass = isDarkMode ? 'text-blue-300 bg-blue-900/30' : 'text-blue-700 bg-blue-100';
+                            statusIcon = <div className={`animate-spin rounded-full h-4 w-4 border-b-2 ${isDarkMode ? 'border-blue-400' : 'border-blue-600'} mr-3`}></div>;
+                            statusLabel = 'Executing';
+                        }
+
                         return (
                             <MessageWrapper key={index}>
-                                <div className={`border rounded-lg p-4 ${isCompleted ? (isDarkMode ? 'border-emerald-700 bg-emerald-900/20' : 'border-emerald-200 bg-emerald-50') : (isDarkMode ? 'border-blue-700 bg-blue-900/20' : 'border-blue-200 bg-blue-50')}`}>
+                                <div className={`border rounded-lg p-4 ${containerClass}`}>
                                     <div className="flex items-center">
-                                        {isCompleted ? (
-                                            <span className={`${isDarkMode ? 'text-emerald-400' : 'text-emerald-600'} text-lg mr-3`}>✅</span>
-                                        ) : (
-                                            <div className={`animate-spin rounded-full h-4 w-4 border-b-2 ${isDarkMode ? 'border-blue-400' : 'border-blue-600'} mr-3`}></div>
-                                        )}
-                                        <span className={`font-medium ${isCompleted ? (isDarkMode ? 'text-emerald-300' : 'text-emerald-800') : (isDarkMode ? 'text-blue-300' : 'text-blue-800')}`}>
-                                            {isCompleted ? "Completed" : "Executing"}
+                                        {statusIcon}
+                                        <span className={`font-medium ${labelClass}`}>
+                                            {statusLabel}
                                         </span>
                                     </div>
-                                    <div className={`font-mono text-sm mt-2 rounded px-3 py-2 ${isCompleted ? (isDarkMode ? 'text-emerald-300 bg-emerald-900/30' : 'text-emerald-700 bg-emerald-100') : (isDarkMode ? 'text-blue-300 bg-blue-900/30' : 'text-blue-700 bg-blue-100')}`}>
+                                    <div className={`font-mono text-sm mt-2 rounded px-3 py-2 ${commandClass}`}>
                                         {message.Payload}
                                     </div>
                                     {isCompleted && hasOutput && (
                                         <div className={`mt-3 pt-3 border-t ${isDarkMode ? 'border-emerald-700' : 'border-emerald-200'}`}>
-                                            <button 
+                                            <button
                                                 onClick={() => toggleOutput(index)}
                                                 className={`flex items-center space-x-2 ${isDarkMode ? 'text-emerald-400 hover:text-emerald-300' : 'text-emerald-600 hover:text-emerald-700'} focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-1 rounded px-2 py-1 transition-colors`}
                                             >
                                                 <span className="text-xs font-medium">
                                                     {isOutputExpanded ? 'Hide output' : 'Show output'}
                                                 </span>
-                                                <svg 
+                                                <svg
                                                     className={"w-3 h-3 transition-transform duration-200 " + (isOutputExpanded ? "rotate-180" : "")}
-                                                    fill="none" 
-                                                    stroke="currentColor" 
+                                                    fill="none"
+                                                    stroke="currentColor"
                                                     viewBox="0 0 24 24"
                                                 >
                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -847,7 +962,7 @@
                                         }}
                                         placeholder={getInputPlaceholder()}
                                         disabled={!canSendMessage}
-                                        className={`w-full px-4 py-3 pr-12 border rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-colors resize-none overflow-y-auto max-h-40 custom-scrollbar align-bottom ${
+                                        className={`w-full px-4 py-3 pr-12 border rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-colors resize-none max-h-40 custom-scrollbar align-bottom ${
                                             isDarkMode 
                                                 ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
                                                 : 'bg-white border-gray-300 text-gray-900 placeholder-gray-400'
@@ -860,13 +975,23 @@
                                         </div>
                                     )}
                                 </div>
-                                <button
-                                    type="submit"
-                                    disabled={!canSendMessage || !input.trim()}
-                                    className="px-6 py-3 bg-gradient-to-r from-brand-500 to-brand-600 text-white rounded-xl hover:from-brand-600 hover:to-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 font-medium shadow-sm self-end"
-                                >
-                                    Send
-                                </button>
+                                {agentState === 'running' ? (
+                                    <button
+                                        type="button"
+                                        onClick={cancelRequest}
+                                        className="px-6 py-3 bg-red-600 text-white rounded-xl hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 transition-all duration-200 font-medium shadow-sm self-end"
+                                    >
+                                        Stop
+                                    </button>
+                                ) : (
+                                    <button
+                                        type="submit"
+                                        disabled={!canSendMessage || !input.trim()}
+                                        className="px-6 py-3 bg-gradient-to-r from-brand-500 to-brand-600 text-white rounded-xl hover:from-brand-600 hover:to-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 font-medium shadow-sm self-end"
+                                    >
+                                        Send
+                                    </button>
+                                )}
                             </form>
                             <div className={`flex items-center justify-center mt-3 text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
                                 <span>💡 Try: "scale nginx to 3 replicas" or "show me pod status"</span>

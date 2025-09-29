@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -162,6 +163,27 @@ func (u *TerminalUI) Run(ctx context.Context) error {
 					klog.Info("Agent has exited, terminating UI")
 					close(agentExited)
 					return
+				}
+			}
+		}
+	}()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt)
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-sigCh:
+				state := u.agent.Session().AgentState
+				if state == api.AgentStateRunning {
+					id := u.agent.Session().CurrentRequestID
+					if id != "" {
+						u.agent.CancelRequest(id)
+					}
+				} else {
+					u.agent.Input <- io.EOF
 				}
 			}
 		}
