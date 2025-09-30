@@ -463,6 +463,15 @@ func (c *Agent) Run(ctx context.Context, initialQuery string) error {
 				}
 
 				// we run the agentic loop for one iteration
+				if c.Recorder != nil {
+					event := &journal.Event{
+						Action:  "llm.request",
+						Payload: c.currChatContent,
+					}
+					if err := c.Recorder.Write(ctx, event); err != nil {
+						klog.Warningf("failed to write to trace: %v", err)
+					}
+				}
 				stream, err := c.llmChat.SendStreaming(ctx, c.currChatContent...)
 				if err != nil {
 					log.Error(err, "error sending streaming LLM response")
@@ -508,6 +517,15 @@ func (c *Agent) Run(ctx context.Context, initialQuery string) error {
 					if response == nil {
 						// end of streaming response
 						break
+					}
+					if c.Recorder != nil {
+						event := &journal.Event{
+							Action:  "llm.response",
+							Payload: response,
+						}
+						if err := c.Recorder.Write(ctx, event); err != nil {
+							klog.Warningf("failed to write to trace: %v", err)
+						}
 					}
 					// klog.Infof("response: %+v", response)
 
