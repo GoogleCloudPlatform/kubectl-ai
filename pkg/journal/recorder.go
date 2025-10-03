@@ -76,6 +76,12 @@ type Event struct {
 	Payload   any       `json:"payload,omitempty"`
 }
 
+const (
+	ActionHTTPRequest  = "http.request"
+	ActionHTTPResponse = "http.response"
+	ActionHTTPError    = "http.error"
+)
+
 // ActionUIRender is for an event that indicates we wrote output to the UI
 const ActionUIRender = "ui.render"
 
