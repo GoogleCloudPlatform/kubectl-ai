@@ -5,4 +5,4 @@ cleanup: "cleanup.sh"
 # disabled: true
 difficulty: "medium"
 expect:
-- contains: "docker.io/bitnami/mysql:8.0.33-debian-11-r17"
+- contains: "mysql:8.0.36"
