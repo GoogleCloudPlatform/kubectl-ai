@@ -31,7 +31,7 @@ Run the server with the streamable HTTP transport to serve compatible MCP client
 kubectl-ai --mcp-server --mcp-server-mode streamable-http --http-port 9080
 ```
 
-This listens on `http://localhost:9080/mcp` by default. Use `--mcp-server-mode sse` for legacy HTTP+SSE clients.
+This listens on `http://localhost:9080/mcp` by default.
 
 ## Configuration
 
@@ -132,8 +132,8 @@ Additional tools available depend on configured MCP servers:
 | `--mcp-server` | `false` | Run in MCP server mode |
 | `--external-tools` | `false` | Discover and expose external MCP tools (requires --mcp-server) |
 | `--kubeconfig` | `~/.kube/config` | Path to kubeconfig file |
-| `--mcp-server-mode` | `stdio` | Transport for the MCP server (`stdio`, `sse`, or `streamable-http`) |
-| `--http-port` | `9080` | Port for the HTTP endpoint when using `sse` or `streamable-http` modes |
+| `--mcp-server-mode` | `stdio` | Transport for the MCP server (`stdio` or `streamable-http`) |
+| `--http-port` | `9080` | Port for the HTTP endpoint when using `streamable-http` mode |
 
 ## Architecture
 
