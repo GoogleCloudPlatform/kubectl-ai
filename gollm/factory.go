@@ -193,12 +193,19 @@ func DefaultIsRetryableError(err error) bool {
 // createCustomHTTPClient returns an *http.Client that optionally skips SSL certificate verification.
 // This is shared by all providers that need custom HTTP transport.
 func createCustomHTTPClient(skipVerify bool) *http.Client {
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: skipVerify}
-
+	if !skipVerify {
+		httpClient := http.DefaultClient
+		httpClient.Timeout = 60 * time.Second
+		return httpClient
+	}
 	return &http.Client{
-		Transport: transport,
-		Timeout:   180 * time.Second,
+		Transport: &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: true,
+			},
+		},
+		Timeout: 60 * time.Second,
 	}
 }
 
