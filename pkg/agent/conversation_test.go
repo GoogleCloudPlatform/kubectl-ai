@@ -255,3 +255,81 @@ func TestHandleMetaQuery(t *testing.T) {
 		})
 	}
 }
+
+func TestAgentShouldRequestApproval(t *testing.T) {
+	a := &Agent{ApprovalPolicy: ApprovalPolicyAutoApproveRead}
+
+	// No pending calls means no approval needed regardless of policy.
+	if a.shouldRequestApproval(-1) {
+		t.Fatalf("expected no approval when there are no pending calls")
+	}
+
+	a.pendingFunctionCalls = []ToolCallAnalysis{{}}
+	if a.shouldRequestApproval(-1) {
+		t.Fatalf("expected auto-approve-read to skip readonly commands")
+	}
+	if !a.shouldRequestApproval(0) {
+		t.Fatalf("expected auto-approve-read to require approval for modifying commands")
+	}
+
+	a.ApprovalPolicy = ApprovalPolicyParanoid
+	if !a.shouldRequestApproval(-1) {
+		t.Fatalf("expected paranoid policy to require approval even for readonly commands")
+	}
+
+	a.ApprovalPolicy = ApprovalPolicyYolo
+	if a.shouldRequestApproval(0) {
+		t.Fatalf("expected yolo policy to bypass approvals")
+	}
+}
+
+func TestHandleChoiceUpdatesApprovalPolicy(t *testing.T) {
+	a := &Agent{
+		ApprovalPolicy: ApprovalPolicyAutoApproveRead,
+		pendingFunctionCalls: []ToolCallAnalysis{{
+			FunctionCall: gollm.FunctionCall{ID: "1", Name: "tool"},
+		}},
+		Output:  make(chan any, 1),
+		session: &api.Session{ChatMessageStore: sessions.NewInMemoryChatStore()},
+	}
+
+	dispatched := a.handleChoice(context.Background(), &api.UserChoiceResponse{Choice: 2})
+	if !dispatched {
+		t.Fatalf("expected tool calls to be dispatched when user opts-in permanently")
+	}
+	if a.ApprovalPolicy != ApprovalPolicyYolo {
+		t.Fatalf("expected approval policy to switch to yolo, got %q", a.ApprovalPolicy)
+	}
+}
+
+func TestHandleChoiceParanoidDecline(t *testing.T) {
+	a := &Agent{
+		ApprovalPolicy: ApprovalPolicyParanoid,
+		pendingFunctionCalls: []ToolCallAnalysis{{
+			FunctionCall: gollm.FunctionCall{ID: "1", Name: "tool"},
+		}},
+		Output:  make(chan any, 1),
+		session: &api.Session{ChatMessageStore: sessions.NewInMemoryChatStore()},
+	}
+
+	dispatched := a.handleChoice(context.Background(), &api.UserChoiceResponse{Choice: 2})
+	if dispatched {
+		t.Fatalf("expected paranoid decline to cancel tool dispatch")
+	}
+	if a.ApprovalPolicy != ApprovalPolicyParanoid {
+		t.Fatalf("paranoid decline should not alter the approval policy")
+	}
+
+	select {
+	case msg := <-a.Output:
+		m, ok := msg.(*api.Message)
+		if !ok {
+			t.Fatalf("expected *api.Message, got %T", msg)
+		}
+		if m.Type != api.MessageTypeError {
+			t.Fatalf("expected error message after decline, got %v", m.Type)
+		}
+	default:
+		t.Fatalf("expected an error message to be emitted after decline")
+	}
+}
