@@ -10,7 +10,7 @@ TASK_NAME="fix-pending-pods"
 echo "Starting verification for $TASK_NAME..." 
 # Verify the PersistentVolumeClaim is bound
 echo "ℹWaiting for PVC '$PVC_NAME' to be 'Bound'..."
-if ! kubectl wait --for=condition=Bound pvc/$PVC_NAME -n $NAMESPACE --timeout=$TIMEOUT; then
+if ! kubectl wait --for=jsonpath='{.status.phase}'=Bound pvc/$PVC_NAME -n $NAMESPACE --timeout=$TIMEOUT; then
     echo "PVC '$PVC_NAME' did not become Bound within $TIMEOUT."
     echo "Info for '$PVC_NAME' in namespace '$NAMESPACE':"
     kubectl describe pvc $PVC_NAME -n $NAMESPACE
