@@ -20,6 +20,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -27,6 +28,14 @@ import (
 
 	"github.com/GoogleCloudPlatform/kubectl-ai/k8s-bench/pkg/model"
 	"sigs.k8s.io/yaml"
+)
+
+type ClusterCreationPolicy string
+
+const (
+	AlwaysCreate     ClusterCreationPolicy = "AlwaysCreate"
+	CreateIfNotExist ClusterCreationPolicy = "CreateIfNotExist"
+	DoNotCreate      ClusterCreationPolicy = "DoNotCreate"
 )
 
 type Task struct {
@@ -95,13 +104,13 @@ type Expectation struct {
 }
 
 type EvalConfig struct {
-	LLMConfigs        []model.LLMConfig
-	KubeConfig        string
-	TasksDir          string
-	TaskPattern       string
-	AgentBin          string
-	Concurrency       int
-	CreateKindCluster bool
+	LLMConfigs            []model.LLMConfig
+	KubeConfig            string
+	TasksDir              string
+	TaskPattern           string
+	AgentBin              string
+	Concurrency           int
+	ClusterCreationPolicy ClusterCreationPolicy
 
 	OutputDir string
 }
@@ -145,6 +154,49 @@ func printUsage() {
 	fmt.Fprintf(os.Stderr, "  run       Run evaluation benchmarks\n")
 	fmt.Fprintf(os.Stderr, "  analyze   Analyze results from previous benchmark runs\n\n")
 	fmt.Fprintf(os.Stderr, "Run '%s <command> --help' for more information on a command.\n", os.Args[0])
+}
+
+func kindClusterExists(clusterName string) (bool, error) {
+	cmd := exec.Command("kind", "get", "clusters")
+	output, err := cmd.Output()
+	if err != nil {
+		return false, fmt.Errorf("failed to run 'kind get clusters': %w", err)
+	}
+	clusters := strings.Split(string(output), "\n")
+	for _, cluster := range clusters {
+		if cluster == clusterName {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func createKindCluster(clusterName string) error {
+	var createErr error
+	for retry := range 3 {
+		if retry > 0 {
+			fmt.Printf("Retrying cluster creation, attempt %d\n", retry+1)
+			time.Sleep(5 * time.Second)
+		}
+		createCmd := exec.Command("kind", "create", "cluster", "--name", clusterName, "--wait", "5m")
+		fmt.Printf("Creating kind cluster %q\n", clusterName)
+		createCmd.Stdout = os.Stdout
+		createCmd.Stderr = os.Stderr
+		createErr = createCmd.Run()
+		if createErr == nil {
+			return nil
+		}
+		fmt.Printf("failed to create kind cluster, retrying...: %v\n", createErr)
+	}
+	return fmt.Errorf("failed to create kind cluster after multiple retries: %w", createErr)
+}
+
+func deleteKindCluster(clusterName string) error {
+	deleteCmd := exec.Command("kind", "delete", "cluster", "--name", clusterName)
+	fmt.Printf("Deleting kind cluster %q\n", clusterName)
+	deleteCmd.Stdout = os.Stdout
+	deleteCmd.Stderr = os.Stderr
+	return deleteCmd.Run()
 }
 
 type Strings []string
@@ -209,7 +261,7 @@ func runEvals(ctx context.Context) error {
 	flag.BoolVar(&enableToolUseShim, "enable-tool-use-shim", enableToolUseShim, "Enable tool use shim")
 	flag.BoolVar(&quiet, "quiet", quiet, "Quiet mode (non-interactive mode)")
 	flag.IntVar(&config.Concurrency, "concurrency", 0, "Number of tasks to run concurrently (0 = auto, 1 = sequential)")
-	flag.BoolVar(&config.CreateKindCluster, "create-kind-cluster", false, "Create a temporary kind cluster for the evaluation run")
+	flag.StringVar((*string)(&config.ClusterCreationPolicy), "cluster-creation-policy", string(CreateIfNotExist), "Cluster creation policy: AlwaysCreate, CreateIfNotExist, DoNotCreate")
 	flag.StringVar(&config.OutputDir, "output-dir", config.OutputDir, "Directory to write results to")
 	flag.Parse()
 

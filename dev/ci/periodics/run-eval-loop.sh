@@ -2,20 +2,22 @@
 
 set -eou pipefail
 
-# Positional args
-# 1. ITERATIONS:   Number of times to run the loop (default: 3)
-# 2. PROVIDER:     The LLM provider to use (default: openai)
-# 3. MODEL:        The specific model to test (default: "Qwen/Qwen3-Next-80B-A3B-Instruct")
-# 4. API_BASE:     The API base URL (default: "http://localhost:8000/v1")
-# 5. CONCURRENCY:  The amount of eval tasks to run in parallel (default: 5)
-# 6. TASK_PATTERN: The regex pattern for tasks to run
-# Example usage: ./run-eval-loop.sh --iterations 5 --provider openai --model Qwen/Qwen3-Next-80B-A3B-Instruct --api-base http://localhost:8000/v1 --concurrency 5 --task-pattern "create"
+# Example usage: ./run-eval-loop.sh --iterations 5 --provider gemini --model gemini-2.5-pro --api-base http://localhost:8000/v1 --concurrency 5 --task-pattern "create" -k AlwaysCreate
+
+# Number of times to run the loop (default: 3)
 ITERATIONS=3
-PROVIDER="openai"
-MODEL="Qwen/Qwen3-Next-80B-A3B-Instruct"
+# The LLM provider to use (default: gemini)
+PROVIDER="gemini"
+# The specific model to test (default: "gemini-2.5-pro")
+MODEL="gemini-2.5-pro"
+# The API base URL (default: "http://localhost:8000/v1")
 API_BASE="http://localhost:8000/v1"
-CONCURRENCY=5
+# The number of eval tasks to run in parallel (default: 5)
+CONCURRENCY=1
+# The regex pattern for tasks to run
 TASK_PATTERN=""
+# kind cluster creation policy (default: "CreateIfNotExists")
+CLUSTER_CREATION_POLICY="CreateIfNotExists"
 
 while [[ $# -gt 0 ]]; do
   key="$1"
@@ -42,6 +44,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     -t|--task-pattern)
       TASK_PATTERN="$2"
+      shift 2
+      ;;
+    -k|--cluster-creation-policy)
+      CLUSTER_CREATION_POLICY="$2"
       shift 2
       ;;
     -h|--help)
@@ -100,7 +106,7 @@ do
   echo "**********"
 
   # Construct the arguments for the make command
-  TEST_ARGS="--enable-tool-use-shim=false --llm-provider=${PROVIDER} --models=${MODEL} --quiet --output-dir=${OUTPUT_DIR} --create-kind-cluster --concurrency ${CONCURRENCY} "
+  TEST_ARGS="--enable-tool-use-shim=false --llm-provider=${PROVIDER} --models=${MODEL} --quiet --output-dir=${OUTPUT_DIR} --cluster-creation-policy=${CLUSTER_CREATION_POLICY} --concurrency ${CONCURRENCY} "
 
   # Add task pattern if it was supplied
   if [ -n "$TASK_PATTERN" ]; then
