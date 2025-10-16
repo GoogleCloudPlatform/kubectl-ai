@@ -39,12 +39,13 @@ const (
 )
 
 type Task struct {
-	Setup      string `json:"setup,omitempty"`
-	Verifier   string `json:"verifier,omitempty"`
-	Cleanup    string `json:"cleanup,omitempty"`
-	Difficulty string `json:"difficulty"`
-	Disabled   bool   `json:"disabled,omitempty"`
-	Timeout    string `json:"timeout,omitempty"`
+	Setup      string            `json:"setup,omitempty"`
+	Verifier   string            `json:"verifier,omitempty"`
+	Cleanup    string            `json:"cleanup,omitempty"`
+	Difficulty string            `json:"difficulty"`
+	Disabled   bool              `json:"disabled,omitempty"`
+	Timeout    string            `json:"timeout,omitempty"`
+	Tags       map[string]string `json:"tags,omitempty"`
 
 	Expect []Expectation `json:"expect,omitempty"`
 
@@ -108,6 +109,7 @@ type EvalConfig struct {
 	KubeConfig            string
 	TasksDir              string
 	TaskPattern           string
+	TaskTags              []string
 	AgentBin              string
 	Concurrency           int
 	ClusterCreationPolicy ClusterCreationPolicy
@@ -251,10 +253,12 @@ func runEvals(ctx context.Context) error {
 	defaultKubeConfig := "~/.kube/config"
 	enableToolUseShim := false
 	quiet := true
+	var taskTags Strings
 
 	flag.StringVar(&config.TasksDir, "tasks-dir", config.TasksDir, "Directory containing evaluation tasks")
 	flag.StringVar(&config.KubeConfig, "kubeconfig", config.KubeConfig, "Path to kubeconfig file")
 	flag.StringVar(&config.TaskPattern, "task-pattern", config.TaskPattern, "Pattern to filter tasks (e.g. 'pod' or 'redis')")
+	flag.Var(&taskTags, "task-tags", "AND-connected filters for tasks based on tags (e.g. 'key=value'). OR logic can be used with comma separation (e.g. 'key=value1,key=value2'). Can be specified multiple times.")
 	flag.StringVar(&config.AgentBin, "agent-bin", config.AgentBin, "Path to kubernetes agent binary")
 	flag.StringVar(&llmProvider, "llm-provider", llmProvider, "Specific LLM provider to evaluate (e.g. 'gemini' or 'ollama')")
 	flag.StringVar(&modelList, "models", modelList, "Comma-separated list of models to evaluate (e.g. 'gemini-1.0,gemini-2.0')")
@@ -264,6 +268,8 @@ func runEvals(ctx context.Context) error {
 	flag.StringVar((*string)(&config.ClusterCreationPolicy), "cluster-creation-policy", string(CreateIfNotExist), "Cluster creation policy: AlwaysCreate, CreateIfNotExist, DoNotCreate")
 	flag.StringVar(&config.OutputDir, "output-dir", config.OutputDir, "Directory to write results to")
 	flag.Parse()
+
+	config.TaskTags = taskTags
 
 	if config.KubeConfig == "" {
 		config.KubeConfig = defaultKubeConfig

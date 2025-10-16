@@ -242,10 +242,57 @@ func loadTasks(config EvalConfig) (map[string]Task, error) {
 			continue
 		}
 
+		if !matchTags(task, config.TaskTags) {
+			continue
+		}
+
 		tasks[taskID] = task
 	}
 
 	return tasks, nil
+}
+
+// matchTags checks if a task matches the provided tag filters.
+// If a task has no tags, it is always included.
+// If filters are provided, a task with tags must match them.
+func matchTags(task Task, filters []string) bool {
+	// If no filters are provided, all tasks match.
+	if len(filters) == 0 {
+		return true
+	}
+
+	// If the task has no tags, it is included by default, as tag-based filtering
+	// only applies to tasks that have tags.
+	if len(task.Tags) == 0 {
+		return true
+	}
+
+	// All filters (AND groups) must be satisfied.
+	for _, filterGroup := range filters {
+		// At least one tag in the group (OR conditions) must match.
+		orConditions := strings.Split(filterGroup, ",")
+		groupSatisfied := false
+		for _, condition := range orConditions {
+			condition = strings.TrimSpace(condition)
+			parts := strings.SplitN(condition, "=", 2)
+			if len(parts) != 2 {
+				// Malformed tag filter, maybe log a warning. For now, just ignore.
+				continue
+			}
+			key, value := parts[0], parts[1]
+
+			if taskVal, ok := task.Tags[key]; ok && taskVal == value {
+				groupSatisfied = true
+				break // This OR group is satisfied, move to the next AND group.
+			}
+		}
+
+		if !groupSatisfied {
+			return false // One of the AND groups was not satisfied.
+		}
+	}
+
+	return true // All AND groups were satisfied.
 }
 
 // getLastNLines returns the last n lines of a string.
