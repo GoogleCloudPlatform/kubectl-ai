@@ -19,12 +19,22 @@ echo "Deployment rollout completed successfully."
 echo "Verifying container images for all pods managed by the deployment..."
 FAILURE=0
 
-# Get a list of pod names and their images, separated by a space
-POD_INFO=$(kubectl get pods -n $NAMESPACE -l app=$DEPLOYMENT -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.spec.containers[0].image}{"\n"}{end}')
+# Get the pod-template-hash from the new, active ReplicaSet
+# (The one that has a desired replica count greater than 0)
+ACTIVE_POD_HASH=$(kubectl get rs -n $NAMESPACE -l app=$DEPLOYMENT -o jsonpath='{.items[?(@.spec.replicas > 0)].metadata.labels.pod-template-hash}')
+
+if [ -z "$ACTIVE_POD_HASH" ]; then
+    echo "ERROR: Could not find active ReplicaSet hash for deployment '$DEPLOYMENT'."
+    exit 1
+fi
+
+echo "Found active pod-template-hash: $ACTIVE_POD_HASH. Verifying pods with this label..."
+
+# Get a list of pod names and images *only* from the active ReplicaSet
+POD_INFO=$(kubectl get pods -n $NAMESPACE -l app=$DEPLOYMENT,pod-template-hash=$ACTIVE_POD_HASH -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.spec.containers[0].image}{"\n"}{end}')
 
 if [ -z "$POD_INFO" ]; then
-    echo "ERROR: Could not find any pods for deployment '$DEPLOYMENT'."
-    exit 1
+    echo "ERROR: Could not find any pods for deployment '$DEPLOYMENT' with hash '$ACTIVE_POD_HASH'."
 fi
 
 # Loop through each line of the pod info
