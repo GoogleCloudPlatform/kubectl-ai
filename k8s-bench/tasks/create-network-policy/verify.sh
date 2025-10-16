@@ -1,56 +1,48 @@
 #!/usr/bin/env bash
 
+set -euo pipefail
+
+echo "Starting verification for create-network-policy"
+POLICY_NAME="np"
+NAMESPACE="ns1"
+
 # Check if NetworkPolicy exists
-if ! kubectl get networkpolicy np -n ns1 &>/dev/null; then
-    echo "NetworkPolicy 'np' does not exist in namespace 'ns1'"
+if ! kubectl get networkpolicy $POLICY_NAME -n $NAMESPACE -o name &>/dev/null; then
+    echo "Failed: NetworkPolicy '$POLICY_NAME' does not exist in namespace '$NAMESPACE'"
     exit 1
 fi
 
-echo "✅ NetworkPolicy 'np' exists in namespace 'ns1'"
+VERIFY_DIR=$(dirname -- "$0")
+YAML_FILE="${VERIFY_DIR}/artifacts/desired-policy.yaml"
 
-# Functional test: Verify ingress traffic is not affected (pod in ns2 can reach pod in ns1)
-echo "Testing that ingress traffic from ns2 to ns1 is not affected..."
-INGRESS_TEST=$(kubectl exec -n ns2 curl-ns2 -- curl -s --connect-timeout 120s http://httpd-ns1.ns1.svc.cluster.local || echo "Failed")
-if [[ "$INGRESS_TEST" == "Failed" ]]; then
-    echo "Failed to connect from ns2 to ns1 - NetworkPolicy should not restrict incoming traffic"
-    exit 1
-fi
-echo "✅ Ingress traffic from ns2 to ns1 is allowed as expected"
+# This JQ filter normalizes the egress spec completely:
+# 1. map(...): Iterates over each rule in the 'egress' array.
+# 2. if .ports ...: If it finds a 'ports' rule, it sorts by 'port' and 'protocol' to make the order consistent.
+# 3. | sort_by(.): Sorts the top-level 'egress' array itself, so the 'ports' rule and 'to' rule can be in any order.
+# The 'jq -S' command handles sorting object keys (like 'port', 'protocol').
+JQ_FILTER='.spec.egress | map(if .ports then .ports |= sort_by(.port, .protocol) else . end) | sort_by(.)'
 
-# Functional test: Test connectivity from ns1 to ns2
-echo "Testing connectivity from ns1 to ns2..."
-CURL_RESULT=$(kubectl exec -n ns1 curl-ns1 -- curl -s --connect-timeout 120s http://httpd-ns2.ns2.svc.cluster.local || echo "Failed")
-if [[ "$CURL_RESULT" == "Failed" ]]; then
-    echo "Failed to connect from ns1 to ns2 - NetworkPolicy might be too restrictive"
-    exit 1
-fi
-echo "✅ Pods in ns1 can reach pods in ns2 as expected"
-
-# Functional test: Try to connect to something outside ns2
-echo "Testing that connections outside ns2 are blocked..."
-CURL_RESULT=$(kubectl exec -n ns1 curl-ns1 -- curl -s --connect-timeout 10s https://kubernetes.io || echo "Failed")
-if [[ "$CURL_RESULT" != "Failed" ]]; then
-    echo "NetworkPolicy should prevent connections to external sites, but connection succeeded"
-    exit 1
-fi
-echo "✅ Pods in ns1 cannot reach external sites as expected"
-
-# More comprehensive DNS resolution test
-echo "Testing DNS resolution for internal services..."
-DNS_INTERNAL=$(kubectl exec -n ns1 curl-ns1 -- nslookup kubernetes.default.svc.cluster.local || echo "Failed")
-if [[ "$DNS_INTERNAL" == "Failed" ]]; then
-    echo "DNS resolution for internal services failed - NetworkPolicy might block DNS traffic"
+# 1. Get the LIVE egress array, sort it completely
+LIVE_EGRESS_SPEC=$(kubectl get networkpolicy $POLICY_NAME -n $NAMESPACE -o json | jq -S "$JQ_FILTER")
+if [ -z "$LIVE_EGRESS_SPEC" ]; then
+    echo "Failed: Could not retrieve and normalize LIVE egress spec."
     exit 1
 fi
 
-echo "Testing DNS resolution for external domains..."
-DNS_EXTERNAL=$(kubectl exec -n ns1 curl-ns1 -- nslookup kubernetes.io || echo "Failed")
-if [[ "$DNS_EXTERNAL" == "Failed" ]]; then
-    echo "DNS resolution for external domains failed - NetworkPolicy might block DNS traffic"
+# 2. Get the DESIRED egress array from a dry-run, sort it completely
+DESIRED_EGRESS_SPEC=$(kubectl apply -f $YAML_FILE --dry-run=server -o json | jq -S "$JQ_FILTER")
+if [ -z "$DESIRED_EGRESS_SPEC" ]; then
+    echo "Failed: Could not perform and normalize server-side dry-run."
     exit 1
 fi
-echo "✅ DNS resolution works as expected"
 
-# All verifications passed
-echo "🎉 All verifications passed! NetworkPolicy is correctly configured."
-exit 0 
+# 3. Compare the two fully-normalized JSON strings
+if ! diff -q <(echo "$LIVE_EGRESS_SPEC") <(echo "$DESIRED_EGRESS_SPEC") >/dev/null 2>&1; then
+    echo "Failed: NetworkPolicy egress specs don't match (after full normalization):"
+    # Pretty-print the diff for a readable failure message
+    diff --color=always <(echo "$LIVE_EGRESS_SPEC" | jq) <(echo "$DESIRED_EGRESS_SPEC" | jq)
+    exit 1
+fi
+
+echo "All verifications passed! NetworkPolicy egress spec is correctly configured."
+exit 0
