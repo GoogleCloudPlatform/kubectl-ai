@@ -16,23 +16,4 @@ done
 kubectl create namespace ns1
 kubectl create namespace ns2
 
-# Deploy httpd pods in each namespace for testing connectivity
-kubectl run httpd-ns1 -n ns1 --image=httpd:alpine
-kubectl run httpd-ns2 -n ns2 --image=httpd:alpine
-
-# Expose the httpd pods as services
-kubectl expose pod httpd-ns1 -n ns1 --name=httpd-ns1 --port=80 --target-port=80
-kubectl expose pod httpd-ns2 -n ns2 --name=httpd-ns2 --port=80 --target-port=80
-
-# Deploy test pods with curl for testing connectivity
-kubectl run curl-ns1 -n ns1 --image=curlimages/curl --command -- sleep 3600
-kubectl run curl-ns2 -n ns2 --image=curlimages/curl --command -- sleep 3600
-
-# Wait for pods to be ready
-echo "Waiting for pods to be ready..."
-kubectl wait --for=condition=Ready pod/httpd-ns1 -n ns1 --timeout=$TIMEOUT
-kubectl wait --for=condition=Ready pod/httpd-ns2 -n ns2 --timeout=$TIMEOUT
-kubectl wait --for=condition=Ready pod/curl-ns1 -n ns1 --timeout=$TIMEOUT
-kubectl wait --for=condition=Ready pod/curl-ns2 -n ns2 --timeout=$TIMEOUT
-
 echo "Setup completed" 
