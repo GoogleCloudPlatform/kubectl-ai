@@ -1,5 +1,5 @@
 script:
-- prompt: "What images are my pods running?"
+- prompt: "What images are all pods running in the cluster?"
 setup: "setup.sh"
 cleanup: "cleanup.sh"
 # disabled: true
