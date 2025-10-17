@@ -24,7 +24,7 @@ if [ -z "$MEMORY_LIMIT" ]; then
     exit 1
 fi
 
-if [ $MEMORY_LIMIT != $ORIGINAL_MEMORY_LIMIT ]; then
+if [ $MEMORY_LIMIT == $ORIGINAL_MEMORY_LIMIT ]; then
     echo "Memory limit has not been changed from $ORIGINAL_MEMORY_LIMIT"
     exit 1
 fi

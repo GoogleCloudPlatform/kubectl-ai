@@ -1,5 +1,5 @@
 script:
-- prompt: "There is a pod with name \"homepage-pod\" which is stuck in pending state. can you fix the issue so that pod status is in running state?"
+- prompt: "My pod homepage-pod in homepage-ns is stuck in pending state. Can you fix the issue so that pod status is in running state?"
 setup: "setup.sh"
 verifier: "verify.sh"
 cleanup: "cleanup.sh"
