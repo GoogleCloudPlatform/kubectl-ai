@@ -25,6 +25,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/GoogleCloudPlatform/kubectl-ai/k8s-bench/pkg/model"
 	"sigs.k8s.io/yaml"
@@ -109,10 +110,13 @@ type EvalConfig struct {
 	TasksDir              string
 	TaskPattern           string
 	AgentBin              string
+	AgentArgs             []string
 	Concurrency           int
+	CreateKindCluster     bool
 	ClusterCreationPolicy ClusterCreationPolicy
 
-	OutputDir string
+	OutputDir        string
+	MaxAgentDuration time.Duration
 }
 
 type AnalyzeConfig struct {
@@ -206,8 +210,102 @@ func (f *Strings) String() string {
 }
 
 func (f *Strings) Set(s string) error {
-	*f = append(*f, s)
+	fields := strings.Fields(s)
+	if len(fields) == 0 {
+		return nil
+	}
+	*f = append(*f, fields...)
 	return nil
+}
+
+type agentDetector func(agentBin string, agentArgs []string, cfg *model.LLMConfig) bool
+
+var agentDetectors = []agentDetector{
+	detectGeminiAgent,
+}
+
+func detectAgentLLMConfig(agentBin string, agentArgs []string) model.LLMConfig {
+	llmConfig := model.LLMConfig{
+		ID:         "agent",
+		ProviderID: "agent",
+		ModelID:    "default",
+	}
+
+	if agentBin == "" {
+		return llmConfig
+	}
+
+	binName := strings.ToLower(filepath.Base(agentBin))
+	for _, detector := range agentDetectors {
+		if detector(binName, agentArgs, &llmConfig) {
+			break
+		}
+	}
+
+	return llmConfig
+}
+
+func detectGeminiAgent(agentBin string, agentArgs []string, cfg *model.LLMConfig) bool {
+	if !strings.Contains(agentBin, "gemini") {
+		return false
+	}
+
+	cfg.ID = "gemini-cli"
+	cfg.ProviderID = "gemini"
+
+	if model := lookupFlagValue(agentArgs, "--model", "-m"); model != "" {
+		cfg.ModelID = model
+	}
+
+	if version := detectGeminiModelVersion(agentArgs); version != "" {
+		cfg.ModelVersion = version
+	}
+
+	return true
+}
+
+func lookupFlagValue(args []string, names ...string) string {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		for _, name := range names {
+			if strings.HasPrefix(arg, name+"=") {
+				return strings.TrimPrefix(arg, name+"=")
+			}
+			if arg == name && i+1 < len(args) {
+				return args[i+1]
+			}
+		}
+	}
+	return ""
+}
+
+func detectGeminiModelVersion(args []string) string {
+	if version := lookupFlagValue(args, "--model-version"); version != "" {
+		return version
+	}
+	if version := lookupFlagValue(args, "--api-version"); version != "" {
+		return version
+	}
+	if options := lookupFlagValue(args, "--client-options"); options != "" {
+		for _, field := range strings.FieldsFunc(options, func(r rune) bool {
+			switch r {
+			case ',', ';':
+				return true
+			default:
+				return unicode.IsSpace(r)
+			}
+		}) {
+			if strings.Contains(field, "=") {
+				parts := strings.SplitN(field, "=", 2)
+				key := strings.ToLower(parts[0])
+				value := parts[1]
+				if key == "apiversion" || key == "version" || key == "modelversion" {
+					return value
+				}
+			}
+		}
+	}
+	return ""
 }
 
 func run(ctx context.Context) error {
@@ -235,7 +333,8 @@ func run(ctx context.Context) error {
 func runEvals(ctx context.Context) error {
 	start := time.Now()
 	config := EvalConfig{
-		TasksDir: "./tasks",
+		TasksDir:         "./tasks",
+		MaxAgentDuration: 5 * time.Minute,
 	}
 
 	// Set custom usage for 'run' subcommand
@@ -246,27 +345,31 @@ func runEvals(ctx context.Context) error {
 		flag.PrintDefaults()
 	}
 
-	llmProvider := "gemini"
-	modelList := ""
-	defaultKubeConfig := "~/.kube/config"
-	enableToolUseShim := false
-	quiet := true
+	var agentArgs Strings
+	var kubeConfigFlag string
 
 	flag.StringVar(&config.TasksDir, "tasks-dir", config.TasksDir, "Directory containing evaluation tasks")
-	flag.StringVar(&config.KubeConfig, "kubeconfig", config.KubeConfig, "Path to kubeconfig file")
+	flag.StringVar(&kubeConfigFlag, "kubeconfig", "", "Path to the kubeconfig file to use for the evaluation")
 	flag.StringVar(&config.TaskPattern, "task-pattern", config.TaskPattern, "Pattern to filter tasks (e.g. 'pod' or 'redis')")
 	flag.StringVar(&config.AgentBin, "agent-bin", config.AgentBin, "Path to kubernetes agent binary")
-	flag.StringVar(&llmProvider, "llm-provider", llmProvider, "Specific LLM provider to evaluate (e.g. 'gemini' or 'ollama')")
-	flag.StringVar(&modelList, "models", modelList, "Comma-separated list of models to evaluate (e.g. 'gemini-1.0,gemini-2.0')")
-	flag.BoolVar(&enableToolUseShim, "enable-tool-use-shim", enableToolUseShim, "Enable tool use shim")
-	flag.BoolVar(&quiet, "quiet", quiet, "Quiet mode (non-interactive mode)")
+	flag.Var(&agentArgs, "agent-args", "Additional argument to pass to the agent (can be specified multiple times)")
 	flag.IntVar(&config.Concurrency, "concurrency", 0, "Number of tasks to run concurrently (0 = auto, 1 = sequential)")
 	flag.StringVar((*string)(&config.ClusterCreationPolicy), "cluster-creation-policy", string(CreateIfNotExist), "Cluster creation policy: AlwaysCreate, CreateIfNotExist, DoNotCreate")
 	flag.StringVar(&config.OutputDir, "output-dir", config.OutputDir, "Directory to write results to")
+	flag.DurationVar(&config.MaxAgentDuration, "agent-timeout", config.MaxAgentDuration, "Maximum duration to allow each agent run before terminating it")
 	flag.Parse()
 
-	if config.KubeConfig == "" {
-		config.KubeConfig = defaultKubeConfig
+	if config.MaxAgentDuration <= 0 {
+		return fmt.Errorf("--agent-timeout must be greater than zero")
+	}
+
+	// Determine KubeConfig path: flag > env var > default
+	if kubeConfigFlag != "" {
+		config.KubeConfig = kubeConfigFlag
+	} else if os.Getenv("KUBECONFIG") != "" {
+		config.KubeConfig = os.Getenv("KUBECONFIG")
+	} else {
+		config.KubeConfig = "~/.kube/config"
 	}
 
 	expandedKubeconfig, err := expandPath(config.KubeConfig)
@@ -275,39 +378,12 @@ func runEvals(ctx context.Context) error {
 	}
 	config.KubeConfig = expandedKubeconfig
 
-	defaultModels := map[string][]string{
-		"gemini": {"gemini-2.5-pro"},
+	if err := os.Setenv("KUBECONFIG", config.KubeConfig); err != nil {
+		return fmt.Errorf("failed to set KUBECONFIG environment variable: %w", err)
 	}
 
-	models := defaultModels
-	if modelList != "" {
-		if llmProvider == "" {
-			return fmt.Errorf("--llm-provider is required when --models is specified")
-		}
-		modelSlice := strings.Split(modelList, ",")
-		models = map[string][]string{
-			llmProvider: modelSlice,
-		}
-	}
-
-	for llmProviderID, models := range models {
-		var toolUseShimStr string
-		if enableToolUseShim {
-			toolUseShimStr = "shim_enabled"
-		} else {
-			toolUseShimStr = "shim_disabled"
-		}
-		for _, modelID := range models {
-			id := fmt.Sprintf("%s-%s-%s", toolUseShimStr, llmProviderID, modelID)
-			config.LLMConfigs = append(config.LLMConfigs, model.LLMConfig{
-				ID:                id,
-				ProviderID:        llmProviderID,
-				ModelID:           modelID,
-				EnableToolUseShim: enableToolUseShim,
-				Quiet:             quiet,
-			})
-		}
-	}
+	config.AgentArgs = append(config.AgentArgs, agentArgs...)
+	config.LLMConfigs = append(config.LLMConfigs, detectAgentLLMConfig(config.AgentBin, config.AgentArgs))
 
 	tasks, err := loadTasks(config)
 	if err != nil {

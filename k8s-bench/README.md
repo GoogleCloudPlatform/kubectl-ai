@@ -19,10 +19,16 @@ The `run` subcommand executes the benchmark evaluations.
 ./k8s-bench run --agent-bin <path/to/kubectl-ai/binary> --output-dir .build/k8sbench
 
 # Run evaluation for scale related tasks
-./k8s-bench run --agent-bin <path/to/kubectl-ai/binary> --task-pattern scale --kubeconfig <path/to/kubeconfig> --output-dir .build/k8sbench
+KUBECONFIG=<path/to/kubeconfig> ./k8s-bench run --agent-bin <path/to/kubectl-ai/binary> --task-pattern scale --output-dir .build/k8sbench
 
-# Run evaluation for a specific LLM provider and model with tool use shim enabled
-./k8s-bench run --llm-provider=grok --models=grok-3-beta --agent-bin ../kubectl-ai --task-pattern=fix-probes --enable-tool-use-shim=true --output-dir .build/k8sbench
+# Pass additional arguments directly to the agent
+./k8s-bench run --agent-bin <path/to/kubectl-ai/binary> --agent-args=--model=gemini-2.5-pro --agent-args=--quiet=true --output-dir .build/k8sbench
+
+# Provide multiple agent arguments in a single flag
+./k8s-bench run --agent-bin <path/to/kubectl-ai/binary> --agent-args="--yolo --prompt" --output-dir .build/k8sbench
+
+# Enforce a two-minute hard timeout for each agent execution
+./k8s-bench run --agent-bin <path/to/kubectl-ai/binary> --agent-timeout=2m --output-dir .build/k8sbench
 
 # Run evaluation sequentially (one task at a time)
 ./k8s-bench run --agent-bin <path/to/kubectl-ai/binary> --tasks-dir ./tasks --output-dir .build/k8sbench --concurrency 1
@@ -30,14 +36,12 @@ The `run` subcommand executes the benchmark evaluations.
 # Run evaluation with all available options
 ./k8s-bench run \
   --agent-bin <path/to/kubectl-ai/binary> \
-  --kubeconfig ~/.kube/config \
   --tasks-dir ./tasks \
   --task-pattern fix \
-  --llm-provider gemini \
-  --models gemini-2.5-pro-preview-03-25,gemini-1.5-pro-latest \
-  --enable-tool-use-shim true \
-  --quiet true \
+  --agent-args=--model=gemini-2.5-pro-preview-03-25 \
+  --agent-args=--quiet=true \
   --concurrency 0 \
+  --create-kind-cluster \
   --output-dir .build/k8sbench
 ```
 
@@ -48,13 +52,13 @@ The `run` subcommand executes the benchmark evaluations.
 | `--agent-bin` | Path to kubectl-ai binary | - | Yes |
 | `--output-dir` | Directory to write results to | - | Yes |
 | `--tasks-dir` | Directory containing evaluation tasks | ./tasks | No |
-| `--kubeconfig` | Path to kubeconfig file | ~/.kube/config | No |
 | `--task-pattern` | Pattern to filter tasks (e.g. 'pod' or 'redis') | - | No |
-| `--llm-provider` | Specific LLM provider to evaluate (e.g. 'gemini' or 'ollama') | gemini | No |
-| `--models` | Comma-separated list of models to evaluate | gemini-2.5-pro-preview-03-25 | No |
-| `--enable-tool-use-shim` | Enable tool use shim | false | No |
-| `--quiet` | Quiet mode (non-interactive mode) | true | No |
+| `--agent-args` | Additional argument passed directly to the agent (repeat flag to provide multiple) | - | No |
 | `--concurrency` | Number of tasks to run concurrently (0 = auto based on number of tasks, 1 = sequential, N = run N tasks at a time) | 0 | No |
+| `--create-kind-cluster` | Create a temporary kind cluster for the evaluation run | false | No |
+| `--agent-timeout` | Maximum duration to allow each agent invocation before it is terminated | 5m | No |
+
+> **Note:** The agent is invoked with the `KUBECONFIG` environment variable. If unset, it defaults to `~/.kube/config`.
 
 #### Analyze Subcommand
 
