@@ -296,8 +296,48 @@ func (c *LlamaCppChat) IsRetryableError(err error) bool {
 }
 
 func (c *LlamaCppChat) Initialize(messages []*api.Message) error {
-	klog.Warning("chat history persistence is not supported for provider 'llamacpp', using in-memory chat history")
+	klog.Info("Initializing llama.cpp chat with history")
+	c.history = make([]llamacppChatMessage, 0, len(messages))
+	for _, msg := range messages {
+		content, err := c.messageToLlamaCppContent(msg)
+		if err != nil {
+			// Skip malformed messages but continue processing
+			continue
+		}
+		c.history = append(c.history, content)
+	}
 	return nil
+}
+
+func (c *LlamaCppChat) messageToLlamaCppContent(msg *api.Message) (llamacppChatMessage, error) {
+	var role string
+	switch msg.Source {
+	case api.MessageSourceUser:
+		role = "user"
+	case api.MessageSourceModel:
+		role = "assistant"
+	case api.MessageSourceAgent:
+		// Treat agent messages as system messages to seed context
+		role = "system"
+	default:
+		return llamacppChatMessage{}, fmt.Errorf("unknown message source: %s", msg.Source)
+	}
+
+	switch v := msg.Payload.(type) {
+	case string:
+		return llamacppChatMessage{Role: role, Content: ptrTo(v)}, nil
+	case FunctionCallResult:
+		// Represent function call results as tool message with JSON content
+		resultJSON, err := json.Marshal(v.Result)
+		if err != nil {
+			return llamacppChatMessage{}, fmt.Errorf("failed to marshal function call result: %w", err)
+		}
+		return llamacppChatMessage{Role: "tool", Content: ptrTo(string(resultJSON)), ToolCallID: v.ID}, nil
+	default:
+		// Convert unknown types to string representation
+		content := fmt.Sprintf("%v", v)
+		return llamacppChatMessage{Role: role, Content: ptrTo(content)}, nil
+	}
 }
 
 func ptrTo[T any](t T) *T {
