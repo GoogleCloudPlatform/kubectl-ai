@@ -4,3 +4,5 @@ setup: "setup.sh"
 verifier: "verify.sh"
 cleanup: "cleanup.sh"
 difficulty: "easy"
+tags:
+  cluster: gke

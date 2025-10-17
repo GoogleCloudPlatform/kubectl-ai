@@ -16,6 +16,8 @@ API_BASE="http://localhost:8000/v1"
 CONCURRENCY=1
 # The regex pattern for tasks to run
 TASK_PATTERN=""
+# The tags for tasks to run
+TASK_TAGS=""
 # kind cluster creation policy (default: "CreateIfNotExists")
 CLUSTER_CREATION_POLICY="CreateIfNotExists"
 
@@ -44,6 +46,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     -t|--task-pattern)
       TASK_PATTERN="$2"
+      shift 2
+      ;;
+    -T|--task-tags)
+      TASK_TAGS+="--task-tags=$2 "
       shift 2
       ;;
     -k|--cluster-creation-policy)
@@ -93,6 +99,7 @@ echo "Model:     $MODEL"
 echo "API Base:  $API_BASE"
 echo "Concurrency: $CONCURRENCY"
 echo "Task Pattern: ${TASK_PATTERN:-"All Tasks"}"
+echo "Task Tags: ${TASK_TAGS:-"No Tags"}"
 
 # Loop from 1 to the specified number of iterations
 for i in $(seq 1 $ITERATIONS)
@@ -112,6 +119,12 @@ do
   if [ -n "$TASK_PATTERN" ]; then
     TEST_ARGS+="--task-pattern=${TASK_PATTERN} "
     echo "Applying task pattern: ${TASK_PATTERN}"
+  fi
+
+  # Add task tags if they were supplied
+  if [ -n "$TASK_TAGS" ]; then
+    TEST_ARGS+="--task-tags=${TASK_TAGS}"
+    echo "Applying task tags: ${TASK_TAGS}"
   fi
 
   # Execute the make command and capture the evaluation time line
