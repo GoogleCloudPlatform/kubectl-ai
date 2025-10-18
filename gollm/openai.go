@@ -465,8 +465,54 @@ func (cs *openAIChatSession) IsRetryableError(err error) bool {
 }
 
 func (cs *openAIChatSession) Initialize(messages []*api.Message) error {
-	klog.Warning("chat history persistence is not supported for provider 'openai', using in-memory chat history")
+	klog.Info("Initializing OpenAI chat with history")
+	cs.history = make([]openai.ChatCompletionMessageParamUnion, 0, len(messages))
+	for _, msg := range messages {
+		content, err := cs.messageToOpenAIContent(msg)
+		if err != nil {
+			continue // Skip malformed messages but continue processing
+		}
+		cs.history = append(cs.history, content)
+	}
 	return nil
+}
+
+func (cs *openAIChatSession) messageToOpenAIContent(msg *api.Message) (openai.ChatCompletionMessageParamUnion, error) {
+	var role string
+	switch msg.Source {
+	case api.MessageSourceUser:
+		role = "user"
+	case api.MessageSourceModel:
+		role = "assistant"
+	case api.MessageSourceAgent:
+		role = "agent"
+	default:
+		return openai.UserMessage(""), fmt.Errorf("unknown message source: %s", msg.Source)
+	}
+
+	switch v := msg.Payload.(type) {
+	case string:
+		if role == "user" {
+			return openai.UserMessage(v), nil
+		} else {
+			return openai.AssistantMessage(v), nil
+		}
+	case FunctionCallResult:
+		// Handle function call results as tool messages
+		resultJSON, err := json.Marshal(v.Result)
+		if err != nil {
+			return openai.UserMessage(""), fmt.Errorf("failed to marshal function call result: %w", err)
+		}
+		return openai.ToolMessage(string(resultJSON), v.ID), nil
+	default:
+		// Convert unknown types to string representation
+		content := fmt.Sprintf("%v", v)
+		if role == "user" {
+			return openai.UserMessage(content), nil
+		} else {
+			return openai.AssistantMessage(content), nil
+		}
+	}
 }
 
 // Helper structs for ChatResponse interface
