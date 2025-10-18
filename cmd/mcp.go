@@ -32,7 +32,7 @@ type kubectlMCPServer struct {
 	tools         tools.Tools
 	workDir       string
 	mcpManager    *mcp.Manager // Add MCP manager for external tool calls
-	mcpServerMode string       // Server mode (e.g., "streamable-http", "sse")
+	mcpServerMode string       // Server mode (e.g., "streamable-http", "stdio")
 	httpPort      int          // Port for HTTP-based server modes
 }
 
@@ -164,13 +164,6 @@ func (s *kubectlMCPServer) Serve(ctx context.Context) error {
 	klog.Info("Starting kubectl-ai MCP server")
 
 	switch s.mcpServerMode {
-	case "sse":
-		// Start the server in SSE mode
-		klog.Infof("Starting MCP server in SSE mode on port %d", s.httpPort)
-		sseServer := server.NewSSEServer(s.server)
-		endpoint := fmt.Sprintf(":%d", s.httpPort)
-		klog.Infof("Listening for SSE connections on port %d", s.httpPort)
-		return sseServer.Start(endpoint)
 	case "streamable-http":
 		// Start the server in streamable HTTP mode
 		klog.Infof("Starting MCP server in streamable HTTP mode on port %d", s.httpPort)
