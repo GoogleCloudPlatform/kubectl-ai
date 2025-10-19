@@ -51,6 +51,8 @@ type ServerConfig struct {
 	Timeout int `yaml:"timeout,omitempty"`
 	// UseStreaming enables streaming HTTP for better performance
 	UseStreaming bool `yaml:"use_streaming,omitempty"`
+	// SkipVerify skips TLS certificate verification for HTTPS connections
+	SkipVerify bool `yaml:"skip_verify,omitempty"`
 }
 
 // ===================================================================

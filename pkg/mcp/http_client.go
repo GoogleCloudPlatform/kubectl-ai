@@ -16,8 +16,10 @@ package mcp
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/base64"
 	"fmt"
+	"net/http"
 	"time"
 
 	mcpclient "github.com/mark3labs/mcp-go/client"
@@ -38,6 +40,7 @@ type httpClient struct {
 	oauthConfig  *OAuthConfig
 	timeout      int
 	useStreaming bool
+	skipVerify   bool
 	client       *mcpclient.Client
 }
 
@@ -50,6 +53,7 @@ func NewHTTPClient(config ClientConfig) MCPClient {
 		oauthConfig:  config.OAuthConfig,
 		timeout:      config.Timeout,
 		useStreaming: config.UseStreaming,
+		skipVerify:   config.SkipVerify,
 	}
 }
 
@@ -114,9 +118,32 @@ func (c *httpClient) createStreamingClient() (*mcpclient.Client, error) {
 	// Set up options for the HTTP client
 	var options []transport.StreamableHTTPCOption
 
-	// Add timeout if specified
+	// Add timeout if specified (only when not using custom client)
 	if c.timeout > 0 {
 		options = append(options, transport.WithHTTPTimeout(time.Duration(c.timeout)*time.Second))
+	}
+
+	klog.V(2).InfoS("WARNING: TLS certificate verification is disabled", "server", c.name)
+	// Handle TLS verification skip by creating custom HTTP client
+	if c.skipVerify {
+		klog.V(2).InfoS("WARNING: TLS certificate verification is disabled", "server", c.name)
+
+		// Create custom HTTP client with TLS verification disabled
+		customClient := &http.Client{
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{
+					InsecureSkipVerify: true,
+				},
+			},
+		}
+
+		// Add timeout to custom client if specified
+		if c.timeout > 0 {
+			customClient.Timeout = time.Duration(c.timeout) * time.Second
+		}
+
+		// Use the custom HTTP client
+		options = append(options, transport.WithHTTPBasicClient(customClient))
 	}
 
 	// Add authentication if specified
@@ -185,7 +212,7 @@ func (c *httpClient) createOAuthClient(ctx context.Context) (*mcpclient.Client, 
 	}
 
 	// Add OAuth configuration
-	options = append(options, transport.WithOAuth(oauthCfg))
+	options = append(options, transport.WithHTTPOAuth(oauthCfg))
 
 	// Add timeout if specified
 	if c.timeout > 0 {

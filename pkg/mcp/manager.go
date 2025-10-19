@@ -104,14 +104,20 @@ func (m *Manager) ConnectAll(ctx context.Context) error {
 
 		// Create client config with environment map
 		config := ClientConfig{
-			Name:        serverCfg.Name,
-			Command:     serverCfg.Command,
-			Args:        serverCfg.Args,
-			Auth:        serverCfg.Auth,
-			OAuthConfig: serverCfg.OAuthConfig,
-			Env:         envSlice,
-			URL:         serverCfg.URL,
+			Name:         serverCfg.Name,
+			Command:      serverCfg.Command,
+			Args:         serverCfg.Args,
+			Auth:         serverCfg.Auth,
+			OAuthConfig:  serverCfg.OAuthConfig,
+			Env:          envSlice,
+			URL:          serverCfg.URL,
+			Timeout:      serverCfg.Timeout,
+			UseStreaming: serverCfg.UseStreaming,
+			SkipVerify:   serverCfg.SkipVerify,
 		}
+
+		klog.V(2).Info("Connecting to MCP server", "name", serverCfg.Name, "url", serverCfg.URL)
+		klog.V(2).Info("MCP client config", "config", config)
 
 		client := NewClient(config)
 		if err := client.Connect(ctx); err != nil {
@@ -236,7 +242,6 @@ func (m *Manager) RefreshToolDiscovery(ctx context.Context) (map[string][]Tool, 
 		serverTools, err = m.ListAvailableTools(ctx)
 		return err
 	})
-
 	if err != nil {
 		klog.Warningf("Failed to discover tools after retries: %v", err)
 		return nil, err
