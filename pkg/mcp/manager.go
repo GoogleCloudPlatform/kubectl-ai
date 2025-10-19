@@ -116,9 +116,6 @@ func (m *Manager) ConnectAll(ctx context.Context) error {
 			SkipVerify:   serverCfg.SkipVerify,
 		}
 
-		klog.V(2).Info("Connecting to MCP server", "name", serverCfg.Name, "url", serverCfg.URL)
-		klog.V(2).Info("MCP client config", "config", config)
-
 		client := NewClient(config)
 		if err := client.Connect(ctx); err != nil {
 			err := fmt.Errorf(ErrServerConnectionFmt, serverCfg.Name, err)
