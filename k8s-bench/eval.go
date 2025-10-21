@@ -263,7 +263,8 @@ func evaluateTask(ctx context.Context, config EvalConfig, taskID string, task Ta
 		LLMConfig: llmConfig,
 	}
 
-	timeout := 5 * time.Minute
+	// Timeout limit for the whole task (setup, agent actions, verify)
+	timeout := 10 * time.Minute
 	if task.Timeout != "" {
 		var err error
 		timeout, err = time.ParseDuration(task.Timeout)
