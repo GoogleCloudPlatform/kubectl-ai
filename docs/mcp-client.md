@@ -60,16 +60,15 @@ The command execution follows this sequence:
 Configure the MCP servers in `~/.config/kubectl-ai/mcp.yaml`:
 
 ```yaml
-Servers:
-- Args:
-  - '~/mcp-send-email/build/index.js'
-  env:
-    RESEND_API_KEY: "api-key-here"
-  Command: node
-  Name: resend
-- Name: permiflow
-  URL: http://localhost:8080/mcp
-
+servers:
+  - name: resend
+    command: node
+    args:
+      - "~/mcp-send-email/build/index.js"
+    env:
+      RESEND_API_KEY: "api-key-here"
+  - name: permiflow
+    url: http://localhost:8080/mcp
 ```
 
 ### Quick Start
@@ -130,14 +129,14 @@ kubectl-ai --mcp-client "show wildcard permissions and suggest fixes"
 Expand the automation capabilities by adding specialized servers:
 
 ```yaml
-Servers:
-  - Name: slack-notifier
-    URL: "https://slack-mcp.company.com/mcp"
-  - Name: jira-tickets
-    URL: "https://jira-mcp.company.com/mcp"
-  - Name: trivy-scanner
-    Command: npx
-    Args: ["-y", "@aquasecurity/trivy-mcp"]
+servers:
+  - name: slack-notifier
+    url: "https://slack-mcp.company.com/mcp"
+  - name: jira-tickets
+    url: "https://jira-mcp.company.com/mcp"
+  - name: trivy-scanner
+    command: npx
+    args: ["-y", "@aquasecurity/trivy-mcp"]
 ```
 
 ### Advanced Workflows

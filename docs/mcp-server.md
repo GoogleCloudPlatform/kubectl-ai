@@ -23,9 +23,9 @@ Start the MCP server with external MCP tool discovery enabled:
 kubectl-ai --mcp-server --external-tools
 ```
 
-### Expose an HTTP endpoint for MCP clients
+### Expose an HTTP Endpoint for MCP Clients
 
-Run the server with the streamable HTTP transport to serve compatible MCP clients (including kubectl-ai's MCP client mode) over HTTP:
+Run the server with the streamable HTTP transport to serve compatible MCP clients (including kubectl-ai MCP client mode) over HTTP:
 
 ```bash
 kubectl-ai --mcp-server --mcp-server-mode streamable-http --http-port 9080
@@ -35,7 +35,7 @@ This listens on `http://localhost:9080/mcp` by default. Use `--mcp-server-mode s
 
 ## Configuration
 
-The enhanced MCP server will automatically discover and expose tools from configured MCP servers when `--external-tools` is enabled. Configure MCP servers using the standard MCP client configuration.
+When `--external-tools` is enabled, the enhanced MCP server will automatically discover and expose tools from configured MCP servers. You can configure MCP servers using the standard MCP client configuration file.
 
 ### Example MCP Configuration
 
@@ -45,8 +45,13 @@ Create `~/.config/kubectl-ai/mcp.yaml`:
 servers:
   filesystem:
     command: "npx"
-    args: ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/allowed/files"]
-  
+    args:
+      [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "/path/to/allowed/files",
+      ]
+
   brave-search:
     command: "npx"
     args: ["-y", "@modelcontextprotocol/server-brave-search"]
@@ -106,34 +111,30 @@ Configure Claude Desktop to use kubectl-ai as an MCP server:
 
 ### Built-in Tools
 
-kubectl-ai provides these native tools:
+kubectl-ai provides the following native tools:
 
-- `kubectl_apply`: Apply Kubernetes manifests
-- `kubectl_get`: Get Kubernetes resources
-- `kubectl_describe`: Describe Kubernetes resources
-- `kubectl_logs`: Get container logs
-- `kubectl_exec`: Execute commands in containers
-- And more...
+- `bash`: Executes a bash command. Use this tool only when you need to execute a shell command.
+- `kubectl`: Executes a kubectl command against the user's Kubernetes cluster. Use this tool only when you need to query or modify the state of the user's Kubernetes cluster.
 
-### External Tools (when --external-tools is enabled)
+### External Tools (when `--external-tools` is enabled)
 
-Additional tools available depend on configured MCP servers:
+Additional tools are available depending on the configured MCP servers:
 
 - **Filesystem tools**: Read/write files, list directories
-- **Web search tools**: Search the internet for information  
+- **Web search tools**: Search the internet for information
 - **Database tools**: Query databases
 - **API tools**: Interact with external APIs
 - **Custom tools**: Any MCP-compatible tools
 
 ## Command Line Options
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--mcp-server` | `false` | Run in MCP server mode |
-| `--external-tools` | `false` | Discover and expose external MCP tools (requires --mcp-server) |
-| `--kubeconfig` | `~/.kube/config` | Path to kubeconfig file |
-| `--mcp-server-mode` | `stdio` | Transport for the MCP server (`stdio`, `sse`, or `streamable-http`) |
-| `--http-port` | `9080` | Port for the HTTP endpoint when using `sse` or `streamable-http` modes |
+| Flag                | Default          | Description                                                            |
+| ------------------- | ---------------- | ---------------------------------------------------------------------- |
+| `--mcp-server`      | `false`          | Run in MCP server mode                                                 |
+| `--external-tools`  | `false`          | Discover and expose external MCP tools (requires --mcp-server)         |
+| `--kubeconfig`      | `~/.kube/config` | Path to kubeconfig file                                                |
+| `--mcp-server-mode` | `stdio`          | Transport for the MCP server (`stdio`, `sse`, or `streamable-http`)    |
+| `--http-port`       | `9080`           | Port for the HTTP endpoint when using `sse` or `streamable-http` modes |
 
 ## Architecture
 
