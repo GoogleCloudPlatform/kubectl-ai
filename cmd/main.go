@@ -399,8 +399,9 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 		if opt.NewSession {
 			// Create a new session
 			meta := sessions.Metadata{
-				ProviderID: opt.ProviderID,
-				ModelID:    opt.ModelID,
+				ProviderID:     opt.ProviderID,
+				ModelID:        opt.ModelID,
+				TokensConsumed: 0,
 			}
 			chatStore, err = sessionManager.NewSession(meta)
 			if err != nil {

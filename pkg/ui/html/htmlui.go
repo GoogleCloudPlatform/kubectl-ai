@@ -27,6 +27,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/GoogleCloudPlatform/kubectl-ai/gollm"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/agent"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/api"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/journal"
@@ -273,7 +274,9 @@ func (u *HTMLUserInterface) handlePOSTSendMessage(w http.ResponseWriter, req *ht
 }
 
 func (u *HTMLUserInterface) getCurrentStateJSON() ([]byte, error) {
-	allMessages := u.agent.Session().AllMessages()
+	session := u.agent.Session()
+	allMessages := session.AllMessages()
+
 	// Create a copy of the messages to avoid race conditions
 	var messages []*api.Message
 	for _, message := range allMessages {
@@ -283,11 +286,15 @@ func (u *HTMLUserInterface) getCurrentStateJSON() ([]byte, error) {
 		messages = append(messages, message)
 	}
 
-	agentState := u.agent.Session().AgentState
+	remaining := 0.0
+	if pct, ok := gollm.ContextPercentRemaining(u.agent.Model, session.TokensConsumed); ok {
+		remaining = pct
+	}
 
 	data := map[string]interface{}{
-		"messages":   messages,
-		"agentState": agentState,
+		"messages":         messages,
+		"agentState":       session.AgentState,
+		"contextRemaining": remaining,
 	}
 	return json.Marshal(data)
 }
