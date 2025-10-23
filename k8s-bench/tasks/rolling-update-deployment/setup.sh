@@ -5,9 +5,11 @@ kubectl create namespace rollout-test
 kubectl create deployment web-app --image=nginx:1.21 --replicas=3 -n rollout-test
 
 # Wait until all replicas are available
-if kubectl wait deployment/web-app -n rollout-test --for=condition=Available=True --timeout=60s; then
+TIMEOUT="120s"
+if kubectl wait deployment/web-app -n rollout-test --for=condition=Available=True --timeout=$TIMEOUT; then
+  echo "Setup succeeded for rolling-update-deployment"
   exit 0
 else
-  echo "Initial deployment did not become ready in time"
+  echo "Setup failed for rolling-update-deployment. Initial deployment did not become ready in time"
   exit 1
 fi

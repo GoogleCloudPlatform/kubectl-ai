@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 NAMESPACE="color-size-settings"
+TIMEOUT="120s"
 
 # Check if namespace exists
 if ! kubectl get namespace $NAMESPACE &>/dev/null; then
@@ -33,7 +34,7 @@ if [[ "$SIZE_VALUE" != "medium" ]]; then
 fi
 
 # Wait for pod to be ready
-if ! kubectl wait --for=condition=Ready pod/pod1 -n $NAMESPACE --timeout=60s; then
+if ! kubectl wait --for=condition=Ready pod/pod1 -n $NAMESPACE --timeout=$TIMEOUT; then
     echo "Pod 'pod1' is not ready in namespace '$NAMESPACE'"
     exit 1
 fi

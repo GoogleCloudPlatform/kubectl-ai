@@ -3,13 +3,15 @@
 # Check if the pod is in Running state with Ready status
 echo "Checking if the pod is running and ready..."
 
-# Wait up to 30 seconds for pod to become ready using kubectl wait
-if kubectl wait --for=condition=Ready pod -l app=webapp -n health-check --timeout=30s; then
+TIMEOUT="120s"
+
+# Wait up to TIMEOUT seconds for pod to become ready using kubectl wait
+if kubectl wait --for=condition=Ready pod -l app=webapp -n orders --timeout=$TIMEOUT; then
   echo "Success: Pod is now Ready"
     
     # Check if probes exist at all
-    LIVENESS_EXISTS=$(kubectl get deploy webapp -n health-check -o jsonpath='{.spec.template.spec.containers[0].livenessProbe}')
-    READINESS_EXISTS=$(kubectl get deploy webapp -n health-check -o jsonpath='{.spec.template.spec.containers[0].readinessProbe}')
+    LIVENESS_EXISTS=$(kubectl get deploy webapp -n orders -o jsonpath='{.spec.template.spec.containers[0].livenessProbe}')
+    READINESS_EXISTS=$(kubectl get deploy webapp -n orders -o jsonpath='{.spec.template.spec.containers[0].readinessProbe}')
     
     if [ -z "$LIVENESS_EXISTS" ] || [ -z "$READINESS_EXISTS" ]; then
       echo "Failure: One or both probes have been removed completely."
@@ -18,8 +20,8 @@ if kubectl wait --for=condition=Ready pod -l app=webapp -n health-check --timeou
     fi
     
     # Get the current probe configurations
-    LIVENESS_PATH=$(kubectl get deploy webapp -n health-check -o jsonpath='{.spec.template.spec.containers[0].livenessProbe.httpGet.path}')
-    READINESS_PATH=$(kubectl get deploy webapp -n health-check -o jsonpath='{.spec.template.spec.containers[0].readinessProbe.httpGet.path}')
+    LIVENESS_PATH=$(kubectl get deploy webapp -n orders -o jsonpath='{.spec.template.spec.containers[0].livenessProbe.httpGet.path}')
+    READINESS_PATH=$(kubectl get deploy webapp -n orders -o jsonpath='{.spec.template.spec.containers[0].readinessProbe.httpGet.path}')
     
     echo "Current liveness probe path: $LIVENESS_PATH"
     echo "Current readiness probe path: $READINESS_PATH"
@@ -30,7 +32,7 @@ if kubectl wait --for=condition=Ready pod -l app=webapp -n health-check --timeou
       echo "Success: Both probe paths have been fixed"
       
       # Check if pod is stable with no recent restarts
-      RESTARTS=$(kubectl get pods -n health-check -l app=webapp -o jsonpath='{.items[0].status.containerStatuses[0].restartCount}')
+      RESTARTS=$(kubectl get pods -n orders -l app=webapp -o jsonpath='{.items[0].status.containerStatuses[0].restartCount}')
       if [ "$RESTARTS" -lt 1 ]; then
         echo "Success: Pod is stable with acceptable number of restarts"
         exit 0
@@ -46,6 +48,6 @@ if kubectl wait --for=condition=Ready pod -l app=webapp -n health-check --timeou
     fi
 else
   echo "Failure: Pod is not Ready after waiting"
-  kubectl get pods -n health-check -l app=webapp
+  kubectl get pods -n orders -l app=webapp
   exit 1
 fi

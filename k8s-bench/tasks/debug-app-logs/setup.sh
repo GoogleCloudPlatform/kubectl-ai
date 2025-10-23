@@ -6,4 +6,5 @@ kubectl apply -f artifacts/calc-app-pod.yaml --namespace=calc-app
 
 # Wait for pod to be ready
 echo "Waiting for pod to be ready..."
-kubectl wait --for=condition=Ready pod/calc-app-pod --namespace=calc-app --timeout=30s
+TIMEOUT="120s"
+kubectl wait --for=condition=Ready pod/calc-app-pod --namespace=calc-app --timeout=$TIMEOUT

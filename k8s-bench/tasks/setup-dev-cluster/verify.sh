@@ -52,36 +52,56 @@ verify_service_accounts() {
 verify_rbac() {
   echo "Testing RBAC permissions..."
   for dev in "${DEVELOPERS[@]}"; do
+    local user_name="${dev}"
     local sa_user="system:serviceaccount:dev-${dev}:${dev}-sa"
     local own_ns="dev-${dev}"
+    
+    # --- Test *User* Permissions ---
+    # Users should have full access to their own namespaces
+    if ! kubectl auth can-i create pods --as="$user_name" -n "$own_ns" --quiet; then
+      echo "FAIL: $user_name (User) cannot create pods in their own namespace '$own_ns'"
+      exit 1
+    fi
 
-    # Should have full access to own namespace
+    # Users should have read access to dev-shared
+    if ! kubectl auth can-i get pods --as="$user_name" -n "dev-shared" --quiet; then
+      echo "FAIL: $user_name (User) cannot read pods in 'dev-shared' namespace"
+      exit 1
+    fi
+
+    # --- Test *Service Account* Permissions ---
+    # Service account should have full access to its own namespace
     if ! kubectl auth can-i create pods --as="$sa_user" -n "$own_ns" --quiet; then
-      echo "$dev cannot create pods in their own namespace '$own_ns'"
+      echo "FAIL: $sa_user (SA) cannot create pods in their own namespace '$own_ns'"
       exit 1
     fi
-    echo "  - $dev has write access to their own namespace"
-
-    # Should have read access to dev-shared
+    
+    # Service account should have read access to dev-shared
     if ! kubectl auth can-i get pods --as="$sa_user" -n "dev-shared" --quiet; then
-      echo "$dev cannot read pods in 'dev-shared' namespace"
+      echo "FAIL: $sa_user (SA) cannot read pods in 'dev-shared' namespace"
       exit 1
     fi
-    echo "  - $dev has read access to 'dev-shared'"
-
-    # Should NOT have access to restricted namespaces
+    
+    # --- Test Isolation for *BOTH* identities ---
     for other_ns in "${ALL_NAMESPACES[@]}"; do
-        # Skip check for their own namespace and the shared one
-        if [[ "$other_ns" == "$own_ns" || "$other_ns" == "dev-shared" ]]; then
-            continue
-        fi
+      # Skip namespaces where access is expected
+      if [[ "$other_ns" == "$own_ns" || "$other_ns" == "dev-shared" ]]; then
+        continue
+      fi
 
-        if kubectl auth can-i get pods --as="$sa_user" -n "$other_ns" --quiet; then
-            echo "$dev has unauthorized read access to '$other_ns' namespace"
-            exit 1
-        fi
+      # --- User Isolation Check ---
+      if kubectl auth can-i get pods --as="$user_name" -n "$other_ns" --quiet; then
+        echo "FAIL: $user_name (User) has unauthorized read access to '$other_ns' namespace"
+        exit 1
+      fi
+
+      # --- Service Account Isolation Check ---
+      if kubectl auth can-i get pods --as="$sa_user" -n "$other_ns" --quiet; then
+        echo "FAIL: $sa_user (SA) has unauthorized read access to '$other_ns' namespace"
+        exit 1
+      fi
     done
-    echo "  - $dev is properly isolated from other dev, staging, and prod namespaces"
+    
   done
   echo "RBAC permissions are correctly configured."
 }

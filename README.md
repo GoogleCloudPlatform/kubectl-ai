@@ -5,7 +5,6 @@
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/GoogleCloudPlatform/kubectl-ai)
 [![GitHub stars](https://img.shields.io/github/stars/GoogleCloudPlatform/kubectl-ai.svg)](https://github.com/GoogleCloudPlatform/kubectl-ai/stargazers)
 
-
 `kubectl-ai` acts as an intelligent interface, translating user intent into
 precise Kubernetes operations, making Kubernetes management more accessible and
 efficient.
@@ -25,7 +24,6 @@ curl -sSL https://raw.githubusercontent.com/GoogleCloudPlatform/kubectl-ai/main/
 ```
 
 <details>
-
 <summary>Other Installation Methods</summary>
 
 #### Manual Installation (Linux, MacOS and Windows)
@@ -42,7 +40,7 @@ sudo mv kubectl-ai /usr/local/bin/
 
 #### Install with Krew (Linux/macOS/Windows)
 
-First of all, you need to have krew insatlled, refer to [krew document](https://krew.sigs.k8s.io/docs/user-guide/setup/install/) for more details
+First of all, you need to have krew installed, refer to [krew document](https://krew.sigs.k8s.io/docs/user-guide/setup/install/) for more details
 Then you can install with krew
 
 ```shell
@@ -53,7 +51,7 @@ Now you can invoke `kubectl-ai` as a kubectl plugin like this: `kubectl ai`.
 
 #### Install on NixOS
 
-There are multiple ways to install `kubectl-ai` on NixOS. For a permantent installation add the following to your NixOS-Configuration:
+There are multiple ways to install `kubectl-ai` on NixOS. For a permanent installation add the following to your NixOS-Configuration:
 
 ```nix
   environment.systemPackages = with pkgs; [
@@ -63,7 +61,7 @@ There are multiple ways to install `kubectl-ai` on NixOS. For a permantent insta
 
 For a temporary installation, you can use the following command:
 
-```
+```shell
 nix-shell -p kubectl-ai
 ```
 
@@ -89,14 +87,13 @@ kubectl-ai --quiet --model gemini-2.5-flash-preview-04-17 "check logs for nginx 
 ```
 
 <details>
-
 <summary>Use other AI models</summary>
 
 #### Using AI models running locally (ollama or llama.cpp)
 
 You can use `kubectl-ai` with AI models running locally. `kubectl-ai` supports [ollama](https://ollama.com/) and [llama.cpp](https://github.com/ggml-org/llama.cpp) to use the AI models running locally.
 
-Additionally, the [`modelserving`](modelserving/) directory provides tools and instructions for deploying your own `llama.cpp`-based LLM serving endpoints locally or on a Kubernetes cluster. This allows you to host models like Gemma directly in your environment.
+Additionally, the [`modelserving`](modelserving) directory provides tools and instructions for deploying your own `llama.cpp`-based LLM serving endpoints locally or on a Kubernetes cluster. This allows you to host models like Gemma directly in your environment.
 
 An example of using Google's `gemma3` model with `ollama`:
 
@@ -144,6 +141,7 @@ kubectl-ai --llm-provider=bedrock
 ```
 
 AWS Bedrock uses the standard AWS SDK credential chain, supporting:
+
 - AWS SSO profiles
 - IAM roles (for EC2/ECS/Lambda)
 - Environment variables (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY)
@@ -173,7 +171,7 @@ kubectl-ai --llm-provider=openai --model=gpt-4.1
 
 #### Using OpenAI Compatible API
 
-For example, you can use aliyun qwen-xxx models as follows
+For example, you can use aliyun qwen-xxx models as follows.
 
 ```bash
 export OPENAI_API_KEY=your_openai_api_key_here
@@ -240,7 +238,6 @@ kubectl-ai --quiet model
 ```
 
 <details>
-
 <summary>More configuration Options</summary>
 
 Here's a complete configuration file with all available options and their default values:
@@ -305,14 +302,15 @@ To specify tools configuration files or directories containing tools configurati
 
 For further details on how to configure your own tools, [go here](docs/tools.md).
 
-## Docker Quick Start 
+## Docker Quick Start
+
 This project provides a Docker image that gives you a standalone environment for running kubectl-ai, including against a GKE cluster.
 
 ### Running the container against GKE
 
 #### Step 1: Build the Image
 
-Clone the repository and build the image with the following command 
+Clone the repository and build the image with the following command
 
 ```bash
 git clone https://github.com/GoogleCloudPlatform/kubectl-ai.git
@@ -321,15 +319,17 @@ docker build -t kubectl-ai:latest -f images/kubectl-ai/Dockerfile .
 ```
 
 #### Step 2: Connect to Your GKE Cluster
+
 Set up application default credentials and connect to your GKE cluster.
+
 ```bash
 gcloud auth application-default login # If in a gcloud shell this is not necessary
 gcloud container clusters get-credentials <cluster-name> --zone <zone>
 ```
 
 #### Step 3: Run the kubectl-ai container
-Below is a sample command that can be used to launch the container with a locally hosted web-ui. Be sure to replace the placeholder values with your specific Google Cloud project ID and location. Note you 
-do not need to mount the gcloud config directory if you're on a cloudshell machine. 
+
+Below is a sample command that can be used to launch the container with a locally hosted web-ui. Be sure to replace the placeholder values with your specific Google Cloud project ID and location. Note you do not need to mount the gcloud config directory if you're on a cloudshell machine.
 
 ```bash
 docker run --rm -it -p 8080:8080 -v ~/.kube:/root/.kube -v ~/.config/gcloud:/root/.config/gcloud -e GOOGLE_CLOUD_LOCATION=us-central1 -e GOOGLE_CLOUD_PROJECT=my-gcp-project kubectl-ai:latest --llm-provider vertexai --ui-listen-address 0.0.0.0:8080 --ui-type web
@@ -343,7 +343,7 @@ For more info about running from the container image see [CONTAINER.md](CONTAINE
 
 `kubectl-ai` can connect to external [MCP](https://modelcontextprotocol.io/examples) Servers to access additional tools in addition to built-in tools.
 
-### Quick Start
+### Quick Start with MCP Client
 
 Enable MCP client mode:
 
@@ -351,7 +351,7 @@ Enable MCP client mode:
 kubectl-ai --mcp-client
 ```
 
-### Configuration
+### MCP Client Configuration
 
 Create or edit `~/.config/kubectl-ai/mcp.yaml` to customize MCP servers:
 
@@ -385,7 +385,7 @@ The system automatically:
 
 No additional setup required - just use the `--mcp-client` flag and the AI will have access to all configured MCP tools.
 
-📖 **For detailed configuration options, troubleshooting, and advanced features for MCP Client mode, see the [MCP Client Documentation](pkg/mcp/README.md).**
+📖 **For detailed configuration options, troubleshooting, and advanced features for MCP Client mode, see the [MCP Client Documentation](docs/mcp-client.md).**
 
 📖 **For multi-server orchestration and security automation examples, see the [MCP Client Integration Guide](docs/mcp-client.md).**
 
@@ -440,11 +440,11 @@ This starts an MCP endpoint at `http://localhost:9080/mcp`.
 
 The enhanced mode provides AI clients with access to both Kubernetes operations and general-purpose tools (filesystem, web search, databases, etc.) through a single MCP endpoint.
 
-📖 **For detailed configuration, examples, and troubleshooting, see the [MCP Server Documentation](./docs/mcp-server.md).**
+📖 **For detailed configuration, examples, and troubleshooting, see the [MCP Server Documentation](docs/mcp-server.md).**
 
 ## k8s-bench
 
-kubectl-ai project includes [k8s-bench](./k8s-bench/README.md) - a benchmark to evaluate performance of different LLM models on kubernetes related tasks. 
+kubectl-ai project includes [k8s-bench](./k8s-bench/README.md) - a benchmark to evaluate performance of different LLM models on Kubernetes related tasks.
 
 ### Latest Benchmark Results (August 2025)
 
@@ -458,7 +458,7 @@ Comprehensive evaluation on identical 10-task Kubernetes benchmark with proper C
 | AWS Bedrock Claude Sonnet 4 | 10 | 0 | 100% |
 | gemma-3-27b-it | 8 | 2 | 80% |
 
-**Test Environment**: Kind cluster v1.27.3 with Calico CNI (full NetworkPolicy support)  
+**Test Environment**: Kind cluster v1.27.3 with Calico CNI (full NetworkPolicy support)
 **Tasks**: create-pod, create-pod-mount-configmaps, create-pod-resources-limits, create-network-policy, fix-crashloop, fix-image-pull, fix-service-routing, list-images-for-pods, scale-deployment, scale-down-deployment
 
 See [full report](./k8s-bench.md) for more details.

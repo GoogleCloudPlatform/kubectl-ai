@@ -6,22 +6,22 @@ NAMESPACE="statefulset-test"
 STS_NAME="db"
 EXPECTED_CONTENT="initial_data"
 
+echo "Verifying old pods are deleted"
+# Wait for scale-down: 1 ready pods and deletion of old pods
+kubectl wait pod/db-1 pod/db-2 -n statefulset-test --for=delete --timeout=120s
+echo "Old pods are deleted"
+
 # Verify correct number of replicas
 echo "Verifying StatefulSet replica count"
 replicas=$(kubectl get sts "${STS_NAME}" -n "${NAMESPACE}" -o jsonpath='{.spec.replicas}')
-if [[ "${replicas}" -ne 2 ]]; then
-  echo "Expected 2 replicas, but got $replicas"
+if [[ "${replicas}" -ne 1 ]]; then
+  echo "Expected 1 replicas, but got $replicas"
   exit 1
 fi
-echo "StatefulSet is scaled to 2 replicas"
+echo "StatefulSet is running with 1 replicas"
 
-echo "Verifying old pods are deleted"
-# Wait for scale-down: 2 ready pods and deletion of old pods
-kubectl wait pod/db-2 pod/db-3 pod/db-4 -n statefulset-test --for=delete --timeout=120s
-echo "Old pods are deleted"
-
-# Verify db-0 and db-1 exist and have the correct data
-for pod in db-0 db-1; do
+# Verify db-0 exists and have the correct data
+for pod in db-0; do
   if ! kubectl get pod "$pod" -n "${NAMESPACE}" &> /dev/null; then
     echo "Pod $pod not found in namespace $NAMESPACE"
     exit 1

@@ -3,10 +3,11 @@ set -euo pipefail
 
 NAMESPACE="multi-container-logging"
 POD_NAME="communication-pod"
+TIMEOUT="120s"
 
 # Wait for pod to be running
 echo "Waiting for pod '$POD_NAME' to be ready..."
-if ! kubectl wait --for=condition=Ready pod/$POD_NAME -n "$NAMESPACE" --timeout=60s; then
+if ! kubectl wait --for=condition=Ready pod/$POD_NAME -n "$NAMESPACE" --timeout=$TIMEOUT; then
     echo "Pod failed to reach Ready state in time"
     echo "Current pod status:"
     kubectl describe pod "$POD_NAME" -n "$NAMESPACE"

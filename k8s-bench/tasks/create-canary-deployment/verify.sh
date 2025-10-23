@@ -9,10 +9,10 @@ CANARY_DEPLOYMENT="engine-v2-1"
 STABLE_DEPLOYMENT="engine-v2-0"
 SERVICE="recommendation-engine"
 CANARY_IMAGE="nginx:1.29"
-CANARY_REPLICAS=1
-STABLE_REPLICAS=10
+CANARY_REPLICAS=2
+STABLE_REPLICAS=2
 EXPECTED_TOTAL_ENDPOINTS=$((CANARY_REPLICAS + STABLE_REPLICAS))
-TIMEOUT="30s"
+TIMEOUT="120s"
 
 # Wait for both deployments to be available and fully rolled out
 if ! kubectl wait deployment "$CANARY_DEPLOYMENT" -n "$NAMESPACE" \

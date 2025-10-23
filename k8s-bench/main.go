@@ -20,6 +20,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -29,12 +30,21 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
+type ClusterCreationPolicy string
+
+const (
+	AlwaysCreate     ClusterCreationPolicy = "AlwaysCreate"
+	CreateIfNotExist ClusterCreationPolicy = "CreateIfNotExist"
+	DoNotCreate      ClusterCreationPolicy = "DoNotCreate"
+)
+
 type Task struct {
 	Setup      string `json:"setup,omitempty"`
 	Verifier   string `json:"verifier,omitempty"`
 	Cleanup    string `json:"cleanup,omitempty"`
 	Difficulty string `json:"difficulty"`
 	Disabled   bool   `json:"disabled,omitempty"`
+	Timeout    string `json:"timeout,omitempty"`
 
 	Expect []Expectation `json:"expect,omitempty"`
 
@@ -94,13 +104,13 @@ type Expectation struct {
 }
 
 type EvalConfig struct {
-	LLMConfigs        []model.LLMConfig
-	KubeConfig        string
-	TasksDir          string
-	TaskPattern       string
-	AgentBin          string
-	Concurrency       int
-	CreateKindCluster bool
+	LLMConfigs            []model.LLMConfig
+	KubeConfig            string
+	TasksDir              string
+	TaskPattern           string
+	AgentBin              string
+	Concurrency           int
+	ClusterCreationPolicy ClusterCreationPolicy
 
 	OutputDir string
 }
@@ -144,6 +154,49 @@ func printUsage() {
 	fmt.Fprintf(os.Stderr, "  run       Run evaluation benchmarks\n")
 	fmt.Fprintf(os.Stderr, "  analyze   Analyze results from previous benchmark runs\n\n")
 	fmt.Fprintf(os.Stderr, "Run '%s <command> --help' for more information on a command.\n", os.Args[0])
+}
+
+func kindClusterExists(clusterName string) (bool, error) {
+	cmd := exec.Command("kind", "get", "clusters")
+	output, err := cmd.Output()
+	if err != nil {
+		return false, fmt.Errorf("failed to run 'kind get clusters': %w", err)
+	}
+	clusters := strings.Split(string(output), "\n")
+	for _, cluster := range clusters {
+		if cluster == clusterName {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func createKindCluster(clusterName string) error {
+	var createErr error
+	for retry := range 3 {
+		if retry > 0 {
+			fmt.Printf("Retrying cluster creation, attempt %d\n", retry+1)
+			time.Sleep(5 * time.Second)
+		}
+		createCmd := exec.Command("kind", "create", "cluster", "--name", clusterName, "--wait", "5m")
+		fmt.Printf("Creating kind cluster %q\n", clusterName)
+		createCmd.Stdout = os.Stdout
+		createCmd.Stderr = os.Stderr
+		createErr = createCmd.Run()
+		if createErr == nil {
+			return nil
+		}
+		fmt.Printf("failed to create kind cluster, retrying...: %v\n", createErr)
+	}
+	return fmt.Errorf("failed to create kind cluster after multiple retries: %w", createErr)
+}
+
+func deleteKindCluster(clusterName string) error {
+	deleteCmd := exec.Command("kind", "delete", "cluster", "--name", clusterName)
+	fmt.Printf("Deleting kind cluster %q\n", clusterName)
+	deleteCmd.Stdout = os.Stdout
+	deleteCmd.Stderr = os.Stderr
+	return deleteCmd.Run()
 }
 
 type Strings []string
@@ -208,7 +261,7 @@ func runEvals(ctx context.Context) error {
 	flag.BoolVar(&enableToolUseShim, "enable-tool-use-shim", enableToolUseShim, "Enable tool use shim")
 	flag.BoolVar(&quiet, "quiet", quiet, "Quiet mode (non-interactive mode)")
 	flag.IntVar(&config.Concurrency, "concurrency", 0, "Number of tasks to run concurrently (0 = auto, 1 = sequential)")
-	flag.BoolVar(&config.CreateKindCluster, "create-kind-cluster", false, "Create a temporary kind cluster for the evaluation run")
+	flag.StringVar((*string)(&config.ClusterCreationPolicy), "cluster-creation-policy", string(CreateIfNotExist), "Cluster creation policy: AlwaysCreate, CreateIfNotExist, DoNotCreate")
 	flag.StringVar(&config.OutputDir, "output-dir", config.OutputDir, "Directory to write results to")
 	flag.Parse()
 
@@ -367,10 +420,10 @@ func collectResults(inputDir string) ([]model.TaskResult, error) {
 	return allResults, nil
 }
 
-func printFailureDetails(buffer *strings.Builder, results []model.TaskResult, title string, showModel bool) {
+func printFailureAndErrorDetails(buffer *strings.Builder, results []model.TaskResult, title string, showModel bool) {
 	hasFailures := false
 	for _, result := range results {
-		if len(result.Failures) > 0 {
+		if len(result.Failures) > 0 || len(result.Error) > 0 {
 			if !hasFailures {
 				buffer.WriteString(fmt.Sprintf("\n**%s Failure Details**\n\n", title))
 				hasFailures = true
@@ -381,8 +434,12 @@ func printFailureDetails(buffer *strings.Builder, results []model.TaskResult, ti
 			} else {
 				buffer.WriteString(fmt.Sprintf("**Task: %s**\n", result.Task))
 			}
+			buffer.WriteString(fmt.Sprintf("**Result: %s**\n", result.Result))
 			for _, failure := range result.Failures {
 				buffer.WriteString(fmt.Sprintf("```\n%s\n```\n", failure.Message))
+			}
+			if len(result.Error) > 0 {
+				buffer.WriteString(fmt.Sprintf("```\n%s\n```\n", result.Error))
 			}
 			buffer.WriteString("\n")
 		}
@@ -410,11 +467,14 @@ func printMarkdownResults(config AnalyzeConfig, results []model.TaskResult, resu
 	totalCount := len(results)
 	overallSuccessCount := 0
 	overallFailCount := 0
+	overallErrorCount := 0
 	for _, result := range results {
 		if strings.Contains(strings.ToLower(result.Result), "success") {
 			overallSuccessCount++
-		} else {
+		} else if strings.Contains(strings.ToLower(result.Result), "fail") {
 			overallFailCount++
+		} else {
+			overallErrorCount++
 		}
 	}
 
@@ -423,26 +483,29 @@ func printMarkdownResults(config AnalyzeConfig, results []model.TaskResult, resu
 
 	if config.IgnoreToolUseShim {
 		// Simplified table ignoring shim status
-		buffer.WriteString("| Model | Success | Fail |\n")
-		buffer.WriteString("|-------|---------|------|\n")
+		buffer.WriteString("| Model | Success | Fail | Error |\n")
+		buffer.WriteString("|-------|---------|------|-------|\n")
 
 		for _, model := range models {
 			successCount := 0
 			failCount := 0
+			errorCount := 0
 			for _, result := range results {
 				if result.LLMConfig.ModelID == model {
 					if strings.Contains(strings.ToLower(result.Result), "success") {
 						successCount++
-					} else {
+					} else if strings.Contains(strings.ToLower(result.Result), "fail") {
 						failCount++
+					} else {
+						errorCount++
 					}
 				}
 			}
-			buffer.WriteString(fmt.Sprintf("| %s | %d | %d |\n", model, successCount, failCount))
+			buffer.WriteString(fmt.Sprintf("| %s | %d | %d | %d |\n", model, successCount, failCount, errorCount))
 		}
 		// Overall totals row
 		buffer.WriteString("| **Total** |")
-		buffer.WriteString(fmt.Sprintf(" %d | %d |\n\n", overallSuccessCount, overallFailCount))
+		buffer.WriteString(fmt.Sprintf(" %d | %d | %d |\n\n", overallSuccessCount, overallFailCount, overallErrorCount))
 
 	} else {
 		// Original table grouped by tool use shim status
@@ -516,7 +579,8 @@ func printMarkdownResults(config AnalyzeConfig, results []model.TaskResult, resu
 	buffer.WriteString("## Overall Summary\n\n")
 	buffer.WriteString(fmt.Sprintf("- Total Runs: %d\n", totalCount))
 	buffer.WriteString(fmt.Sprintf("- Overall Success: %d (%d%%)\n", overallSuccessCount, calculatePercentage(overallSuccessCount, totalCount)))
-	buffer.WriteString(fmt.Sprintf("- Overall Fail: %d (%d%%)\n\n", overallFailCount, calculatePercentage(overallFailCount, totalCount)))
+	buffer.WriteString(fmt.Sprintf("- Overall Fail: %d (%d%%)\n", overallFailCount, calculatePercentage(overallFailCount, totalCount)))
+	buffer.WriteString(fmt.Sprintf("- Overall Error: %d (%d%%)\n\n", overallErrorCount, calculatePercentage(overallErrorCount, totalCount)))
 
 	// --- Detailed Results ---
 	if config.IgnoreToolUseShim {
@@ -533,6 +597,7 @@ func printMarkdownResults(config AnalyzeConfig, results []model.TaskResult, resu
 
 			modelSuccessCount := 0
 			modelFailCount := 0
+			modelErrorCount := 0
 			modelResults := resultsByModel[model]
 			modelTotalCount := len(modelResults)
 
@@ -546,8 +611,10 @@ func printMarkdownResults(config AnalyzeConfig, results []model.TaskResult, resu
 				if strings.Contains(strings.ToLower(result.Result), "success") {
 					resultEmoji = "✅"
 					modelSuccessCount++
-				} else {
+				} else if strings.Contains(strings.ToLower(result.Result), "fail") {
 					modelFailCount++
+				} else {
+					modelErrorCount++
 				}
 
 				buffer.WriteString(fmt.Sprintf("| %s | %s | %s %s |\n",
@@ -560,10 +627,11 @@ func printMarkdownResults(config AnalyzeConfig, results []model.TaskResult, resu
 			buffer.WriteString(fmt.Sprintf("\n**%s Summary**\n\n", model))
 			buffer.WriteString(fmt.Sprintf("- Total: %d\n", modelTotalCount))
 			buffer.WriteString(fmt.Sprintf("- Success: %d (%d%%)\n", modelSuccessCount, calculatePercentage(modelSuccessCount, modelTotalCount)))
-			buffer.WriteString(fmt.Sprintf("- Fail: %d (%d%%)\n\n", modelFailCount, calculatePercentage(modelFailCount, modelTotalCount)))
+			buffer.WriteString(fmt.Sprintf("- Fail: %d (%d%%)\n", modelFailCount, calculatePercentage(modelFailCount, modelTotalCount)))
+			buffer.WriteString(fmt.Sprintf("- Error: %d (%d%%)\n\n", modelErrorCount, calculatePercentage(modelErrorCount, modelTotalCount)))
 			// After the summary, print failure details
 			if config.ShowFailures {
-				printFailureDetails(&buffer, modelResults, model, false)
+				printFailureAndErrorDetails(&buffer, modelResults, model, false)
 			}
 		}
 
@@ -632,7 +700,7 @@ func printMarkdownResults(config AnalyzeConfig, results []model.TaskResult, resu
 
 			// After the summary, print failure details
 			if config.ShowFailures {
-				printFailureDetails(&buffer, toolUseShimStrResults, toolUseShimStr, true)
+				printFailureAndErrorDetails(&buffer, toolUseShimStrResults, toolUseShimStr, true)
 			}
 		}
 	}

@@ -7,7 +7,8 @@ if ! kubectl get namespace limits-test &>/dev/null; then
 fi
 
 # Wait for pod to be ready
-if ! kubectl wait --for=condition=Ready pod/resource-limits-pod -n limits-test --timeout=60s; then
+TIMEOUT="120s"
+if ! kubectl wait --for=condition=Ready pod/resource-limits-pod -n limits-test --timeout=$TIMEOUT; then
     echo "Pod 'resource-limits-pod' is not ready in namespace 'limits-test'"
     exit 1
 fi

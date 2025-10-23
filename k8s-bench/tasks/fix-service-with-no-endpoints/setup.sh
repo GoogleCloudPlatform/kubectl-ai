@@ -11,9 +11,10 @@ kubectl create namespace webshop-frontend
 kubectl apply -f artifacts/service.yaml
 kubectl apply -f artifacts/deployment.yaml
 
-# Wait for the deployment to be available or timeout after 30 seconds
+# Wait for the deployment to be available or timeout after 120 seconds
 echo "Waiting for resources to be created..."
-kubectl wait --for=condition=Available=False --timeout=30s deployment/web-app-deployment -n webshop-frontend || true
+TIMEOUT="120s"
+kubectl wait --for=condition=Available=False --timeout=$TIMEOUT deployment/web-app-deployment -n webshop-frontend || true
 
 # Check the service has no endpoints (due to deployment with invalid node selector)
 ENDPOINTS=$(kubectl get endpoints web-app-service -n webshop-frontend -o jsonpath='{.subsets}')

@@ -9,6 +9,7 @@ Create a secure, multi-tenant development environment with the following require
     - Developers should have read-only access to the dev-shared namespace
     - Only cluster admins should access staging and prod
     - Create service accounts for each developer (alice-sa, bob-sa, charlie-sa) in their respective namespaces
+    - Each developer's service account should have full access to their respective namespace and read-only access to the dev-shared namespace
 
 3. **Resource Quotas**:
     - Each developer namespace: max 2 CPUs, 4Gi memory, 10 pods, 5 services

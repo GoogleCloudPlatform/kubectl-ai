@@ -61,6 +61,7 @@ type ClientConfig struct {
 	OAuthConfig  *OAuthConfig
 	Timeout      int
 	UseStreaming bool // Whether to use streaming HTTP for better performance
+	SkipVerify   bool // Whether to skip TLS certificate verification for HTTPS connections
 
 	// No LLM configuration needed - MCP doesn't need to know about LLM models
 }

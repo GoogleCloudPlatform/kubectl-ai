@@ -24,6 +24,7 @@ import (
 
 	openai "github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
+	"github.com/openai/openai-go/responses"
 	"k8s.io/klog/v2"
 
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/api"
@@ -31,10 +32,11 @@ import (
 
 // Package-level env var storage (OpenAI env)
 var (
-	openAIAPIKey   string
-	openAIEndpoint string
-	openAIAPIBase  string
-	openAIModel    string
+	openAIAPIKey          string
+	openAIEndpoint        string
+	openAIAPIBase         string
+	openAIModel           string
+	openAIUseResponsesAPI bool
 )
 
 // init reads and caches OpenAI environment variables:
@@ -48,6 +50,12 @@ func init() {
 	openAIEndpoint = os.Getenv("OPENAI_ENDPOINT")
 	openAIAPIBase = os.Getenv("OPENAI_API_BASE")
 	openAIModel = os.Getenv("OPENAI_MODEL")
+
+	if val := os.Getenv("OPENAI_USE_RESPONSES_API"); strings.ToLower(val) == "true" {
+		openAIUseResponsesAPI = true
+		klog.InfoS("Using responses API for openai",
+			"baseURL", openAIAPIBase, "endpoint", openAIEndpoint, "model", openAIModel)
+	}
 
 	// Register "openai" as the provider ID
 	if err := RegisterProvider("openai", newOpenAIClientFactory); err != nil {
@@ -96,6 +104,7 @@ func NewOpenAIClient(ctx context.Context, opts ClientOptions) (*OpenAIClient, er
 
 	// Support custom HTTP client (e.g., skip SSL verification)
 	httpClient := createCustomHTTPClient(opts.SkipVerifySSL)
+	httpClient = withJournaling(httpClient)
 	options = append(options, option.WithHTTPClient(httpClient))
 
 	return &OpenAIClient{
@@ -115,6 +124,38 @@ func (c *OpenAIClient) StartChat(systemPrompt, model string) Chat {
 	selectedModel := getOpenAIModel(model)
 
 	klog.V(1).Infof("Starting new OpenAI chat session with model: %s", selectedModel)
+
+	if openAIUseResponsesAPI {
+		// Initialize history with system prompt if provided
+		history := responses.ResponseInputParam{}
+		if systemPrompt != "" {
+			history = append(history, responses.ResponseInputItemUnionParam{
+				OfMessage: &responses.EasyInputMessageParam{
+					Content: responses.EasyInputMessageContentUnionParam{
+						OfString: openai.String(systemPrompt),
+					},
+					Role: responses.EasyInputMessageRoleSystem,
+				},
+			})
+		}
+
+		return &openAIResponseChatSession{
+			client:  c.client,
+			history: history,
+			model:   selectedModel,
+			// functionDefinitions and tools will be set later via SetFunctionDefinitions
+			params: responses.ResponseNewParams{
+				Model:           selectedModel,
+				Temperature:     openai.Float(0.2),
+				MaxOutputTokens: openai.Int(2048),
+				Reasoning: responses.ReasoningParam{
+					Effort: responses.ReasoningEffortLow,
+				},
+				Store: openai.Bool(false),
+			},
+		}
+	}
+	// by default use completion endpoint
 
 	// Initialize history with system prompt if provided
 	history := []openai.ChatCompletionMessageParamUnion{}

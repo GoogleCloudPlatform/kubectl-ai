@@ -220,6 +220,8 @@ func (s *Agent) Init(ctx context.Context) error {
 	systemPrompt, err := s.generatePrompt(ctx, defaultSystemPromptTemplate, PromptData{
 		Tools:             s.Tools,
 		EnableToolUseShim: s.EnableToolUseShim,
+		// RunOnce is a good proxy to indicate the agentic session is non-interactive mode.
+		SessionIsInteractive: !s.RunOnce,
 	})
 	if err != nil {
 		return fmt.Errorf("generating system prompt: %w", err)
@@ -289,8 +291,17 @@ func (c *Agent) Close() error {
 func (c *Agent) Run(ctx context.Context, initialQuery string) error {
 	log := klog.FromContext(ctx)
 
+	if c.Recorder != nil {
+		ctx = journal.ContextWithRecorder(ctx, c.Recorder)
+	}
+
+	// Save unexpected error and return it in for RunOnce mode
+	errChan := make(chan error, 1)
+	wg := sync.WaitGroup{}
+	wg.Add(1)
 	log.Info("Starting agent loop", "initialQuery", initialQuery, "runOnce", c.RunOnce)
 	go func() {
+		defer wg.Done()
 		if initialQuery != "" {
 			c.addMessage(api.MessageSourceUser, api.MessageTypeText, initialQuery)
 			answer, handled, err := c.handleMetaQuery(ctx, initialQuery)
@@ -328,6 +339,7 @@ func (c *Agent) Run(ctx context.Context, initialQuery string) error {
 				c.addMessage(api.MessageSourceAgent, api.MessageTypeText, greetingMessage)
 			}
 		}
+		var savedErr error
 		for {
 			var userInput any
 			log.Info("Agent loop iteration", "state", c.AgentState())
@@ -337,6 +349,9 @@ func (c *Agent) Run(ctx context.Context, initialQuery string) error {
 				if c.RunOnce {
 					log.Info("RunOnce mode, exiting agent loop")
 					c.setAgentState(api.AgentStateExited)
+					if savedErr != nil {
+						errChan <- savedErr
+					}
 					return
 				}
 				log.Info("initiating user input")
@@ -428,6 +443,7 @@ func (c *Agent) Run(ctx context.Context, initialQuery string) error {
 							// In RunOnce mode, exit on tool execution error
 							if c.RunOnce {
 								c.setAgentState(api.AgentStateExited)
+								errChan <- err
 								return
 							}
 							continue
@@ -463,20 +479,12 @@ func (c *Agent) Run(ctx context.Context, initialQuery string) error {
 				}
 
 				// we run the agentic loop for one iteration
-				if c.Recorder != nil {
-					event := &journal.Event{
-						Action:  "llm.request",
-						Payload: c.currChatContent,
-					}
-					if err := c.Recorder.Write(ctx, event); err != nil {
-						klog.Warningf("failed to write to trace: %v", err)
-					}
-				}
 				stream, err := c.llmChat.SendStreaming(ctx, c.currChatContent...)
 				if err != nil {
 					log.Error(err, "error sending streaming LLM response")
 					c.setAgentState(api.AgentStateDone)
 					c.pendingFunctionCalls = []ToolCallAnalysis{}
+					savedErr = err
 					continue
 				}
 
@@ -512,20 +520,12 @@ func (c *Agent) Run(ctx context.Context, initialQuery string) error {
 						llmError = err
 						c.setAgentState(api.AgentStateDone)
 						c.pendingFunctionCalls = []ToolCallAnalysis{}
+						savedErr = llmError
 						break
 					}
 					if response == nil {
 						// end of streaming response
 						break
-					}
-					if c.Recorder != nil {
-						event := &journal.Event{
-							Action:  "llm.response",
-							Payload: response,
-						}
-						if err := c.Recorder.Write(ctx, event); err != nil {
-							klog.Warningf("failed to write to trace: %v", err)
-						}
 					}
 					// klog.Infof("response: %+v", response)
 
@@ -558,6 +558,7 @@ func (c *Agent) Run(ctx context.Context, initialQuery string) error {
 					c.setAgentState(api.AgentStateDone)
 					c.pendingFunctionCalls = []ToolCallAnalysis{}
 					c.addMessage(api.MessageSourceAgent, api.MessageTypeError, "Error: "+llmError.Error())
+					savedErr = llmError
 					continue
 				}
 				log.Info("streamedText", "streamedText", streamedText)
@@ -590,6 +591,7 @@ func (c *Agent) Run(ctx context.Context, initialQuery string) error {
 					c.pendingFunctionCalls = []ToolCallAnalysis{}
 					c.session.LastModified = time.Now()
 					c.addMessage(api.MessageSourceAgent, api.MessageTypeError, "Error: "+err.Error())
+					savedErr = err
 					continue
 				}
 
@@ -645,6 +647,7 @@ func (c *Agent) Run(ctx context.Context, initialQuery string) error {
 						log.Error(nil, "RunOnce mode cannot handle permission requests", "commands", commandDescriptions)
 						c.setAgentState(api.AgentStateExited)
 						c.addMessage(api.MessageSourceAgent, api.MessageTypeError, errorMessage)
+						errChan <- fmt.Errorf("%s", errorMessage)
 						return
 					}
 
@@ -678,6 +681,7 @@ func (c *Agent) Run(ctx context.Context, initialQuery string) error {
 					c.pendingFunctionCalls = []ToolCallAnalysis{}
 					c.session.LastModified = time.Now()
 					c.addMessage(api.MessageSourceAgent, api.MessageTypeError, "Error: "+err.Error())
+					savedErr = err
 					continue
 				}
 				c.currIteration = c.currIteration + 1
@@ -686,6 +690,17 @@ func (c *Agent) Run(ctx context.Context, initialQuery string) error {
 			}
 		}
 	}()
+
+	wg.Wait()
+	select {
+	// In case of saved unexpected error, return it
+	case err := <-errChan:
+		if err != nil {
+			return err
+		}
+	default:
+		return nil
+	}
 
 	return nil
 }
@@ -1043,7 +1058,8 @@ type PromptData struct {
 	Query string
 	Tools tools.Tools
 
-	EnableToolUseShim bool
+	EnableToolUseShim    bool
+	SessionIsInteractive bool
 }
 
 func (a *PromptData) ToolsAsJSON() string {

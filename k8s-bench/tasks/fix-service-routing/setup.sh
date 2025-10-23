@@ -27,5 +27,5 @@ for i in {1..30}; do
     if kubectl get deployment nginx -n web -o jsonpath='{.status.availableReplicas}' | grep -q "1"; then
         exit 0
     fi
-    sleep 1
+    sleep 2
 done 

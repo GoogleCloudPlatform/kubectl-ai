@@ -22,7 +22,7 @@ spec:
       - name: nginx
         image: nginx
         command: ["/bin/sh", "-c"]
-        args: ["nonexistent_command"]  # This will cause the pod to crash
+        args: ["python3 -c 'print('Starting'))'"] 
 EOF
 
 # Wait for pod to enter crashloop state

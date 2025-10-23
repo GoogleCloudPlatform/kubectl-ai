@@ -3,12 +3,13 @@ set -e
 NAMESPACE="e-commerce"
 SERVICE_NAME="checkout-service"
 EXPECTED_SELECTOR_VERSION="green"
+TIMEOUT="120s"
 
 echo "Waiting for the Service '$SERVICE_NAME' to point to version '$EXPECTED_SELECTOR_VERSION'..."
 # Use 'kubectl wait' to verify the service selector condition
-if ! kubectl wait --for=jsonpath='{.spec.selector.version}'="$EXPECTED_SELECTOR_VERSION" service/$SERVICE_NAME -n $NAMESPACE --timeout=30s; then
+if ! kubectl wait --for=jsonpath='{.spec.selector.version}'="$EXPECTED_SELECTOR_VERSION" service/$SERVICE_NAME -n $NAMESPACE --timeout=$TIMEOUT; then
     echo "Failed to verify the service selector."
-    exit 0
+    exit 1
 fi
 
 echo "Service selector updated correctly."

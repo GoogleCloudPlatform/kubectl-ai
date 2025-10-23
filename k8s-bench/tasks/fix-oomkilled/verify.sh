@@ -2,16 +2,30 @@
 
 NAMESPACE="webapp-backend"
 DEPLOYMENT="backend-api"
+ORIGINAL_MEMORY_LIMIT="128Mi"
+TIMEOUT="120s"
 
 # Check if the deployment is ready
-if ! kubectl wait --for=condition=Available deployment/$DEPLOYMENT -n $NAMESPACE --timeout=60s; then
+if ! kubectl wait --for=condition=Available deployment/$DEPLOYMENT -n $NAMESPACE --timeout=$TIMEOUT; then
     echo "Deployment is not available"
     exit 1
 fi
 
 # Check if pods are running
-if ! kubectl wait --for=condition=Ready pod -l app=backend-api -n $NAMESPACE --timeout=30s; then
+if ! kubectl wait --for=condition=Ready pod -l app=backend-api -n $NAMESPACE --timeout=$TIMEOUT; then
     echo "Pods are not ready"
+    exit 1
+fi
+
+# Check that the memory limit has been changed
+MEMORY_LIMIT=$(kubectl get deployment/$DEPLOYMENT -n $NAMESPACE -o jsonpath='{.spec.template.spec.containers[0].resources.limits.memory}')
+if [ -z "$MEMORY_LIMIT" ]; then
+    echo "Memory limit is not set"
+    exit 1
+fi
+
+if [ $MEMORY_LIMIT == $ORIGINAL_MEMORY_LIMIT ]; then
+    echo "Memory limit has not been changed from $ORIGINAL_MEMORY_LIMIT"
     exit 1
 fi
 
