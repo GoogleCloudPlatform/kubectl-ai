@@ -210,8 +210,49 @@ func (c *OllamaChat) SendStreaming(ctx context.Context, contents ...any) (ChatRe
 }
 
 func (c *OllamaChat) Initialize(messages []*kctlApi.Message) error {
-	klog.Warning("chat history persistence is not supported for provider 'ollama', using in-memory chat history")
+	klog.Info("Initializing ollama chat with history")
+	c.history = make([]api.Message, 0, len(messages))
+	for _, msg := range messages {
+		content, err := c.messageToOllamaContent(msg)
+		if err != nil {
+			// Skip malformed messages but continue processing
+			continue
+		}
+		c.history = append(c.history, content)
+	}
 	return nil
+}
+
+func (c *OllamaChat) messageToOllamaContent(msg *kctlApi.Message) (api.Message, error) {
+	var role string
+	switch msg.Source {
+	case kctlApi.MessageSourceUser:
+		role = "user"
+	case kctlApi.MessageSourceModel:
+		role = "assistant"
+	case kctlApi.MessageSourceAgent:
+		// Treat agent messages as system to seed context
+		role = "system"
+	default:
+		return api.Message{}, fmt.Errorf("unknown message source: %s", msg.Source)
+	}
+
+	switch v := msg.Payload.(type) {
+	case string:
+		return api.Message{Role: role, Content: v}, nil
+	case FunctionCallResult:
+		// Represent tool output as a tool response; Ollama does not have a distinct tool role in history API,
+		// so include a textual representation for context.
+		resultJSON, err := json.Marshal(v.Result)
+		if err != nil {
+			return api.Message{}, fmt.Errorf("failed to marshal function call result: %w", err)
+		}
+		return api.Message{Role: "user", Content: string(resultJSON)}, nil
+	default:
+		// Convert unknown types to string representation
+		content := fmt.Sprintf("%v", v)
+		return api.Message{Role: role, Content: content}, nil
+	}
 }
 
 type OllamaChatResponse struct {

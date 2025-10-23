@@ -15,6 +15,7 @@
 package sessions
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -146,11 +147,18 @@ func (s *Session) ChatMessages() []*api.Message {
 	}
 	defer f.Close()
 
-	scanner := json.NewDecoder(f)
-	for scanner.More() {
+	// Read file line by line instead of using json.Decoder
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" {
+			continue
+		}
+
 		var message api.Message
-		if err := scanner.Decode(&message); err != nil {
-			continue // skip malformed messages
+		if err := json.Unmarshal([]byte(line), &message); err != nil {
+			// Skip malformed messages
+			continue
 		}
 		messages = append(messages, &message)
 	}
