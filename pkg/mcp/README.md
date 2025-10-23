@@ -63,6 +63,10 @@ servers:
     auth:
       type: "bearer"  # Options: "basic", "bearer", "api-key"
       token: "${YOUR_ENV_VAR}"  # Will be read from YOUR_ENV_VAR environment variable
+    # Optional custom headers
+    headers:
+      X-Custom-Header: "custom-value"
+      X-API-Version: "v1"
 ```
 
 ### Authentication Options
@@ -70,6 +74,7 @@ servers:
 Remote MCP servers support different authentication methods:
 
 1. **Bearer Token**:
+
    ```yaml
    auth:
      type: "bearer"
@@ -77,6 +82,7 @@ Remote MCP servers support different authentication methods:
    ```
 
 2. **Basic Authentication**:
+
    ```yaml
    auth:
      type: "basic"
@@ -85,12 +91,43 @@ Remote MCP servers support different authentication methods:
    ```
 
 3. **API Key**:
+
    ```yaml
    auth:
      type: "api-key"
      api_key: "your-api-key"
      header_name: "X-Api-Key"  # Optional: Defaults to X-Api-Key
    ```
+
+### Custom Headers
+
+Remote MCP servers support custom HTTP headers for additional configuration or authentication requirements:
+
+```yaml
+servers:
+  - name: remote-server
+    url: "https://mcp-server.example.com/"
+    headers:
+      X-Custom-Header: "custom-value"
+      X-API-Version: "v1"
+      User-Agent: "kubectl-ai/1.0"
+      Accept-Language: "en-US"
+```
+
+**Key Points:**
+
+- Custom headers are applied to all HTTP requests sent to the MCP server
+- Headers can be combined with authentication methods
+- Authentication headers (e.g., `Authorization`) may override custom headers if both are specified
+- All header values are strings
+- Headers are case-sensitive as per HTTP specification
+
+**Common Use Cases:**
+
+- API versioning headers (e.g., `X-API-Version`)
+- Custom user agent strings
+- Request tracking headers (e.g., `X-Request-ID`)
+- Content negotiation headers (e.g., `Accept`, `Accept-Language`)
 
 ### Environment Variable Support
 
@@ -108,13 +145,12 @@ kubectl-ai --mcp-client
 
 When you run kubectl-ai with the MCP client enabled, you'll see information about connected servers:
 
-```
-MCP Server Status:                                                          
+```txt
+MCP Server Status:
 
-Successfully connected to 2 MCP server(s) (2 tools discovered)              
+Successfully connected to 2 MCP server(s) (2 tools discovered)
 
-• sequential-thinking (npx) - Connected, Tools: sequentialthinking        
-
+• sequential-thinking (npx) - Connected, Tools: sequentialthinking
 • fetch (remote) - Connected, Tools: fetch  
 ```
 
@@ -152,16 +188,19 @@ You can configure the following environment variables to customize MCP client be
 The MCP client automatically handles parameter name and type conversion to ensure compatibility with different MCP servers:
 
 ### Name Conversion
+
 - Converts snake_case parameter names to camelCase
 - Example: `thought_number` → `thoughtNumber`
 
 ### Type Conversion
+
 Parameters are intelligently converted based on naming patterns:
 
 **Numbers:** Parameters containing `number`, `count`, `total`, `max`, `min`, `limit`
 **Booleans:** Parameters starting with `is`, `has`, `needs`, `enable` or containing `required`, `enabled`
 
 ### Fallback Behavior
+
 - If type conversion fails, the original value is preserved
 - Unknown servers use generic conversion rules
 - No configuration required - works automatically with any MCP server
@@ -171,6 +210,7 @@ Parameters are intelligently converted based on naming patterns:
 ### Client
 
 The `Client` struct represents a connection to an MCP server. It provides methods to:
+
 - Connect to the server
 - List available tools
 - Execute tools
@@ -179,6 +219,7 @@ The `Client` struct represents a connection to an MCP server. It provides method
 ### Manager
 
 The `Manager` struct manages multiple MCP client connections. It provides:
+
 - Connection management for multiple servers
 - Tool discovery across all connected servers
 - Thread-safe operations
@@ -212,16 +253,19 @@ The MCP client is integrated with `kubectl-ai` to automatically discover and use
 ### Common Issues
 
 **MCP tools are not available:**
+
 - Ensure you're using the `--mcp-client` flag
 - Check that `~/.config/kubectl-ai/mcp.yaml` exists and is valid (created by default)
 - Verify MCP servers are installed (e.g., `npx` commands work)
 
 **Connection failures:**
+
 - Check network connectivity
 - Ensure server commands and paths are correct in configuration
 - Verify environment variables are properly set
 
 **Parameter conversion issues:**
+
 - The system automatically converts snake_case → camelCase
 - String parameters are converted to numbers/booleans based on naming patterns
 - Fallback behavior preserves original values if conversion fails

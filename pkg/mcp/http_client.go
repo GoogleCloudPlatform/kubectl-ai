@@ -41,6 +41,7 @@ type httpClient struct {
 	timeout      int
 	useStreaming bool
 	skipVerify   bool
+	headers      map[string]string
 	client       *mcpclient.Client
 }
 
@@ -54,6 +55,7 @@ func NewHTTPClient(config ClientConfig) MCPClient {
 		timeout:      config.Timeout,
 		useStreaming: config.UseStreaming,
 		skipVerify:   config.SkipVerify,
+		headers:      config.Headers,
 	}
 }
 
@@ -146,11 +148,17 @@ func (c *httpClient) createStreamingClient() (*mcpclient.Client, error) {
 		options = append(options, transport.WithHTTPBasicClient(customClient))
 	}
 
-	// Add authentication if specified
-	if c.auth != nil {
-		// Prepare headers map for authentication
-		headers := make(map[string]string)
+	// Prepare headers map for authentication and custom headers
+	headers := make(map[string]string)
 
+	// Add custom headers from configuration first
+	for key, value := range c.headers {
+		headers[key] = value
+		klog.V(3).InfoS("Using custom header for HTTP client", "server", c.name, "header", key)
+	}
+
+	// Add authentication headers if specified (may override custom headers)
+	if c.auth != nil {
 		switch c.auth.Type {
 		case "basic":
 			auth := "Basic " + base64.StdEncoding.EncodeToString([]byte(c.auth.Username+":"+c.auth.Password))
@@ -167,11 +175,11 @@ func (c *httpClient) createStreamingClient() (*mcpclient.Client, error) {
 			headers[headerName] = c.auth.ApiKey
 			klog.V(3).InfoS("Using API key auth for HTTP client", "server", c.name)
 		}
+	}
 
-		// Add headers if any were set
-		if len(headers) > 0 {
-			options = append(options, transport.WithHTTPHeaders(headers))
-		}
+	// Add headers if any were set
+	if len(headers) > 0 {
+		options = append(options, transport.WithHTTPHeaders(headers))
 	}
 
 	klog.V(4).InfoS("Creating streamable HTTP client", "server", c.name, "url", c.url)
