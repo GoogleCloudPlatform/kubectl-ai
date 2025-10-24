@@ -41,6 +41,9 @@ type LLMConfig struct {
 	ProviderID string `json:"provider"`
 	ModelID    string `json:"model"`
 
+	// ModelVersion records additional version metadata about the model when available.
+	ModelVersion string `json:"modelVersion,omitempty"`
+
 	EnableToolUseShim bool `json:"enableToolUseShim"`
 
 	Quiet bool `json:"quiet"`
