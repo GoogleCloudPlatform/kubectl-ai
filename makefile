@@ -60,7 +60,7 @@ run: ## Run the application
 
 run-html: ## Run with HTML UI
 	@echo "λ Running $(BINARY_NAME) with HTML UI from source..."
-	go run $(CMD_DIR) --user-interface html
+	go run $(CMD_DIR) --ui-type web
 
 # --- Code Quality Tasks (using dev scripts) ---
 fmt: ## Format code using dev script
@@ -121,7 +121,7 @@ dev: build ## Development mode - build and run
 
 dev-html: build ## Development mode - build and run with HTML UI
 	@echo "λ Starting $(BINARY_NAME) with HTML UI in dev mode..."
-	$(BINARY_PATH) --user-interface html
+	$(BINARY_PATH) --ui-type web
 
 # --- Maintenance Tasks ---
 clean: ## Clean build artifacts and coverage files

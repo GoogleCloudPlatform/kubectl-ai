@@ -492,7 +492,7 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 	case ui.UITypeTUI:
 		userInterface = ui.NewTUI(k8sAgent)
 	default:
-		return fmt.Errorf("user-interface mode %q is not known", opt.UIType)
+		return fmt.Errorf("ui-type mode %q is not known", opt.UIType)
 	}
 
 	return repl(ctx, queryFromCmd, userInterface, k8sAgent)
