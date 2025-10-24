@@ -172,7 +172,7 @@ func (u *TerminalUI) Run(ctx context.Context) error {
 	case <-ctx.Done():
 		return nil
 	case <-agentExited:
-		return nil
+		return u.agent.LastErr()
 	}
 }
 
