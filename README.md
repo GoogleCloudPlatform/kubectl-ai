@@ -487,7 +487,7 @@ We welcome contributions to `kubectl-ai` from the community. Take a look at our
 
 ### Talks and Presentations
 
-- [From Natural Language to K8s Operations: The MCP Architecture and Practice of kubectl-ai](https://speakerdeck.com/appleboy/from-natural-language-to-k8s-operations-the-mcp-architecture-and-practice-of-kubectl-ai) - A comprehensive presentation covering the architecture and practical usage of kubectl-ai with MCP (Model Context Protocol)
+- [From Natural Language to K8s Operations: The MCP Architecture and Practice of kubectl-ai](https://blog.wu-boy.com/2025/10/from-natural-language-to-k8s-operations-the-mcp-architecture-and-practice-of-kubectl-ai-en) - A comprehensive presentation covering the architecture and practical usage of kubectl-ai with MCP (Model Context Protocol).
 
 ---
 
