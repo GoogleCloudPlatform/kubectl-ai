@@ -369,8 +369,19 @@ func (cs *openAIChatSession) SendStreaming(ctx context.Context, contents ...any)
 		for stream.Next() {
 			chunk := stream.Current()
 
-			// Update the accumulator with the new chunk
-			acc.AddChunk(chunk)
+			// Update the accumulator with the new chunk, guarding against
+			// panics from the upstream client when tool call indices are
+			// missing. See https://github.com/openai/openai-go/issues/464 for more details.
+			if ok, err := addChunkSafely(&acc, chunk); err != nil {
+				klog.ErrorS(err, "Recovered from OpenAI accumulator panic while processing chunk")
+				yield(nil, fmt.Errorf("OpenAI streaming error while accumulating chunk: %w", err))
+				return
+			} else if !ok {
+				err := errors.New("OpenAI accumulator rejected stream chunk")
+				klog.Error(err)
+				yield(nil, fmt.Errorf("OpenAI streaming error while accumulating chunk: %w", err))
+				return
+			}
 
 			// Handle content completion
 			if _, ok := acc.JustFinishedContent(); ok {
@@ -454,6 +465,23 @@ func (cs *openAIChatSession) SendStreaming(ctx context.Context, contents ...any)
 				"tool_calls", len(completeMessage.ToolCalls))
 		}
 	}, nil
+}
+
+// addChunkSafely wraps the accumulator's AddChunk method to protect against
+// panics triggered by malformed tool call indices returned by the upstream
+// openai-go client. Returning an error allows the caller to surface a regular
+// failure instead of crashing the entire process while the upstream fix is in
+// flight.
+func addChunkSafely(acc *openai.ChatCompletionAccumulator, chunk openai.ChatCompletionChunk) (added bool, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("openai accumulator panic: %v", r)
+			added = false
+		}
+	}()
+
+	added = acc.AddChunk(chunk)
+	return
 }
 
 // IsRetryableError determines if an error from the OpenAI API should be retried.
