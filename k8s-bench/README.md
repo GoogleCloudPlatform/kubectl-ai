@@ -36,7 +36,7 @@ The `run` subcommand executes the benchmark evaluations.
   --llm-provider gemini \
   --models gemini-2.5-pro-preview-03-25,gemini-1.5-pro-latest \
   --enable-tool-use-shim true \
-  --quiet true \
+  --quiet \
   --concurrency 0 \
   --output-dir .build/k8sbench
 ```
@@ -55,6 +55,7 @@ The `run` subcommand executes the benchmark evaluations.
 | `--enable-tool-use-shim` | Enable tool use shim | false | No |
 | `--quiet` | Quiet mode (non-interactive mode) | true | No |
 | `--concurrency` | Number of tasks to run concurrently (0 = auto based on number of tasks, 1 = sequential, N = run N tasks at a time) | 0 | No |
+| `--mcp-client` | Enable MCP client in kubectl-ai | false | No |
 
 #### Analyze Subcommand
 

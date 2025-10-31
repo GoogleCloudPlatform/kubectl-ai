@@ -45,6 +45,8 @@ type LLMConfig struct {
 
 	Quiet bool `json:"quiet"`
 
+	McpClient bool `json:"mcpClient"`
+
 	// TODO: Maybe different styles of invocation, or different temperatures etc?
 }
 
