@@ -546,6 +546,9 @@ func (x *TaskExecution) runAgent(ctx context.Context) (string, error) {
 		"--skip-permissions",
 		"--show-tool-output",
 	}
+	if x.llmConfig.McpClient {
+		args = append(args, "--mcp-client")
+	}
 
 	stdinReader, stdinWriter := io.Pipe()
 

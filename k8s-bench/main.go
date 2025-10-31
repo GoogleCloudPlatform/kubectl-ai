@@ -251,6 +251,7 @@ func runEvals(ctx context.Context) error {
 	defaultKubeConfig := "~/.kube/config"
 	enableToolUseShim := false
 	quiet := true
+	mcpClient := false
 
 	flag.StringVar(&config.TasksDir, "tasks-dir", config.TasksDir, "Directory containing evaluation tasks")
 	flag.StringVar(&config.KubeConfig, "kubeconfig", config.KubeConfig, "Path to kubeconfig file")
@@ -263,6 +264,7 @@ func runEvals(ctx context.Context) error {
 	flag.IntVar(&config.Concurrency, "concurrency", 0, "Number of tasks to run concurrently (0 = auto, 1 = sequential)")
 	flag.StringVar((*string)(&config.ClusterCreationPolicy), "cluster-creation-policy", string(CreateIfNotExist), "Cluster creation policy: AlwaysCreate, CreateIfNotExist, DoNotCreate")
 	flag.StringVar(&config.OutputDir, "output-dir", config.OutputDir, "Directory to write results to")
+	flag.BoolVar(&mcpClient, "mcp-client", mcpClient, "Enable MCP client in kubectl-ai")
 	flag.Parse()
 
 	if config.KubeConfig == "" {
@@ -305,6 +307,7 @@ func runEvals(ctx context.Context) error {
 				ModelID:           modelID,
 				EnableToolUseShim: enableToolUseShim,
 				Quiet:             quiet,
+				McpClient:         mcpClient,
 			})
 		}
 	}
