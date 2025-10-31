@@ -149,7 +149,17 @@ func runEvaluation(ctx context.Context, config EvalConfig) error {
 						log = logFile
 					}
 
+					start := time.Now()
+					fmt.Printf("\033[36mWorker %d: Started %s for %s\033[0m\n", workerID, llmConfig.ID, job.taskID)
+
 					result := evaluateTask(ctx, config, job.taskID, job.task, llmConfig, log)
+
+					fmt.Printf("\033[32mWorker %d: Completed %s for %s in %s\033[0m\n",
+						workerID,
+						llmConfig.ID,
+						job.taskID,
+						time.Since(start).Round(time.Second),
+					)
 
 					if taskOutputDir != "" {
 						if err := writeToYAMLFile(filepath.Join(taskOutputDir, "results.yaml"), result); err != nil {
