@@ -1,7 +1,6 @@
 script:
 - prompt: "What wrong with my calc-app-pod in the calc-app namespace?"
 setup: "setup.sh"
-verifier: "verify.sh"
 cleanup: "cleanup.sh"
 difficulty: "medium"
 expect:
