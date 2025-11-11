@@ -47,6 +47,11 @@ If the eval only requires verifying a model's text output, you can omit the veri
 #### Documenting Evaluation Runs
 It is highly recommended to include a screenshot or a copy of the output from both a successful and, if possible, a failed run of the eval.
 
+## Generating Evals with LLMs
+With a well-crafted prompt, LLMs can often generate the files with minimal changes needed. See [eval-generator-prompt.md](eval-generator-prompt.md), which has been used to successfully create evals with gemini 2.5 pro. An example of using this prompt can be seen in [#455](https://github.com/GoogleCloudPlatform/kubectl-ai/pull/455).
+
+Important to note: LLMs are not perfect, any generated code should still be thoroughly reviewed to ensure it fulfills your request, meets the requirements listed above, and follows best practices.
+
 ## Running evals and analyzing results
 For a quick build/run and analyze loop from the main directory:
 ```
