@@ -604,3 +604,73 @@ func TestConvertToolCallsToFunctionCalls(t *testing.T) {
 		})
 	}
 }
+
+func TestAddChunkSafely(t *testing.T) {
+	tests := []struct {
+		name             string
+		chunk            openai.ChatCompletionChunk
+		expectError      bool
+		expectAdded      bool
+		setupAccumulator func() *openai.ChatCompletionAccumulator
+		unmarshalJSON    bool
+		jsonString       string
+	}{
+		{
+			name: "valid chunk with valid accumulator",
+			chunk: openai.ChatCompletionChunk{
+				Choices: []openai.ChatCompletionChunkChoice{
+					{
+						Delta: openai.ChatCompletionChunkChoiceDelta{
+							Content: "hello",
+						},
+					},
+				},
+			},
+			expectError: false,
+			expectAdded: true,
+			setupAccumulator: func() *openai.ChatCompletionAccumulator {
+				return &openai.ChatCompletionAccumulator{}
+			},
+		},
+		{
+			name:        "chunk with negative tool call index should panic and be recovered",
+			expectError: true,
+			expectAdded: false,
+			setupAccumulator: func() *openai.ChatCompletionAccumulator {
+				return &openai.ChatCompletionAccumulator{}
+			},
+			unmarshalJSON: true,
+			jsonString:    "{\"id\":\"gen-1753952129163910909\",\"object\":\"chat.completion.chunk\",\"created\":1753952129,\"model\":\"model\",\"choices\":[{\"index\":0,\"delta\":{\"role\":null,\"content\":null,\"reasoning_content\":null,\"tool_calls\":[{\"id\":\"call_goVJu3KUQtuahQuqW6wgzQ\",\"index\":-1,\"type\":\"function\",\"function\":{\"name\":\"doc_search\",\"arguments\":\"\"}}]},\"logprobs\":null,\"finish_reason\":null,\"matched_stop\":null}],\"usage\":null}",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			acc := tt.setupAccumulator()
+			chunk := tt.chunk
+
+			if tt.unmarshalJSON {
+				err := json.Unmarshal([]byte(tt.jsonString), &chunk)
+				if err != nil {
+					t.Fatalf("Failed to unmarshal test JSON: %v", err)
+				}
+			}
+
+			added, err := addChunkSafely(acc, chunk)
+
+			if tt.expectError {
+				if err == nil {
+					t.Error("expected an error, but got none")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+
+			if added != tt.expectAdded {
+				t.Errorf("expected added to be %v, but got %v", tt.expectAdded, added)
+			}
+		})
+	}
+}
