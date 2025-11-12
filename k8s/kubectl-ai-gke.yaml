@@ -2,36 +2,13 @@ kind: ServiceAccount
 apiVersion: v1
 metadata:
   name: kubectl-ai
+  namespace: kubectl-ai
 ---
-# apiVersion: v1
-# kind: Pod
-# metadata:
-#   name: kubectl-ai
-#   labels:
-#     app: kubectl-ai
-# spec:
-#   serviceAccountName: kubectl-ai
-#   containers:
-#     - name: kubectl-ai
-#       image: kubectl-ai:latest
-#       args:
-#       - --ui-type=web
-#       - --ui-listen-address=0.0.0.0:8080
-#       - --llm-provider=vertexai
-#       - --v=4
-#       - --alsologtostderr
-#       env:
-#       - name: GOOGLE_CLOUD_PROJECT
-#         value: "PROJECT_ID"
-#       - name: GOOGLE_CLOUD_LOCATION
-#         value: "global"
-#       ports:
-#         - containerPort: 8080
-# ---
 kind: Deployment
 apiVersion: apps/v1
 metadata:
   name: kubectl-ai
+  namespace: kubectl-ai
 spec:
   replicas: 1
   selector:
@@ -45,10 +22,10 @@ spec:
       serviceAccountName: kubectl-ai
       containers:
       - name: kubectl-ai
-        image: kubectl-ai:latest
+        image: REPLACE_WITH_YOUR_IMAGE # e.g. us-central1-docker.pkg.dev/PROJECT_ID/kubectl-ai/kubectl-ai:latest
         args:
         - --ui-type=web
-        - --llm-provider=vertexai
+        - --ui-listen-address=0.0.0.0:8080
         - --v=4
         - --alsologtostderr
         - --use-sandbox
@@ -57,13 +34,15 @@ spec:
           value: "PROJECT_ID"
         - name: GOOGLE_CLOUD_LOCATION
           value: "global"
-        # Vertex AI authentication will be handled via Workload Identity Federation
+        - name: GEMINI_API_KEY
+          value: "REPLACE_WITH_YOUR_GEMINI_API_KEY"
 # ---
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: kubectl-ai:view
+  namespace: kubectl-ai
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
@@ -76,6 +55,7 @@ kind: Service
 apiVersion: v1
 metadata:
   name: kubectl-ai
+  namespace: kubectl-ai
   labels:
     app: kubectl-ai
 spec:
@@ -83,7 +63,7 @@ spec:
     app: kubectl-ai
   ports:
   - port: 80
-    targetPort: 8888
+    targetPort: 8080
     protocol: TCP 
 ---
 # 1. The ClusterRole that grants read-only access to most resources

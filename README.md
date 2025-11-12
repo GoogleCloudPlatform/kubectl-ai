@@ -183,6 +183,10 @@ You can even combine a positional argument with stdin input. The positional argu
 cat error.log | kubectl-ai "explain the error"
 ```
 
+## Deploying to Google Kubernetes Engine
+
+To host the web UI and sandboxed agent inside a GKE cluster, follow the step-by-step guide in [docs/gke-deployment.md](docs/gke-deployment.md). The document covers building an image, configuring Workload Identity, applying the sandbox namespace, and exposing the hosted UI for demos.
+
 ## Configuration
 
 You can also configure `kubectl-ai` using a YAML configuration file at `~/.config/kubectl-ai/config.yaml`:
