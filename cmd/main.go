@@ -81,8 +81,9 @@ func BuildRootCommand(opt *Options) (*cobra.Command, error) {
 type Options struct {
 	ProviderID string `json:"llmProvider,omitempty"`
 	ModelID    string `json:"model,omitempty"`
-	// SkipPermissions is a flag to skip asking for confirmation before executing kubectl commands
-	// that modifies resources in the cluster.
+	// ApprovalPolicy controls how permission prompts are handled before executing kubectl commands.
+	ApprovalPolicy agent.ApprovalPolicy `json:"approvalPolicy,omitempty"`
+	// SkipPermissions is deprecated. Use ApprovalPolicy instead.
 	SkipPermissions bool `json:"skipPermissions,omitempty"`
 	// EnableToolUseShim is a flag to enable tool use shim.
 	// TODO(droot): figure out a better way to discover if the model supports tool use
@@ -142,6 +143,7 @@ func (o *Options) InitDefaults() {
 	o.ProviderID = "gemini"
 	o.ModelID = "gemini-2.5-pro"
 	// by default, confirm before executing kubectl commands that modify resources in the cluster.
+	o.ApprovalPolicy = agent.ApprovalPolicyAutoApproveRead
 	o.SkipPermissions = false
 	o.MCPServer = false
 	o.MCPClient = false
@@ -184,6 +186,26 @@ func (o *Options) LoadConfiguration(b []byte) error {
 	if err := yaml.Unmarshal(b, &o); err != nil {
 		return fmt.Errorf("parsing configuration: %w", err)
 	}
+	return nil
+}
+
+func (o *Options) ResolveApprovalPolicy() error {
+	if o.ApprovalPolicy == "" {
+		o.ApprovalPolicy = agent.ApprovalPolicyAutoApproveRead
+	}
+
+	if o.SkipPermissions {
+		if o.ApprovalPolicy == agent.ApprovalPolicyAutoApproveRead || o.ApprovalPolicy == "" {
+			o.ApprovalPolicy = agent.ApprovalPolicyYolo
+		} else if o.ApprovalPolicy != agent.ApprovalPolicyYolo {
+			fmt.Fprintln(os.Stderr, "warning: --skip-permissions is deprecated and conflicts with --approval-policy; ignoring --skip-permissions")
+		}
+	}
+
+	if !o.ApprovalPolicy.IsValid() {
+		return fmt.Errorf("invalid approval policy %q", o.ApprovalPolicy)
+	}
+
 	return nil
 }
 
@@ -272,6 +294,10 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("failed to load config file: %w", err)
 	}
 
+	if err := opt.ResolveApprovalPolicy(); err != nil {
+		return err
+	}
+
 	rootCmd, err := BuildRootCommand(&opt)
 	if err != nil {
 		return err
@@ -302,7 +328,14 @@ func (opt *Options) bindCLIFlags(f *pflag.FlagSet) error {
 
 	f.StringVar(&opt.ProviderID, "llm-provider", opt.ProviderID, "language model provider")
 	f.StringVar(&opt.ModelID, "model", opt.ModelID, "language model e.g. gemini-2.0-flash-thinking-exp-01-21, gemini-2.0-flash")
+	f.StringVar((*string)(&opt.ApprovalPolicy), "approval-policy", string(opt.ApprovalPolicy), "approval policy for executing kubectl commands. Supported values: auto-approve-read, paranoid, yolo")
 	f.BoolVar(&opt.SkipPermissions, "skip-permissions", opt.SkipPermissions, "(dangerous) skip asking for confirmation before executing kubectl commands that modify resources")
+	if err := f.MarkHidden("skip-permissions"); err != nil {
+		return err
+	}
+	if err := f.MarkDeprecated("skip-permissions", "use --approval-policy=yolo instead"); err != nil {
+		return err
+	}
 	f.BoolVar(&opt.MCPServer, "mcp-server", opt.MCPServer, "run in MCP server mode")
 	f.BoolVar(&opt.ExternalTools, "external-tools", opt.ExternalTools, "in MCP server mode, discover and expose external MCP tools")
 	f.StringArrayVar(&opt.ToolConfigPaths, "custom-tools-config", opt.ToolConfigPaths, "path to custom tools config file or directory")
@@ -327,6 +360,10 @@ func (opt *Options) bindCLIFlags(f *pflag.FlagSet) error {
 
 func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 	var err error // Declare err once for the whole function
+
+	if err = opt.ResolveApprovalPolicy(); err != nil {
+		return err
+	}
 
 	// Validate flag combinations
 	if opt.ExternalTools && !opt.MCPServer {
@@ -461,7 +498,7 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 		Tools:              tools.Default(),
 		Recorder:           recorder,
 		RemoveWorkDir:      opt.RemoveWorkDir,
-		SkipPermissions:    opt.SkipPermissions,
+		ApprovalPolicy:     opt.ApprovalPolicy,
 		EnableToolUseShim:  opt.EnableToolUseShim,
 		MCPClientEnabled:   opt.MCPClient,
 		RunOnce:            opt.Quiet,
