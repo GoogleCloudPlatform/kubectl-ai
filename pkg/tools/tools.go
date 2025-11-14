@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/journal"
+	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/sandbox"
 	"github.com/google/uuid"
 	"sigs.k8s.io/yaml"
 )
@@ -151,6 +152,10 @@ type InvokeToolOptions struct {
 
 	// Kubeconfig is the path to the kubeconfig file.
 	Kubeconfig string
+
+	// Sandbox is the sandbox instance for isolated command execution.
+	// If not nil, tools should use the sandbox for execution.
+	Sandbox *sandbox.Sandbox
 }
 
 type ToolRequestEvent struct {
@@ -183,7 +188,25 @@ func (t *ToolCall) InvokeTool(ctx context.Context, opt InvokeToolOptions) (any, 
 	ctx = context.WithValue(ctx, KubeconfigKey, opt.Kubeconfig)
 	ctx = context.WithValue(ctx, WorkDirKey, opt.WorkDir)
 
-	response, err := t.tool.Run(ctx, t.arguments)
+	var response any
+	var err error
+
+	// Check if sandbox is available and tool supports sandbox execution
+	if opt.Sandbox != nil && (t.name == "bash" || t.name == "kubectl") {
+		// Use sandbox execution for bash and kubectl tools
+		switch tool := t.tool.(type) {
+		case *BashTool:
+			response, err = tool.RunInSandbox(ctx, t.arguments, opt.Sandbox)
+		case *Kubectl:
+			response, err = tool.RunInSandbox(ctx, t.arguments, opt.Sandbox)
+		default:
+			// Fallback to regular execution
+			response, err = t.tool.Run(ctx, t.arguments)
+		}
+	} else {
+		// Regular execution
+		response, err = t.tool.Run(ctx, t.arguments)
+	}
 
 	{
 		ev := ToolResponseEvent{

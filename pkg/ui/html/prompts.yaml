@@ -1,0 +1,25 @@
+- group: Analyze
+  items:
+    - "Analyze resource usage in the cluster and list top pods by memory and cpu usage. Show the results in a nice table."
+    - "Analyze resource usage in the cluster and list top namespaces by memory and cpu usage. Show the results in a nice table."
+    - "analyze resources usage by nodes in the cluster"
+    - "can you analyze nodes by their accelerator (non-accelerator) types. Show the results in a nice table."
+- group: Getting Started
+  items:
+    - "Check recent activity in the cluster and highlight any issues."
+    - "List all pods in the default namespace."
+    - "List all pods in the kube-system namespace."
+    - "Explain what a Deployment is in Kubernetes."
+- group: Debugging
+  items:
+    - "My pod is CrashLoopBackOff, how do I debug it?"
+    - "Why is this service not receiving traffic?"
+    - "Show me the recent logs for deployment/my-app."
+- group: Scaling & Maintenance
+  items:
+    - "Scale deployment nginx to 3 replicas."
+    - "Roll out restart for deployment my-app."
+- group: Org Tips
+  items:
+    - "Deploy the standard logging sidecar."
+    - "Check policy compliance for namespace dev." 
