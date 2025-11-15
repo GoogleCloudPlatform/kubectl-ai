@@ -11,6 +11,21 @@ efficient.
 
 ![kubectl-ai demo GIF using: kubectl-ai "how's nginx app doing in my cluster"](./.github/kubectl-ai.gif)
 
+## Table of Contents
+
+- [Quick Start](#quick-start)
+  - [Installation](#installation)
+  - [Usage](#usage)
+- [Configuration](#configuration)
+- [Tools](#tools)
+- [Docker Quick Start](#docker-quick-start)
+- [MCP Client Mode](#mcp-client-mode)
+- [Extras](#extras)
+- [MCP Server Mode](#mcp-server-mode)
+- [k8s-bench](#k8s-bench)
+- [Start Contributing](#start-contributing)
+- [Learning Resources](#learning-resources)
+
 ## Quick Start
 
 First, ensure that kubectl is installed and configured.
@@ -467,6 +482,12 @@ See [full report](./k8s-ai-bench.md) for more details.
 
 We welcome contributions to `kubectl-ai` from the community. Take a look at our
 [contribution guide](contributing.md) to get started.
+
+## Learning Resources
+
+### Talks and Presentations
+
+- [From Natural Language to K8s Operations: The MCP Architecture and Practice of kubectl-ai](https://blog.wu-boy.com/2025/10/from-natural-language-to-k8s-operations-the-mcp-architecture-and-practice-of-kubectl-ai-en) - A comprehensive presentation covering the architecture and practical usage of kubectl-ai with MCP (Model Context Protocol).
 
 ---
 
