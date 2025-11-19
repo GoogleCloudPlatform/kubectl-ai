@@ -465,7 +465,16 @@ func (c *GeminiChat) SendStreaming(ctx context.Context, contents ...any) (ChatRe
 			}
 
 			content := geminiResponse.Candidates[0].Content
-			if content == nil || content.Parts == nil || len(content.Parts) == 0 {
+			partsIsEmpty := true
+			if content != nil {
+				for _, part := range content.Parts {
+					if part.Text != "" || part.FunctionCall != nil {
+						partsIsEmpty = false
+						break
+					}
+				}
+			}
+			if partsIsEmpty {
 				// This happens when there is empty content with the finish reason (STOP) to indicate that streaming response is finished.
 				// xref: https://github.com/GoogleCloudPlatform/kubectl-ai/issues/306
 				log.V(1).Info("empty response probably with STOP finishedReason")
