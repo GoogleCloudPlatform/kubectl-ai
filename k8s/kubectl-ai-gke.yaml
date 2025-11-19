@@ -1,7 +1,14 @@
+kind: ServiceAccount
+apiVersion: v1
+metadata:
+  name: kubectl-ai
+  namespace: kubectl-ai
+---
 kind: Deployment
 apiVersion: apps/v1
 metadata:
   name: kubectl-ai
+  namespace: kubectl-ai
 spec:
   replicas: 1
   selector:
@@ -15,31 +22,27 @@ spec:
       serviceAccountName: kubectl-ai
       containers:
       - name: kubectl-ai
-        image: kubectl-ai:latest
+        image: REPLACE_WITH_YOUR_IMAGE # e.g. us-central1-docker.pkg.dev/PROJECT_ID/kubectl-ai/kubectl-ai:latest
         args:
         - --ui-type=web
-        - --llm-provider=vertexai
+        - --ui-listen-address=0.0.0.0:8080
         - --v=4
         - --alsologtostderr
+        - --use-sandbox
         env:
         - name: GOOGLE_CLOUD_PROJECT
           value: "PROJECT_ID"
         - name: GOOGLE_CLOUD_LOCATION
           value: "global"
-        # Vertex AI authentication will be handled via Workload Identity Federation
+        - name: GEMINI_API_KEY
+          value: "REPLACE_WITH_YOUR_GEMINI_API_KEY"
+# ---
 ---
-
-kind: ServiceAccount
-apiVersion: v1
-metadata:
-  name: kubectl-ai
-  # Using GKE Workload Identity Federation - no GSA impersonation needed
----
-
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: kubectl-ai:view
+  namespace: kubectl-ai
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
@@ -47,13 +50,12 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: kubectl-ai
-
 ---
-
 kind: Service
 apiVersion: v1
 metadata:
   name: kubectl-ai
+  namespace: kubectl-ai
   labels:
     app: kubectl-ai
 spec:
@@ -61,5 +63,91 @@ spec:
     app: kubectl-ai
   ports:
   - port: 80
-    targetPort: 8888
+    targetPort: 8080
     protocol: TCP 
+---
+# 1. The ClusterRole that grants read-only access to most resources
+# This is a cluster-wide role, so it does not have a namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  # This name is shared across the cluster.
+  name: read-only-except-secrets-cluster-role
+rules:
+- apiGroups:
+  - "" # core API group
+  resources:
+  # List all core resource types EXCEPT "secrets"
+  - configmaps
+  - endpoints
+  - events
+  - limitranges
+  - namespaces
+  - nodes
+  - persistentvolumeclaims
+  - persistentvolumes
+  - pods
+  - podtemplates
+  - replicationcontrollers
+  - resourcequotas
+  - serviceaccounts
+  - services
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - "*" # All other current and future API groups
+  resources:
+  - "*" # All current and future resources in those groups (including CRDs and CRs)
+  verbs:
+  - get
+  - list
+  - watch
+---
+# 2. The ClusterRoleBinding that connects the ServiceAccount to the Role
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: read-only-kubectl-ai-binding
+subjects:
+# Grant the permissions to the specific ServiceAccount in the specific namespace
+- kind: ServiceAccount
+  name: kubectl-ai
+  namespace: kubectl-ai
+roleRef:
+  # This refers to the ClusterRole defined above
+  kind: ClusterRole
+  name: read-only-except-secrets-cluster-role
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kubectl-ai-computer-manager
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  - pods/exec
+  - configmaps
+  - secrets
+  verbs:
+  - create
+  - get
+  - delete
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kubectl-ai-computer-manager-binding
+  namespace: computer
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kubectl-ai-computer-manager
+subjects:
+- kind: ServiceAccount
+  name: kubectl-ai
+  namespace: kubectl-ai

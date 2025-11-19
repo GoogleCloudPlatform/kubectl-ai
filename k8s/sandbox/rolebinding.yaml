@@ -1,0 +1,13 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: normal-user-reader-binding
+  namespace: computer
+subjects:
+- kind: ServiceAccount
+  name: normal-user
+  namespace: computer
+roleRef:
+  kind: Role
+  name: reader-all-but-secrets
+  apiGroup: rbac.authorization.k8s.io 

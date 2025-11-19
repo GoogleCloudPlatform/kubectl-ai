@@ -217,6 +217,9 @@ kubectl-ai --list-sessions # list all saved sessions
 kubectl-ai --resume-session 20250807-510872 # resume session 20250807-510872
 kubectl-ai --delete-session 20250807-510872 # delete session 20250807-510872
 ```
+## Deploying to Google Kubernetes Engine
+
+To host the web UI and sandboxed agent inside a GKE cluster, follow the step-by-step guide in [docs/gke-deployment.md](docs/gke-deployment.md). The document covers building an image, configuring Workload Identity, applying the sandbox namespace, and exposing the hosted UI for demos.
 
 ## Configuration
 
