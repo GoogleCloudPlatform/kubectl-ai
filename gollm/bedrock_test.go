@@ -7,10 +7,10 @@ import (
 	"testing"
 )
 
-// TestConnection is a single entry point that validates provider selection
+// TestBedrockClient is a single entry point that validates Client Options
 // for the Bedrock client across several named scenarios. It does not perform
 // any live network calls.
-func TestConnection(t *testing.T) {
+func TestBedrockClient(t *testing.T) {
 	t.Run("LLM_CLIENT not set shows error message", func(t *testing.T) {
 		// Ensure LLM_CLIENT is not set
 		os.Unsetenv("LLM_CLIENT")
@@ -172,6 +172,7 @@ func TestConnection(t *testing.T) {
 		for _, tc := range testCases {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Setenv("LLM_CLIENT", tc.llmClientURL)
+				t.Setenv("AWS_BEARER_TOKEN_BEDROCK", "test-bearer-token")
 				if tc.awsRegionEnv != "" {
 					t.Setenv("AWS_REGION", tc.awsRegionEnv)
 				} else {
@@ -213,6 +214,131 @@ func TestConnection(t *testing.T) {
 					}
 				}
 			})
+		}
+	})
+
+	t.Run("Returns bearer when AWS_BEARER_TOKEN_BEDROCK is set", func(t *testing.T) {
+		t.Setenv("AWS_BEARER_TOKEN_BEDROCK", "test-bearer-token")
+		// Clear other credentials to ensure bearer token is used
+		os.Unsetenv("AWS_ACCESS_KEY_ID")
+		os.Unsetenv("AWS_SECRET_ACCESS_KEY")
+
+		authMethod, err := getAWSAuthMethod()
+
+		if err != nil {
+			t.Fatalf("Expected no error, got: %v", err)
+		}
+
+		if authMethod != AWSAuthBearerToken {
+			t.Errorf("Expected auth method %q, got %q", AWSAuthBearerToken, authMethod)
+		}
+
+		t.Logf("✓ Correctly detected bearer token authentication")
+	})
+
+	t.Run("Returns AWS SigV4 when credentials are set", func(t *testing.T) {
+		os.Unsetenv("AWS_BEARER_TOKEN_BEDROCK")
+		t.Setenv("AWS_ACCESS_KEY_ID", "test-key")
+		t.Setenv("AWS_SECRET_ACCESS_KEY", "test-secret")
+
+		authMethod, err := getAWSAuthMethod()
+
+		if err != nil {
+			t.Fatalf("Expected no error, got: %v", err)
+		}
+
+		if authMethod != AWSAuthAWSSigV4 {
+			t.Errorf("Expected auth method %q, got %q", AWSAuthAWSSigV4, authMethod)
+		}
+
+		t.Logf("✓ Correctly detected AWS SigV4 authentication")
+	})
+
+	t.Run("Bearer token takes precedence over SigV4", func(t *testing.T) {
+		t.Setenv("AWS_BEARER_TOKEN_BEDROCK", "test-bearer")
+		t.Setenv("AWS_ACCESS_KEY_ID", "test-key")
+		t.Setenv("AWS_SECRET_ACCESS_KEY", "test-secret")
+
+		authMethod, err := getAWSAuthMethod()
+
+		if err != nil {
+			t.Fatalf("Expected no error, got: %v", err)
+		}
+
+		if authMethod != AWSAuthBearerToken {
+			t.Errorf("Expected bearer token to take precedence, got %q", authMethod)
+		}
+
+		t.Logf("✓ Bearer token correctly took precedence")
+	})
+
+	t.Run("Returns error when no credentials are set", func(t *testing.T) {
+		os.Unsetenv("AWS_BEARER_TOKEN_BEDROCK")
+		os.Unsetenv("AWS_ACCESS_KEY_ID")
+		os.Unsetenv("AWS_SECRET_ACCESS_KEY")
+
+		_, err := getAWSAuthMethod()
+
+		if err == nil {
+			t.Fatal("Expected error when no credentials are set")
+		}
+
+		if !strings.Contains(err.Error(), "AWS_SECRET_ACCESS_KEY") &&
+			!strings.Contains(err.Error(), "AWS_ACCESS_KEY_ID") {
+			t.Errorf("Expected error about missing credentials, got: %v", err)
+		}
+
+		t.Logf("✓ Correctly returned error for missing credentials: %v", err)
+	})
+
+	t.Run("LIVE: Network connectivity check with real Bedrock API call", func(t *testing.T) {
+		// TODO (nisranjan) Remove the short mode check
+		if testing.Short() {
+			t.Skip("Skipping live network test in short mode")
+		}
+
+		ctx := context.Background()
+
+		// Create the Bedrock client
+		client, err := NewClient(ctx, "")
+		if err != nil {
+			t.Fatalf("Failed to create Bedrock client: %v", err)
+		}
+		defer client.Close()
+
+		// Verify it's a BedrockClient
+		bedrockClient, ok := client.(*BedrockClient)
+		if !ok {
+			t.Fatalf("Expected *BedrockClient, got %T", client)
+		}
+
+		t.Logf("✓ Successfully created BedrockClient")
+
+		// Make a live API call to check network connectivity
+		// Using ListModels to test the connection
+		models, err := bedrockClient.ListModels(ctx)
+
+		// Check for network/connectivity errors
+		if err != nil {
+			if strings.Contains(err.Error(), "network") ||
+				strings.Contains(err.Error(), "connection") ||
+				strings.Contains(err.Error(), "timeout") ||
+				strings.Contains(err.Error(), "dial") {
+				t.Fatalf("Network connectivity error: %v", err)
+			}
+			// Other errors might be related to auth, model availability, etc.
+			t.Logf("Warning: API call failed (may not be network issue): %v", err)
+		} else {
+			t.Logf("✓ Network connectivity successful")
+			t.Logf("✓ Successfully listed %d foundation models from Bedrock API", len(models))
+			if len(models) > 0 {
+				// Show first 3 models as samples
+				sampleCount := len(models)
+				if sampleCount > 3 {
+					sampleCount = 3
+				}
+				t.Logf("Sample models: %v", models[:sampleCount])
+			}
 		}
 	})
 }

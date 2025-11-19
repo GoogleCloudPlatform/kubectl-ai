@@ -26,6 +26,7 @@ import (
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/api"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/bedrock"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/document"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
@@ -48,30 +49,41 @@ func newBedrockClientFactory(ctx context.Context, opts ClientOptions) (Client, e
 		AWSRegionSource: getAWSRegionSource(opts),
 	}
 
+	var err error
+	bedrockOpts.AWSAuthMethod, err = getAWSAuthMethod()
+	if err != nil {
+		return nil, err
+	}
+
 	return NewBedrockClient(ctx, bedrockOpts)
 }
 
 // BedrockClient implements the gollm.Client interface for AWS Bedrock models
 type BedrockClient struct {
-	client *bedrockruntime.Client
+	client        *bedrockruntime.Client
+	bedrockClient *bedrock.Client
 }
 
 // Ensure BedrockClient implements the Client interface
 var _ Client = &BedrockClient{}
 
-// AWS Region source constants for Bedrock provider
+// AWS Options constants for Bedrock provider
 const (
-	AWSRegionSourceAuto = ""    // Auto-detect (URL > Env > Default)
-	AWSRegionSourceURL  = "url" // Use region from URL only
-	AWSRegionSourceEnv  = "env" // Use region from environment only
+	AWSRegionSourceAuto = ""           // Auto-detect (URL > Env > Default)
+	AWSRegionSourceURL  = "url"        // Use region from URL only
+	AWSRegionSourceEnv  = "env"        // Use region from environment only
+	AWSAuthBearerToken  = "bearer"     // Use bearer token authentication
+	AWSAuthAWSSigV4     = "aws-sig-v4" // Use AWS Signature Version 4 authentication
 )
 
 // BedrockClientOptions extends ClientOptions with Bedrock-specific settings
 type BedrockClientOptions struct {
 	ClientOptions
 	AWSRegionSource string
+	AWSAuthMethod   string
 }
 
+// getAWSRegionSource determines the source of the AWS region for the Bedrock client
 func getAWSRegionSource(opts ClientOptions) string {
 	if opts.URL != nil && opts.URL.Host != "" {
 		return AWSRegionSourceURL
@@ -80,6 +92,90 @@ func getAWSRegionSource(opts ClientOptions) string {
 		return AWSRegionSourceEnv
 	}
 	return AWSRegionSourceAuto
+}
+
+// getAWSRegion determines the AWS region to use for the Bedrock client
+func getAWSRegion(opts BedrockClientOptions) (string, error) {
+	regionSource := opts.AWSRegionSource
+
+	// Extract region from URL if provided
+	var regionFromURL string
+	if opts.URL != nil && opts.URL.Host != "" {
+		region, err := extractAWSRegionFromHost(opts.URL.Host)
+		if err != nil && regionSource == AWSRegionSourceURL {
+			return "", fmt.Errorf("URL schema not valid: %w. Expected format: bedrock://bedrock.<aws-region>.amazonaws.com", err)
+		}
+		if err == nil {
+			regionFromURL = region
+		}
+	}
+
+	// Get region from environment
+	regionFromEnv := os.Getenv("AWS_REGION")
+
+	// Determine final region based on source
+	var finalRegion string
+	switch regionSource {
+	case AWSRegionSourceURL:
+		if regionFromURL == "" {
+			return "", fmt.Errorf("AWS_REGION_FROM_URL specified but no region found in URL schema. Expected format: bedrock://bedrock.<region>.amazonaws.com")
+		}
+		if regionFromEnv != "" && regionFromURL != regionFromEnv {
+			return "", fmt.Errorf("AWS REGION from LLM_CLIENT and environment variables mismatch: URL has %q, environment has %q",
+				regionFromURL, regionFromEnv)
+		}
+		finalRegion = regionFromURL
+		klog.V(2).Infof("Using AWS region from URL: %s", finalRegion)
+
+	case AWSRegionSourceEnv:
+		if regionFromEnv == "" {
+			return "", fmt.Errorf("AWS_REGION_FROM_ENV specified but AWS_REGION environment variable not set")
+		}
+		finalRegion = regionFromEnv
+		klog.V(2).Infof("Using AWS region from environment: %s", finalRegion)
+
+	default: // AWSRegionSourceAuto or empty
+		// Check for mismatch
+		if regionFromURL != "" && regionFromEnv != "" && regionFromURL != regionFromEnv {
+			return "", fmt.Errorf("AWS REGION from LLM_CLIENT and environment variables mismatch: URL has %q, environment has %q",
+				regionFromURL, regionFromEnv)
+		}
+
+		// Priority: URL > Environment > Default
+		if regionFromURL != "" {
+			finalRegion = regionFromURL
+			klog.V(2).Infof("Using AWS region from URL (auto): %s", finalRegion)
+		} else if regionFromEnv != "" {
+			finalRegion = regionFromEnv
+			klog.V(2).Infof("Using AWS region from environment (auto): %s", finalRegion)
+		} else {
+			finalRegion = "us-east-1"
+			klog.V(2).Infof("Using default AWS region: %s", finalRegion)
+		}
+	}
+
+	return finalRegion, nil
+}
+
+func getAWSAuthMethod() (string, error) {
+	// Check if bearer token is sets
+	if os.Getenv("AWS_BEARER_TOKEN_BEDROCK") != "" {
+		return AWSAuthBearerToken, nil
+	}
+
+	// Fallback to AWS Signature Version 4 credentials
+	if os.Getenv("AWS_SECRET_ACCESS_KEY") != "" &&
+		os.Getenv("AWS_ACCESS_KEY_ID") != "" {
+		return AWSAuthAWSSigV4, nil
+	} else {
+		if os.Getenv("AWS_SECRET_ACCESS_KEY") == "" {
+			return "", fmt.Errorf("AWS_SECRET_ACCESS_KEY not set")
+		}
+		if os.Getenv("AWS_ACCESS_KEY_ID") == "" {
+			return "", fmt.Errorf("AWS_ACCESS_KEY_ID not set")
+		}
+		return "", fmt.Errorf("AWS_ACCESS_KEY_ID or AWS_SECRET_ACCESS_KEY not set")
+	}
 }
 
 func extractAWSRegionFromHost(host string) (string, error) {
@@ -128,27 +224,13 @@ func isValidAWSRegion(region string) bool {
 
 // NewBedrockClient creates a new client for interacting with AWS Bedrock models
 func NewBedrockClient(ctx context.Context, opts BedrockClientOptions) (*BedrockClient, error) {
-	regionSource := opts.AWSRegionSource
 
-	// Extract region from URL if provided
-	var regionFromURL string
-	if opts.URL != nil && opts.URL.Host != "" {
-		region, err := extractAWSRegionFromHost(opts.URL.Host)
-		if err != nil && regionSource == AWSRegionSourceURL {
-			return nil, fmt.Errorf("URL schema not valid: %w. Expected format: bedrock://bedrock.<aws-region>.amazonaws.com", err)
-		}
-		if err == nil {
-			regionFromURL = region
-		}
+	finalRegion, err := getAWSRegion(opts)
+	if err != nil {
+		return nil, err
 	}
-
-	// Get region from environment
-	regionFromEnv := os.Getenv("AWS_REGION")
-	//if regionFromEnv == "" {
-	//	regionFromEnv = cfg.Region
-	//}
-
 	// Load AWS config with timeout protection
+	//(nisranjan) Is this the right way to handle context here
 	configCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
@@ -157,51 +239,11 @@ func NewBedrockClient(ctx context.Context, opts BedrockClientOptions) (*BedrockC
 		return nil, fmt.Errorf("failed to load AWS config: %w", err)
 	}
 
-	// Determine final region based on source
-	var finalRegion string
-	switch regionSource {
-	case AWSRegionSourceURL:
-		if regionFromURL == "" {
-			return nil, fmt.Errorf("AWS_REGION_FROM_URL specified but no region found in URL schema. Expected format: bedrock://bedrock.<region>.amazonaws.com")
-		}
-		if regionFromEnv != "" && regionFromURL != regionFromEnv {
-			return nil, fmt.Errorf("AWS REGION from LLM_CLIENT and environment variables mismatch: URL has %q, environment has %q",
-				regionFromURL, regionFromEnv)
-		}
-		finalRegion = regionFromURL
-		klog.V(2).Infof("Using AWS region from URL: %s", finalRegion)
-
-	case AWSRegionSourceEnv:
-		if regionFromEnv == "" {
-			return nil, fmt.Errorf("AWS_REGION_FROM_ENV specified but AWS_REGION environment variable not set")
-		}
-		finalRegion = regionFromEnv
-		klog.V(2).Infof("Using AWS region from environment: %s", finalRegion)
-
-	default: // AWSRegionSourceAuto or empty
-		// Check for mismatch
-		if regionFromURL != "" && regionFromEnv != "" && regionFromURL != regionFromEnv {
-			return nil, fmt.Errorf("AWS REGION from LLM_CLIENT and environment variables mismatch: URL has %q, environment has %q",
-				regionFromURL, regionFromEnv)
-		}
-
-		// Priority: URL > Environment > Default
-		if regionFromURL != "" {
-			finalRegion = regionFromURL
-			klog.V(2).Infof("Using AWS region from URL (auto): %s", finalRegion)
-		} else if regionFromEnv != "" {
-			finalRegion = regionFromEnv
-			klog.V(2).Infof("Using AWS region from environment (auto): %s", finalRegion)
-		} else {
-			finalRegion = "us-east-1"
-			klog.V(2).Infof("Using default AWS region: %s", finalRegion)
-		}
-	}
-
 	cfg.Region = finalRegion
 
 	return &BedrockClient{
-		client: bedrockruntime.NewFromConfig(cfg),
+		client:        bedrockruntime.NewFromConfig(cfg),
+		bedrockClient: bedrock.NewFromConfig(cfg),
 	}, nil
 }
 
@@ -255,12 +297,28 @@ func (c *BedrockClient) SetResponseSchema(schema *Schema) error {
 	return fmt.Errorf("response schema not supported by Bedrock")
 }
 
-// ListModels returns the list of supported Bedrock models
+// ListModels returns the list of supported Bedrock models by calling the AWS Bedrock API
 func (c *BedrockClient) ListModels(ctx context.Context) ([]string, error) {
-	return []string{
-		"us.anthropic.claude-sonnet-4-20250514-v1:0",   // Claude Sonnet 4 (default)
-		"us.anthropic.claude-3-7-sonnet-20250219-v1:0", // Claude 3.7 Sonnet
-	}, nil
+	if c.bedrockClient == nil {
+		return nil, fmt.Errorf("bedrock client not initialized")
+	}
+
+	// Call ListFoundationModels API
+	input := &bedrock.ListFoundationModelsInput{}
+	output, err := c.bedrockClient.ListFoundationModels(ctx, input)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list foundation models: %w", err)
+	}
+
+	// Extract model IDs from the response
+	var modelIDs []string
+	for _, modelSummary := range output.ModelSummaries {
+		if modelSummary.ModelId != nil {
+			modelIDs = append(modelIDs, *modelSummary.ModelId)
+		}
+	}
+
+	return modelIDs, nil
 }
 
 // bedrockChat implements the Chat interface for Bedrock conversations
