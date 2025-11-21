@@ -1,0 +1,312 @@
+// Copyright 2025 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package sessions
+
+import (
+	"os"
+	"testing"
+	"time"
+
+	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/api"
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+// setupTestManager creates a temporary directory and SessionManager for testing
+func setupTestManager(t *testing.T) (*SessionManager, func()) {
+	t.Helper()
+	tempDir, err := os.MkdirTemp("", "session-test-*")
+	require.NoError(t, err)
+
+	cleanup := func() {
+		os.RemoveAll(tempDir)
+	}
+
+	manager := &SessionManager{BasePath: tempDir}
+	return manager, cleanup
+}
+
+// createTestMetadata returns standard test metadata
+func createTestMetadata() Metadata {
+	return Metadata{
+		ProviderID: "test-provider",
+		ModelID:    "test-model",
+	}
+}
+
+// createTestMessage creates a test message with the given payload
+func createTestMessage(payload string) *api.Message {
+	return &api.Message{
+		ID:        uuid.New().String(),
+		Source:    api.MessageSourceUser,
+		Type:      api.MessageTypeText,
+		Payload:   payload,
+		Timestamp: time.Now(),
+	}
+}
+
+// TestSessionPersistence tests the basic save and load functionality
+func TestSessionPersistence(t *testing.T) {
+	manager, cleanup := setupTestManager(t)
+	defer cleanup()
+
+	// Create a new session
+	session, err := manager.NewSession(createTestMetadata())
+	require.NoError(t, err)
+
+	// Add some test messages
+	testMessage := createTestMessage("Hello, how can I help?")
+	err = session.AddChatMessage(testMessage)
+	require.NoError(t, err)
+
+	// Load the session and verify its contents
+	loadedSession, err := manager.FindSessionByID(session.ID)
+	require.NoError(t, err)
+
+	messages := loadedSession.ChatMessages()
+	require.Equal(t, 1, len(messages))
+	assert.Equal(t, testMessage.Payload, messages[0].Payload)
+
+	// Verify metadata
+	loadedMeta, err := loadedSession.LoadMetadata()
+	require.NoError(t, err)
+	expectedMeta := createTestMetadata()
+	assert.Equal(t, expectedMeta.ProviderID, loadedMeta.ProviderID)
+	assert.Equal(t, expectedMeta.ModelID, loadedMeta.ModelID)
+}
+
+// TestCreateNewSession tests the creation of a new session
+func TestCreateNewSession(t *testing.T) {
+	manager, cleanup := setupTestManager(t)
+	defer cleanup()
+
+	session, err := manager.NewSession(createTestMetadata())
+	require.NoError(t, err)
+	assert.NotEmpty(t, session.ID)
+	assert.NotEmpty(t, session.Path)
+
+	// Verify history file is created after adding a message:
+	testMessage := createTestMessage("Test message")
+	err = session.AddChatMessage(testMessage)
+	require.NoError(t, err)
+	assert.FileExists(t, session.HistoryPath())
+
+	// Verify session directory and files exist
+	assert.DirExists(t, session.Path)
+	assert.FileExists(t, session.MetadataPath())
+	assert.FileExists(t, session.HistoryPath())
+
+	// Verify metadata
+	loadedMeta, err := session.LoadMetadata()
+	require.NoError(t, err)
+	expectedMeta := createTestMetadata()
+	assert.Equal(t, expectedMeta.ProviderID, loadedMeta.ProviderID)
+	assert.Equal(t, expectedMeta.ModelID, loadedMeta.ModelID)
+	assert.False(t, loadedMeta.CreatedAt.IsZero())
+	assert.False(t, loadedMeta.LastAccessed.IsZero())
+}
+
+// TestDeleteSession tests session deletion
+func TestDeleteSession(t *testing.T) {
+	manager, cleanup := setupTestManager(t)
+	defer cleanup()
+
+	// Create a session
+	session, err := manager.NewSession(createTestMetadata())
+	require.NoError(t, err)
+
+	// Delete the session
+	err = manager.DeleteSession(session.ID)
+	require.NoError(t, err)
+
+	// Verify session directory is gone
+	_, err = os.Stat(session.Path)
+	assert.True(t, os.IsNotExist(err))
+
+	// Verify session can't be found
+	_, err = manager.FindSessionByID(session.ID)
+	assert.Error(t, err)
+}
+
+// TestListSessions tests listing all available sessions
+func TestListSessions(t *testing.T) {
+	manager, cleanup := setupTestManager(t)
+	defer cleanup()
+
+	// Create multiple sessions
+	for i := 0; i < 3; i++ {
+		_, err := manager.NewSession(createTestMetadata())
+		require.NoError(t, err)
+	}
+
+	// List sessions
+	sessions, err := manager.ListSessions()
+	require.NoError(t, err)
+	assert.Equal(t, 3, len(sessions))
+
+	// Verify sessions are sorted by ID (newest first)
+	for i := 1; i < len(sessions); i++ {
+		assert.True(t, sessions[i-1].ID > sessions[i].ID)
+	}
+}
+
+// TestCorruptedMetadata tests handling of corrupted metadata
+func TestCorruptedMetadata(t *testing.T) {
+	manager, cleanup := setupTestManager(t)
+	defer cleanup()
+
+	// Create a session
+	session, err := manager.NewSession(createTestMetadata())
+	require.NoError(t, err)
+
+	// Corrupt the metadata file
+	err = os.WriteFile(session.MetadataPath(), []byte("corrupted yaml"), 0644)
+	require.NoError(t, err)
+
+	// Attempt to load metadata
+	_, err = session.LoadMetadata()
+	assert.Error(t, err)
+}
+
+// TestCorruptedHistory tests handling of corrupted history file
+func TestCorruptedHistory(t *testing.T) {
+	manager, cleanup := setupTestManager(t)
+	defer cleanup()
+
+	// Create a session
+	session, err := manager.NewSession(createTestMetadata())
+	require.NoError(t, err)
+
+	// Add a valid message
+	err = session.AddChatMessage(createTestMessage("Valid message"))
+	require.NoError(t, err)
+
+	// Append corrupted JSON to history file
+	f, err := os.OpenFile(session.HistoryPath(), os.O_APPEND|os.O_WRONLY, 0644)
+	require.NoError(t, err)
+	_, err = f.WriteString("corrupted json\n")
+	require.NoError(t, err)
+	f.Close()
+
+	// Verify we can still read valid messages
+	messages := session.ChatMessages()
+	assert.Equal(t, 1, len(messages))
+	assert.Equal(t, "Valid message", messages[0].Payload)
+}
+
+// TestConcurrentAccess tests concurrent access to a session
+func TestConcurrentAccess(t *testing.T) {
+	manager, cleanup := setupTestManager(t)
+	defer cleanup()
+
+	// Create a session
+	session, err := manager.NewSession(createTestMetadata())
+	require.NoError(t, err)
+
+	// Test concurrent reads and writes
+	done := make(chan bool)
+	messageCount := 100
+
+	for i := 0; i < messageCount; i++ {
+		go func(i int) {
+			msg := createTestMessage("Concurrent message")
+			err := session.AddChatMessage(msg)
+			assert.NoError(t, err)
+			done <- true
+		}(i)
+	}
+
+	// Wait for all goroutines to finish
+	for i := 0; i < messageCount; i++ {
+		<-done
+	}
+
+	// Verify all messages were written
+	messages := session.ChatMessages()
+	assert.Equal(t, messageCount, len(messages))
+}
+
+// TestClearMessages tests clearing all messages from a session
+func TestClearMessages(t *testing.T) {
+	manager, cleanup := setupTestManager(t)
+	defer cleanup()
+
+	// Create a session
+	session, err := manager.NewSession(createTestMetadata())
+	require.NoError(t, err)
+
+	// Add some messages
+	for i := 0; i < 3; i++ {
+		err = session.AddChatMessage(createTestMessage("Test message"))
+		require.NoError(t, err)
+	}
+
+	// Verify messages were added
+	assert.Equal(t, 3, len(session.ChatMessages()))
+
+	// Clear messages
+	err = session.ClearChatMessages()
+	require.NoError(t, err)
+
+	// Verify messages were cleared
+	assert.Empty(t, session.ChatMessages())
+}
+
+// TestGetLatestSession tests getting the most recent session
+func TestGetLatestSession(t *testing.T) {
+	manager, cleanup := setupTestManager(t)
+	defer cleanup()
+
+	// Create multiple sessions
+	var lastSession *Session
+	var err error
+	for i := 0; i < 3; i++ {
+		lastSession, err = manager.NewSession(createTestMetadata())
+		require.NoError(t, err)
+		time.Sleep(time.Millisecond) // Ensure different timestamps
+	}
+
+	// Get latest session
+	latest, err := manager.GetLatestSession()
+	require.NoError(t, err)
+	assert.Equal(t, lastSession.ID, latest.ID)
+}
+
+// TestUpdateLastAccessed tests updating the last accessed timestamp
+func TestUpdateLastAccessed(t *testing.T) {
+	manager, cleanup := setupTestManager(t)
+	defer cleanup()
+
+	// Create a session
+	session, err := manager.NewSession(createTestMetadata())
+	require.NoError(t, err)
+
+	// Get initial last accessed time
+	meta, err := session.LoadMetadata()
+	require.NoError(t, err)
+	initialAccess := meta.LastAccessed
+
+	time.Sleep(time.Millisecond) // Ensure different timestamp
+
+	// Update last accessed
+	err = session.UpdateLastAccessed()
+	require.NoError(t, err)
+
+	// Verify last accessed was updated
+	meta, err = session.LoadMetadata()
+	require.NoError(t, err)
+	assert.True(t, meta.LastAccessed.After(initialAccess))
+}

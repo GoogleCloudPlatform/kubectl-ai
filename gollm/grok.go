@@ -381,8 +381,65 @@ func (cs *grokChatSession) IsRetryableError(err error) bool {
 }
 
 func (cs *grokChatSession) Initialize(messages []*api.Message) error {
-	klog.Warning("chat history persistence is not supported for provider 'grok', using in-memory chat history")
+	klog.Info("Initializing Grok chat with history")
+	cs.history = make([]openai.ChatCompletionMessageParamUnion, 0, len(messages))
+	for _, msg := range messages {
+		content, err := cs.messageToGrokProvider(msg)
+		if err != nil {
+			continue // Skip malformed messages but continue processing
+		}
+		cs.history = append(cs.history, content)
+	}
 	return nil
+}
+
+// messageToGrokProvider converts api.Message to Grok-specific message format
+func (cs *grokChatSession) messageToGrokProvider(msg *api.Message) (openai.ChatCompletionMessageParamUnion, error) {
+	var role string
+	switch msg.Source {
+	case api.MessageSourceUser:
+		role = "user"
+	case api.MessageSourceModel:
+		role = "assistant"
+	case api.MessageSourceAgent:
+		role = "system" // Grok treats agent messages as system messages
+	default:
+		return openai.UserMessage(""), fmt.Errorf("unknown message source: %s", msg.Source)
+	}
+
+	switch v := msg.Payload.(type) {
+	case string:
+		switch role {
+		case "user":
+			return openai.UserMessage(v), nil
+		case "assistant":
+			return openai.AssistantMessage(v), nil
+		case "system":
+			return openai.SystemMessage(v), nil
+		default:
+			return openai.UserMessage(v), nil
+		}
+	case FunctionCallResult:
+		// Handle function call results as tool messages for Grok
+		resultJSON, err := json.Marshal(v.Result)
+		if err != nil {
+			return openai.UserMessage(""), fmt.Errorf("failed to marshal function call result: %w", err)
+		}
+		return openai.ToolMessage(string(resultJSON), v.ID), nil
+	default:
+		// Convert unknown types to string representation
+		content := fmt.Sprintf("%v", v)
+		switch role {
+		case "user":
+			return openai.UserMessage(content), nil
+		case "assistant":
+			return openai.AssistantMessage(content), nil
+		case "system":
+			return openai.SystemMessage(content), nil
+		default:
+			return openai.UserMessage(content), nil
+		}
+	}
 }
 
 // --- Helper structs for ChatResponse interface ---
