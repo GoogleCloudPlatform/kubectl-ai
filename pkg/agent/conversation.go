@@ -22,6 +22,7 @@ import (
 	"html/template"
 	"io"
 	"os"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -31,6 +32,7 @@ import (
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/api"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/journal"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/mcp"
+	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/sandbox"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/sessions"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/tools"
 	"github.com/google/uuid"
@@ -84,6 +86,11 @@ type Agent struct {
 
 	// Kubeconfig is the path to the kubeconfig file.
 	Kubeconfig string
+	// Sandbox indicates whether to execute tools in a sandbox environment
+	Sandbox string
+
+	// SandboxImage is the container image to use for the sandbox
+	SandboxImage string
 
 	SkipPermissions bool
 
@@ -100,6 +107,10 @@ type Agent struct {
 	llmChat gollm.Chat
 
 	workDir string
+
+
+	// executor is the executor for tool execution
+	executor sandbox.Executor
 
 	// session tracks the current session of the agent
 	// this is used by the UI to track the state of the agent and the conversation
@@ -258,6 +269,44 @@ func (s *Agent) Init(ctx context.Context) error {
 		}
 	}
 
+	switch s.Sandbox {
+	case "cluster":
+		sandboxName := fmt.Sprintf("kubectl-ai-sandbox-%s", uuid.New().String()[:8])
+
+		// Use default image if not specified
+		sandboxImage := s.SandboxImage
+		if sandboxImage == "" {
+			sandboxImage = "bitnami/kubectl:latest"
+		}
+
+		// Create sandbox with kubeconfig
+		sb, err := sandbox.NewKubernetesSandbox(sandboxName,
+			sandbox.WithKubeconfig(s.Kubeconfig),
+			sandbox.WithImage(sandboxImage),
+		)
+		if err != nil {
+			return fmt.Errorf("failed to create sandbox: %w", err)
+		}
+
+
+		s.executor = sb
+		log.Info("Created sandbox", "name", sandboxName, "image", sandboxImage)
+
+	case "mac":
+		if runtime.GOOS != "darwin" {
+			return fmt.Errorf("seatbelt sandbox is only supported on macOS")
+		}
+		s.executor = sandbox.NewSeatbeltExecutor()
+		log.Info("Using Seatbelt executor")
+
+	case "":
+		// No sandbox, use local executor
+		s.executor = sandbox.NewLocalExecutor()
+
+	default:
+		return fmt.Errorf("unknown sandbox type: %s", s.Sandbox)
+	}
+
 	if !s.EnableToolUseShim {
 		var functionDefinitions []*gollm.FunctionDefinition
 		for _, tool := range s.Tools.AllTools() {
@@ -287,6 +336,18 @@ func (c *Agent) Close() error {
 	// Close MCP client connections
 	if err := c.CloseMCPClient(); err != nil {
 		klog.Warningf("error closing MCP client: %v", err)
+	}
+
+	// Close sandbox if enabled
+	// Close executor if it exists
+	if c.executor != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		if err := c.executor.Close(ctx); err != nil {
+			klog.Warningf("error cleaning up executor: %v", err)
+		} else {
+			klog.Info("Executor cleaned up successfully")
+		}
 	}
 	return nil
 }
@@ -901,6 +962,7 @@ func (c *Agent) DispatchToolCalls(ctx context.Context) error {
 		output, err := call.ParsedToolCall.InvokeTool(ctx, tools.InvokeToolOptions{
 			Kubeconfig: c.Kubeconfig,
 			WorkDir:    c.workDir,
+			Executor:   c.executor,
 		})
 
 		if err != nil {
@@ -910,7 +972,7 @@ func (c *Agent) DispatchToolCalls(ctx context.Context) error {
 		}
 
 		// Handle timeout message using UI blocks
-		if execResult, ok := output.(*tools.ExecResult); ok && execResult != nil && execResult.StreamType == "timeout" {
+		if execResult, ok := output.(*sandbox.ExecResult); ok && execResult != nil && execResult.StreamType == "timeout" {
 			c.addMessage(api.MessageSourceAgent, api.MessageTypeError, "\nTimeout reached after 7 seconds\n")
 		}
 		// Add the tool call result to maintain conversation flow

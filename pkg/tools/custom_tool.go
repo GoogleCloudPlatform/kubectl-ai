@@ -18,10 +18,10 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 
 	"github.com/GoogleCloudPlatform/kubectl-ai/gollm"
+	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/sandbox"
 	"mvdan.cc/sh/v3/syntax"
 )
 
@@ -137,12 +137,18 @@ func (t *CustomTool) Run(ctx context.Context, args map[string]any) (any, error) 
 	}
 
 	workDir := ctx.Value(WorkDirKey).(string)
+	env := os.Environ()
 
-	cmd := exec.CommandContext(ctx, lookupBashBin(), "-c", command)
-	cmd.Dir = workDir
-	cmd.Env = os.Environ()
+	// Get executor from context or default to local
+	var executor sandbox.Executor
+	if v := ctx.Value(ExecutorKey); v != nil {
+		executor = v.(sandbox.Executor)
+	} else {
+		executor = sandbox.NewLocalExecutor()
+	}
 
-	return executeCommand(ctx, cmd)
+	// Execute the command
+	return executor.Execute(ctx, command, env, workDir)
 }
 
 // CheckModifiesResource determines if the command modifies resources

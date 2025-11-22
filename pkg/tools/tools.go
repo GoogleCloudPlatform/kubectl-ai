@@ -21,12 +21,14 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/journal"
+	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/sandbox"
 	"github.com/google/uuid"
 	"sigs.k8s.io/yaml"
 )
@@ -36,6 +38,7 @@ type ContextKey string
 const (
 	KubeconfigKey ContextKey = "kubeconfig"
 	WorkDirKey    ContextKey = "work_dir"
+	ExecutorKey   ContextKey = "executor"
 )
 
 func Lookup(name string) Tool {
@@ -151,6 +154,9 @@ type InvokeToolOptions struct {
 
 	// Kubeconfig is the path to the kubeconfig file.
 	Kubeconfig string
+
+	// Executor is the executor for tool execution
+	Executor sandbox.Executor
 }
 
 type ToolRequestEvent struct {
@@ -182,6 +188,9 @@ func (t *ToolCall) InvokeTool(ctx context.Context, opt InvokeToolOptions) (any, 
 
 	ctx = context.WithValue(ctx, KubeconfigKey, opt.Kubeconfig)
 	ctx = context.WithValue(ctx, WorkDirKey, opt.WorkDir)
+	if opt.Executor != nil {
+		ctx = context.WithValue(ctx, ExecutorKey, opt.Executor)
+	}
 
 	response, err := t.tool.Run(ctx, t.arguments)
 
@@ -297,4 +306,39 @@ func (t *CustomTool) IsInteractive(args map[string]any) (bool, error) {
 // Add a method to access the tool
 func (t *ToolCall) GetTool() Tool {
 	return t.tool
+}
+
+// ExpandShellVar expands shell variables and syntax using bash
+func ExpandShellVar(value string) (string, error) {
+	if strings.Contains(value, "~") {
+		if len(value) >= 2 && value[0] == '~' && os.IsPathSeparator(value[1]) {
+			if runtime.GOOS == "windows" {
+				value = filepath.Join(os.Getenv("USERPROFILE"), value[2:])
+			} else {
+				value = filepath.Join(os.Getenv("HOME"), value[2:])
+			}
+		}
+	}
+	return os.ExpandEnv(value), nil
+}
+
+func IsInteractiveCommand(command string) (bool, error) {
+	// Inline isKubectlCommand logic
+	words := strings.Fields(command)
+	if len(words) == 0 {
+		return false, nil
+	}
+	base := filepath.Base(words[0])
+	if base != "kubectl" {
+		return false, nil
+	}
+
+	isExec := strings.Contains(command, " exec ") && strings.Contains(command, " -it")
+	isPortForward := strings.Contains(command, " port-forward ")
+	isEdit := strings.Contains(command, " edit ")
+
+	if isExec || isPortForward || isEdit {
+		return true, fmt.Errorf("interactive mode not supported for kubectl, please use non-interactive commands")
+	}
+	return false, nil
 }
