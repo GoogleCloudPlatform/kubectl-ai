@@ -159,6 +159,21 @@ func (c *Agent) addMessage(source api.MessageSource, messageType api.MessageType
 	return message
 }
 
+func (c *Agent) setTokensConsumed(tokens int64) {
+	c.sessionMu.Lock()
+	defer c.sessionMu.Unlock()
+	c.session.TokensConsumed = tokens
+	c.session.LastModified = time.Now()
+
+	if session, ok := c.session.ChatMessageStore.(*sessions.Session); ok {
+		if meta, err := session.LoadMetadata(); err == nil {
+			meta.TokensConsumed = tokens
+			meta.LastAccessed = c.session.LastModified
+			_ = session.SaveMetadata(meta)
+		}
+	}
+}
+
 // setAgentState updates the agent state and ensures LastModified is updated
 func (c *Agent) setAgentState(newState api.AgentState) {
 	c.sessionMu.Lock()
@@ -204,11 +219,20 @@ func (s *Agent) Init(ctx context.Context) error {
 	}
 
 	if session, ok := s.ChatMessageStore.(*sessions.Session); ok {
-		s.loadSession(session.ID)
+		metadata, err := session.LoadMetadata()
+		if err != nil {
+			return fmt.Errorf("failed to load session metadata: %w", err)
+		}
+		s.session.ID = session.ID
+		s.session.CreatedAt = metadata.CreatedAt
+		s.session.LastModified = metadata.LastAccessed
+		s.session.TokensConsumed = metadata.TokensConsumed
+
 	} else {
 		s.session.ID = uuid.New().String()
 		s.session.CreatedAt = time.Now()
 		s.session.LastModified = time.Now()
+		s.session.TokensConsumed = 0
 	}
 
 	// Create a temporary working directory
@@ -513,6 +537,7 @@ func (c *Agent) Run(ctx context.Context, initialQuery string) error {
 				// accumulator for streamed text
 				var streamedText string
 				var llmError error
+				var usageMetadata any
 
 				for response, err := range stream {
 					if err != nil {
@@ -538,6 +563,10 @@ func (c *Agent) Run(ctx context.Context, initialQuery string) error {
 					}
 
 					candidate := response.Candidates()[0]
+
+					if meta := response.UsageMetadata(); meta != nil {
+						usageMetadata = meta
+					}
 
 					for _, part := range candidate.Parts() {
 						// Check if it's a text response
@@ -566,6 +595,11 @@ func (c *Agent) Run(ctx context.Context, initialQuery string) error {
 				if streamedText != "" {
 					c.addMessage(api.MessageSourceModel, api.MessageTypeText, streamedText)
 				}
+
+				if tokens, ok := gollm.TotalTokens(usageMetadata); ok {
+					c.setTokensConsumed(tokens)
+				}
+
 				// If no function calls to be made, we're done
 				if len(functionCalls) == 0 {
 					log.Info("No function calls to be made, so most likely the task is completed, so we're done.")
