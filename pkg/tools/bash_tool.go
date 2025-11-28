@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/GoogleCloudPlatform/kubectl-ai/gollm"
+	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/sandbox"
 	"k8s.io/klog/v2"
 )
 
@@ -99,8 +100,14 @@ Possible values:
 }
 
 func (t *BashTool) Run(ctx context.Context, args map[string]any) (any, error) {
-	kubeconfig := ctx.Value(KubeconfigKey).(string)
-	workDir := ctx.Value(WorkDirKey).(string)
+	return t.run(ctx, args, false, nil)
+}
+
+func (t *BashTool) RunInSandbox(ctx context.Context, args map[string]any, sandbox *sandbox.Sandbox) (any, error) {
+	return t.run(ctx, args, true, sandbox)
+}
+
+func (t *BashTool) run(ctx context.Context, args map[string]any, useSandbox bool, sb *sandbox.Sandbox) (any, error) {
 	command := args["command"].(string)
 
 	if strings.Contains(command, "kubectl edit") {
@@ -109,6 +116,51 @@ func (t *BashTool) Run(ctx context.Context, args map[string]any) (any, error) {
 	if strings.Contains(command, "kubectl port-forward") {
 		return &ExecResult{Command: command, Error: "port-forwarding is not allowed because assistant is running in an unattended mode, please try some other alternative"}, nil
 	}
+
+	if useSandbox && sb != nil {
+		// Execute in sandbox - pass command directly since sandbox handles shell execution
+		// Split the command into parts for proper execution
+		parts := strings.Fields(command)
+		if len(parts) == 0 {
+			return &ExecResult{
+				Command:  command,
+				Error:    "empty command",
+				ExitCode: 1,
+			}, nil
+		}
+
+		var cmd *sandbox.Cmd
+		if len(parts) == 1 {
+			cmd = sb.Command(parts[0])
+		} else {
+			cmd = sb.Command(parts[0], parts[1:]...)
+		}
+
+		// Use separate buffers for stdout and stderr to match regular execution behavior
+		var stdout bytes.Buffer
+		var stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+
+		results := &ExecResult{
+			Command: command,
+		}
+
+		if err := cmd.Run(); err != nil {
+			results.Error = err.Error()
+			results.ExitCode = 1
+		} else {
+			results.ExitCode = 0
+		}
+
+		results.Stdout = stdout.String()
+		results.Stderr = stderr.String()
+		return results, nil
+	}
+
+	// Execute locally (original implementation)
+	kubeconfig := ctx.Value(KubeconfigKey).(string)
+	workDir := ctx.Value(WorkDirKey).(string)
 
 	var cmd *exec.Cmd
 	if runtime.GOOS == "windows" {

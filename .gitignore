@@ -2,6 +2,7 @@
 ./kubectl-ai
 bin/
 .build/
+tmp/
 
 # Log files
 *.log
@@ -31,5 +32,4 @@ dist/
 # Ignore generated credentials from google-github-actions/auth
 gha-creds-*.json
 
-# air config
 .air.toml

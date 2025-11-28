@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>kubectl-ai</title>
+    <title>k8</title>
     <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -21,14 +21,15 @@
                         'mono': ['JetBrains Mono', 'Menlo', 'Monaco', 'Courier New', 'monospace'],
                     },
                     colors: {
+                        // Emerald-based accent palette
                         'brand': {
-                            50: '#f0f9ff',
-                            100: '#e0f2fe',
-                            500: '#0ea5e9',
-                            600: '#0284c7',
-                            700: '#0369a1',
-                            800: '#075985',
-                            900: '#0c4a6e',
+                            50:  '#ecfdf5',
+                            100: '#d1fae5',
+                            500: '#10a37f',
+                            600: '#0e9775',
+                            700: '#0d8b6b',
+                            800: '#0b7f61',
+                            900: '#0a7357',
                         }
                     },
                     animation: {
@@ -266,17 +267,387 @@
 <body class="bg-gradient-to-br from-slate-50 to-blue-50 font-sans">
     <div id="root"></div>
     <script type="text/babel">
-        const { useState, useEffect, useRef } = React;
+        const { useState, useEffect, useRef, useCallback } = React;
+
+        // Helper to fetch JSON with minimal boilerplate
+        async function fetchJSON(url, opts = {}) {
+            const res = await fetch(url, opts);
+            if (!res.ok) throw new Error(await res.text());
+            return res.json();
+        }
+
+        const formatMessage = (message) => {
+            if (!message) return '';
+            
+            try {
+                marked.setOptions({
+                    breaks: true,
+                    gfm: true,
+                    tables: true,
+                    sanitize: false
+                });
+                
+                const rawHtml = marked.parse(message);
+                const cleanHtml = DOMPurify.sanitize(rawHtml, {
+                    ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'code', 'pre', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li', 'blockquote', 'a', 'img', 'table', 'thead', 'tbody', 'tr', 'th', 'td'],
+                    ALLOWED_ATTR: ['href', 'src', 'alt', 'title', 'class']
+                });
+                
+                return cleanHtml;
+            } catch (error) {
+                console.error('Error formatting message:', error);
+                return message.replace(/\n/g, '<br>');
+            }
+        };
+
+        const getSourceInfo = (source, isDarkMode) => {
+            switch (source) {
+                case 'user': return { 
+                    name: 'You', 
+                    color: isDarkMode ? 'text-gray-200' : 'text-gray-700', 
+                    bg: isDarkMode ? 'bg-gray-700' : 'bg-gray-200', 
+                    avatar: '👤' 
+                };
+                case 'model': 
+                case 'agent': return { 
+                    name: 'k8', 
+                    color: isDarkMode ? 'text-gray-200' : 'text-gray-700', 
+                    bg: isDarkMode ? 'bg-gray-700' : 'bg-gray-200', 
+                    avatar: '🤖' 
+                };
+                default: return { 
+                    name: 'System', 
+                    color: isDarkMode ? 'text-gray-400' : 'text-gray-700', 
+                    bg: isDarkMode ? 'bg-gray-800' : 'bg-gray-50', 
+                    avatar: '⚙️' 
+                };
+            }
+        };
+
+        const InlineVisualization = ({ vizData, isDarkMode, visualizationMode }) => {
+            if (!vizData) return null;
+
+            const [activeTab, setActiveTab] = useState('lite');
+            const liteRef = useRef(null);
+            const proRef = useRef(null);
+
+            const adjustSize = (ref) => {
+                if (!ref?.current) return;
+                try {
+                    const doc = ref.current.contentDocument || ref.current.contentWindow.document;
+                    if (doc && doc.body) {
+                        ref.current.style.height = doc.body.scrollHeight + 'px';
+                        // If the content is wider than the container, allow horizontal scroll within iframe
+                        ref.current.style.width = '100%';
+                    }
+                } catch (_) {
+                    /* Ignore cross-origin adjustments */
+                }
+            };
+
+            const renderIframe = (data, ref) => {
+                if (!data) return null;
+                if (data.loading) {
+                    return (
+                        <div className="flex items-center justify-center h-48">
+                            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-500"></div>
+                        </div>
+                    );
+                }
+                if (data.content) {
+                    return (
+                        <iframe
+                            srcDoc={data.content}
+                            className="w-full border-0 bg-transparent block"
+                            style={{ minHeight: '200px', width: '100%' }}
+                            title="Visualization"
+                            sandbox="allow-scripts allow-forms allow-same-origin"
+                            ref={ref}
+                            onLoad={(e) => {
+                                adjustSize({ current: e.target });
+                                try {
+                                    const doc = e.target.contentDocument || e.target.contentWindow.document;
+                                    doc.body.style.margin = '0';
+                                    doc.body.style.overflow = 'hidden';
+                                } catch (_) {}
+                            }}
+                        ></iframe>
+                    );
+                }
+                return null;
+            };
+
+            // Auto-fit whenever the HTML content becomes available / changes
+            useEffect(() => {
+                if (vizData?.lite?.content && liteRef.current) {
+                    adjustSize(liteRef);
+                }
+                if (vizData?.pro?.content && proRef.current) {
+                    adjustSize(proRef);
+                }
+                // We only care when content changes
+                // eslint-disable-next-line react-hooks/exhaustive-deps
+            }, [vizData?.lite?.content, vizData?.pro?.content]);
+
+            const hasData = vizData.lite || vizData.pro;
+            if (!hasData) return null;
+
+            const hasPro = !!vizData.pro;
+
+            return (
+                <div className="mt-4 border rounded-lg overflow-hidden dark:border-gray-700 bg-white dark:bg-gray-800/50">
+                    {visualizationMode === 'dual' && hasPro && (
+                        <div className="flex-shrink-0 border-b border-gray-200 dark:border-gray-700">
+                            <div className="flex items-center space-x-2 px-2">
+                                <button
+                                    onClick={() => setActiveTab('lite')}
+                                    className={`flex items-center space-x-2 px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
+                                        activeTab === 'lite'
+                                            ? 'border-purple-500 text-purple-600 dark:text-purple-400'
+                                            : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                                    }`}
+                                >
+                                    <span>Flash Lite</span>
+                                    {vizData.lite?.loading && <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-purple-500"></div>}
+                                </button>
+                                <button
+                                    onClick={() => setActiveTab('pro')}
+                                    className={`flex items-center space-x-2 px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
+                                        activeTab === 'pro'
+                                            ? 'border-green-500 text-green-600 dark:text-green-400'
+                                            : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                                    }`}
+                                >
+                                    <span>Flash</span>
+                                    {vizData.pro?.loading && <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-green-500"></div>}
+                                </button>
+                            </div>
+                        </div>
+                    )}
+                    <div className="relative p-2">
+                        {/* Render only the active tab to avoid overlay sizing issues */}
+                        {visualizationMode === 'dual' && hasPro ? (
+                            activeTab === 'lite' ? renderIframe(vizData.lite, liteRef) : renderIframe(vizData.pro, proRef)
+                        ) : (
+                            renderIframe(vizData.lite, liteRef)
+                        )}
+
+                        {/* removed manual fit button */}
+                    </div>
+                </div>
+            );
+        };
+
+        const MessageItem = React.memo(function MessageItem({ 
+            message, index, sessionID, isDarkMode, isOutputExpanded, 
+            toolResponse, vizData, toggleOutput, chooseOption, visualizeMessage, visualizationMode 
+        }) {
+            const sourceInfo = getSourceInfo(message.Source, isDarkMode);
+
+            const MessageWrapper = ({ children, className = "" }) => (
+                <div id={`msg-${index}`} className={"message-enter mb-6 " + className}>
+                    <div className="flex items-start space-x-3"> 
+                        <div className={"flex-shrink-0 w-8 h-8 rounded-full " + sourceInfo.bg + " flex items-center justify-center text-sm"}>
+                            {sourceInfo.avatar}
+                        </div>
+                        <div className="flex-1 min-w-0 group relative">
+                            <div className={"text-sm font-medium " + sourceInfo.color + " mb-1"}>
+                                {sourceInfo.name}
+                            </div>
+                            {children}
+                            {typeof message.Payload === 'string' && message.Payload.trim() !== '' && (
+                                <button 
+                                    onClick={() => visualizeMessage(`${sessionID}-${index}`, message.Payload)}
+                                    className="absolute top-0 right-0 -mt-1 -mr-1 p-1.5 rounded-full bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                    title="Visualize this message"
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+                                        <path d="M10 12.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z" />
+                                        <path fillRule="evenodd" d="M.664 10.59a1.651 1.651 0 0 1 0-1.18l.88-3.838a1.65 1.65 0 0 1 1.624-1.222h14.164a1.65 1.65 0 0 1 1.624 1.222l.88 3.838a1.651 1.651 0 0 1 0 1.18l-.88 3.838a1.65 1.65 0 0 1-1.624-1.222H3.168a1.65 1.65 0 0 1-1.624-1.222L.664 10.59ZM1.65 10a.65.65 0 0 1 .65-.65h15.4a.65.65 0 0 1 .65.65v.005a.65.65 0 0 1-.005.093l-.88 3.838a.65.65 0 0 1-.645.494H3.168a.65.65 0 0 1-.645-.494l-.88-3.838A.65.65 0 0 1 1.65 10Z" clipRule="evenodd" />
+                                    </svg>
+                                </button>
+                            )}
+                            <InlineVisualization vizData={vizData} isDarkMode={isDarkMode} visualizationMode={visualizationMode} />
+                        </div>
+                    </div>
+                </div>
+            );
+
+            switch (message.Type) {
+                case 'text':
+                case 'user-input-request':
+                    return (
+                        <MessageWrapper>
+                            <div className={`prose leading-relaxed ${isDarkMode ? 'text-gray-300' : 'text-gray-700'} ${message.Source==='user' ? (isDarkMode ? 'bg-gray-800' : 'bg-gray-100') + ' rounded-lg p-3' : ''}`}
+                                 dangerouslySetInnerHTML={{ __html: formatMessage(message.Payload) }} />
+                        </MessageWrapper>
+                    );
+                
+                case 'error':
+                    return (
+                        <MessageWrapper className="error-message">
+                            <div className={`${isDarkMode ? 'bg-red-900/30 border-red-800' : 'bg-red-50 border-red-200'} border rounded-lg p-4`}>
+                                <div className="flex items-center">
+                                    <span className={`${isDarkMode ? 'text-red-400' : 'text-red-600'} text-lg mr-2`}>⚠️</span>
+                                    <div className={`${isDarkMode ? 'text-red-300' : 'text-red-800'} font-medium`}>Error</div>
+                                </div>
+                                <div className={`${isDarkMode ? 'text-red-400' : 'text-red-700'} mt-1`}>{message.Payload}</div>
+                            </div>
+                        </MessageWrapper>
+                    );
+                
+                case 'tool-call-request':
+                    const isCompleted = toolResponse !== null;
+                    
+                    // Extract stdout from the tool response
+                    const getOutputText = (response) => {
+                        if (!response || !response.Payload) return '';
+                        
+                        let payload = response.Payload;
+                        if (typeof payload === 'string') {
+                            try {
+                                payload = JSON.parse(payload);
+                            } catch (e) {
+                                return payload; // Return as-is if not valid JSON
+                            }
+                        }
+                        
+                        // Try to extract stdout field, fallback to full payload
+                        if (payload && payload.stdout) {
+                            return payload.stdout;
+                        } else if (payload && typeof payload === 'object') {
+                            return JSON.stringify(payload, null, 2);
+                        } else {
+                            return String(payload);
+                        }
+                    };
+                    
+                    const outputText = isCompleted ? getOutputText(toolResponse) : '';
+                    const hasOutput = outputText && outputText.trim().length > 0;
+                    
+                    return (
+                        <MessageWrapper>
+                            <div className={`border rounded-lg p-4 ${isCompleted ? (isDarkMode ? 'border-emerald-700 bg-emerald-900/20' : 'border-emerald-200 bg-emerald-50') : (isDarkMode ? 'border-blue-700 bg-blue-900/20' : 'border-blue-200 bg-blue-50')}`}>
+                                <div className="flex items-center">
+                                    {isCompleted ? (
+                                        <span className={`${isDarkMode ? 'text-emerald-400' : 'text-emerald-600'} text-lg mr-3`}>✅</span>
+                                    ) : (
+                                        <div className={`animate-spin rounded-full h-4 w-4 border-b-2 ${isDarkMode ? 'border-blue-400' : 'border-blue-600'} mr-3`}></div>
+                                    )}
+                                    <span className={`font-medium ${isCompleted ? (isDarkMode ? 'text-emerald-300' : 'text-emerald-800') : (isDarkMode ? 'text-blue-300' : 'text-blue-800')}`}>
+                                        {isCompleted ? "Completed" : "Executing"}
+                                    </span>
+                                </div>
+                                <div className={`font-mono text-sm mt-2 rounded px-3 py-2 ${isCompleted ? (isDarkMode ? 'text-emerald-300 bg-emerald-900/30' : 'text-emerald-700 bg-emerald-100') : (isDarkMode ? 'text-blue-300 bg-blue-900/30' : 'text-blue-700 bg-blue-100')}`}>
+                                    {message.Payload}
+                                </div>
+                                {isCompleted && hasOutput && (
+                                    <div className={`mt-3 pt-3 border-t ${isDarkMode ? 'border-emerald-700' : 'border-emerald-200'}`}>
+                                        <button 
+                                            onClick={() => toggleOutput(index)}
+                                            className={`flex items-center space-x-2 ${isDarkMode ? 'text-emerald-400 hover:text-emerald-300' : 'text-emerald-600 hover:text-emerald-700'} focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-1 rounded px-2 py-1 transition-colors`}
+                                        >
+                                            <span className="text-xs font-medium">
+                                                {isOutputExpanded ? 'Hide output' : 'Show output'}
+                                            </span>
+                                            <svg 
+                                                className={"w-3 h-3 transition-transform duration-200 " + (isOutputExpanded ? "rotate-180" : "")}
+                                                fill="none" 
+                                                stroke="currentColor" 
+                                                viewBox="0 0 24 24"
+                                            >
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                            </svg>
+                                        </button>
+                                        {isOutputExpanded && (
+                                            <div className={`mt-2 text-sm rounded px-3 py-2 font-mono text-xs overflow-auto max-h-[60vh] ${isDarkMode ? 'text-emerald-300 bg-emerald-900/30' : 'text-emerald-700 bg-emerald-100'}`}>
+                                                <pre className="whitespace-pre-wrap">{outputText}</pre>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        </MessageWrapper>
+                    );
+                
+                case 'tool-call-response':
+                    // Skip rendering individual tool responses since they're shown with the request
+                    return null;
+                
+                case 'user-choice-request':
+                    const choiceRequest = message.Payload;
+                    return (
+                        <MessageWrapper>
+                            <div className={`border rounded-xl p-6 shadow-sm ${isDarkMode ? 'border-amber-700 bg-amber-900/20' : 'border-amber-200 bg-amber-50'}`}>
+                                <div className="flex items-center mb-4">
+                                    <span className={`${isDarkMode ? 'text-amber-400' : 'text-amber-600'} text-lg mr-2`}>🤔</span>
+                                    <span className={`${isDarkMode ? 'text-amber-300' : 'text-amber-800'} font-semibold`}>Decision Required</span>
+                                </div>
+                                <div className={`prose mb-4 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}
+                                     dangerouslySetInnerHTML={{ __html: formatMessage(choiceRequest.Prompt) }} />
+                                <div className="space-y-3">
+                                    {choiceRequest.Options.map((option, idx) => (
+                                        <button
+                                            key={idx}
+                                            onClick={() => chooseOption(idx + 1)}
+                                            className={`choice-button w-full text-left px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-colors ${
+                                                isDarkMode 
+                                                    ? 'bg-gray-800 border-gray-600 hover:border-brand-500 hover:bg-gray-700' 
+                                                    : 'bg-white border-gray-200 hover:border-brand-300 hover:bg-brand-50'
+                                            }`}
+                                        >
+                                            <div className="flex items-center">
+                                                <span className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-sm font-medium mr-3 ${
+                                                    isDarkMode 
+                                                        ? 'bg-brand-900/50 text-brand-300' 
+                                                        : 'bg-brand-100 text-brand-700'
+                                                }`}>
+                                                    {idx + 1}
+                                                </span>
+                                                <span className={`font-medium ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>{option.label}</span>
+                                            </div>
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        </MessageWrapper>
+                    );
+                
+                default:
+                    return (
+                        <MessageWrapper>
+                            <div className={`border rounded-lg p-4 ${isDarkMode ? 'bg-yellow-900/20 border-yellow-700' : 'bg-yellow-50 border-yellow-200'}`}>
+                                <div className={`font-medium mb-2 ${isDarkMode ? 'text-yellow-300' : 'text-yellow-800'}`}>Debug Information</div>
+                                <pre className={`text-xs overflow-x-auto font-mono ${isDarkMode ? 'text-yellow-400' : 'text-yellow-700'}`}>
+                                    {JSON.stringify(message, null, 2)}
+                                </pre>
+                            </div>
+                        </MessageWrapper>
+                    );
+            }
+        });
 
         function App() {
+            const [sessions, setSessions] = useState([]); // list of session metadata
+            const [currentSessionId, setCurrentSessionId] = useState(null);
             const [messages, setMessages] = useState([]);
             const [input, setInput] = useState('');
             const [agentState, setAgentState] = useState('idle');
             const [isConnected, setIsConnected] = useState(false);
             const [expandedOutputs, setExpandedOutputs] = useState(new Set());
+            const [showDrawer, setShowDrawer] = useState(false);
+            const [promptGroups, setPromptGroups] = useState([]);
+            const [visualizationCache, setVisualizationCache] = useState({});
+            const [visualizationMode, setVisualizationMode] = useState(() => {
+                return localStorage.getItem('k8-viz-mode') || 'single';
+            });
+            const [sidebarWidth, setSidebarWidth] = useState(() => {
+                const savedWidth = localStorage.getItem('k8-sidebar-width');
+                return savedWidth ? parseInt(savedWidth, 10) : 260; // Default width
+            });
             const [isDarkMode, setIsDarkMode] = useState(() => {
                 // Check for saved preference first
-                const saved = localStorage.getItem('kubectl-ai-dark-mode');
+                const saved = localStorage.getItem('k8-dark-mode');
                 if (saved !== null) {
                     return JSON.parse(saved);
                 }
@@ -291,6 +662,9 @@
             });
             const messagesEndRef = useRef(null);
             const inputRef = useRef(null);
+            const sidebarRef = useRef(null);
+            const scrollContainerRef = useRef(null);
+            const isAtBottomRef = useRef(true);
 
             // Auto-resize textarea
             useEffect(() => {
@@ -301,20 +675,92 @@
                 }
             }, [input]);
 
-            const toggleOutput = (messageIndex) => {
+            const startResizing = React.useCallback((mouseDownEvent) => {
+                mouseDownEvent.preventDefault();
                 const newExpanded = new Set(expandedOutputs);
-                if (newExpanded.has(messageIndex)) {
+                const isCurrentlyExpanded = newExpanded.has(messageIndex);
+                if (isCurrentlyExpanded) {
                     newExpanded.delete(messageIndex);
                 } else {
                     newExpanded.add(messageIndex);
                 }
                 setExpandedOutputs(newExpanded);
+
+                // If we just expanded, scroll that message into view after state update
+                if (!isCurrentlyExpanded) {
+                    setTimeout(() => {
+                        const el = document.getElementById(`msg-${messageIndex}`);
+                        if (el) {
+                            el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                        }
+                    }, 50); // slight delay to allow DOM to update
+                }
+            }, [expandedOutputs]);
+
+            // Save sidebar width to localStorage whenever it changes
+            useEffect(() => {
+                localStorage.setItem('k8-sidebar-width', sidebarWidth);
+            }, [sidebarWidth]);
+
+            useEffect(() => {
+                localStorage.setItem('k8-viz-mode', visualizationMode);
+            }, [visualizationMode]);
+
+            const scrollToBottom = () => {
+                messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
             };
+
+            useEffect(() => {
+                if (scrollContainerRef.current && isAtBottomRef.current) {
+                    scrollToBottom();
+                }
+            }, [messages]);
+
+            useEffect(() => {
+                const scrollContainer = scrollContainerRef.current;
+                if (!scrollContainer) return;
+
+                const handleScroll = () => {
+                    const scrollThreshold = 100; // pixels
+                    const atBottom = (scrollContainer.scrollHeight - scrollContainer.scrollTop - scrollContainer.clientHeight) <= scrollThreshold;
+                    isAtBottomRef.current = atBottom;
+                };
+
+                scrollContainer.addEventListener('scroll', handleScroll);
+                const resizeObserver = new ResizeObserver(handleScroll);
+                resizeObserver.observe(scrollContainer);
+
+                return () => {
+                    scrollContainer.removeEventListener('scroll', handleScroll);
+                    resizeObserver.disconnect();
+                };
+            }, []);
+
+            const toggleOutput = useCallback((messageIndex) => {
+                const newExpanded = new Set(expandedOutputs);
+                const isCurrentlyExpanded = newExpanded.has(messageIndex);
+                if (isCurrentlyExpanded) {
+                    newExpanded.delete(messageIndex);
+                } else {
+                    newExpanded.add(messageIndex);
+                }
+                setExpandedOutputs(newExpanded);
+
+                // If we just expanded, scroll that message into view after state update
+                if (!isCurrentlyExpanded) {
+                    setTimeout(() => {
+                        const el = document.getElementById(`msg-${messageIndex}`);
+                        if (el) {
+                            el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                        }
+                    }, 50); // slight delay to allow DOM to update
+                }
+            }, [expandedOutputs]);
 
             const toggleDarkMode = () => {
                 const newDarkMode = !isDarkMode;
                 setIsDarkMode(newDarkMode);
-                localStorage.setItem('kubectl-ai-dark-mode', JSON.stringify(newDarkMode));
+                localStorage.setItem('k8-dark-mode', JSON.stringify(newDarkMode));
             };
 
             // Apply dark mode to document body
@@ -332,7 +778,7 @@
                 
                 const handleThemeChange = (e) => {
                     // Only auto-update if user hasn't manually set a preference
-                    const hasManualPreference = localStorage.getItem('kubectl-ai-dark-mode') !== null;
+                    const hasManualPreference = localStorage.getItem('k8-dark-mode') !== null;
                     if (!hasManualPreference) {
                         setIsDarkMode(e.matches);
                     }
@@ -347,20 +793,38 @@
                 };
             }, []);
 
-            const scrollToBottom = () => {
-                messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-            };
+            // parse session param from URL
+            const urlParams = new URLSearchParams(window.location.search);
+            const sessionFromURL = urlParams.get('session');
 
+            // Load session list on mount
             useEffect(() => {
-                scrollToBottom();
-            }, [messages]);
+                fetchSessions();
+            }, []);
 
+            async function fetchSessions() {
+                try {
+                    const data = await fetchJSON('/api/sessions');
+                    setSessions(data);
+                    if (sessionFromURL && data.some(s=>s.ID===sessionFromURL)) {
+                        setCurrentSessionId(sessionFromURL);
+                    } else if (!currentSessionId && data.length > 0) {
+                        setCurrentSessionId(data[0].ID);
+                    }
+                } catch (err) {
+                    console.error('Error fetching sessions', err);
+                }
+            }
+
+            // SSE connection handling per-session
             useEffect(() => {
-                const eventSource = new EventSource('/messages-stream');
+                if (!currentSessionId) return;
+
+                const eventSource = new EventSource(`/api/sessions/${currentSessionId}/stream`);
                 
                 eventSource.onopen = () => {
                     setIsConnected(true);
-                    console.log('Connected to kubectl-ai');
+                    console.log('Connected to k8');
                 };
 
                 eventSource.onmessage = (event) => {
@@ -381,7 +845,7 @@
                 return () => {
                     eventSource.close();
                 };
-            }, []);
+            }, [currentSessionId]);
 
             useEffect(() => {
                 const canSendMessage = agentState === 'idle' || agentState === 'done' || agentState === 'waiting-for-input';
@@ -397,7 +861,7 @@
                 if (!message.trim()) return;
 
                 try {
-                    const response = await fetch('/send-message', {
+                    const response = await fetch(`/api/sessions/${currentSessionId}/send-message`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                         body: 'q=' + encodeURIComponent(message)
@@ -411,9 +875,10 @@
                 }
             };
 
-            const chooseOption = async (optionIndex) => {
+            const chooseOption = useCallback(async (optionIndex) => {
+                if (!currentSessionId) return;
                 try {
-                    await fetch('/choose-option', {
+                    await fetch(`/api/sessions/${currentSessionId}/choose-option`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                         body: 'choice=' + encodeURIComponent(optionIndex)
@@ -421,7 +886,7 @@
                 } catch (error) {
                     console.error('Error choosing option:', error);
                 }
-            };
+            }, [currentSessionId]);
 
             const handleSubmit = (e) => {
                 e.preventDefault();
@@ -443,247 +908,79 @@
                 }
             };
 
-            const formatMessage = (message) => {
-                if (!message) return '';
-                
-                try {
-                    marked.setOptions({
-                        breaks: true,
-                        gfm: true,
-                        tables: true,
-                        sanitize: false
-                    });
-                    
-                    const rawHtml = marked.parse(message);
-                    const cleanHtml = DOMPurify.sanitize(rawHtml, {
-                        ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'code', 'pre', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li', 'blockquote', 'a', 'img', 'table', 'thead', 'tbody', 'tr', 'th', 'td'],
-                        ALLOWED_ATTR: ['href', 'src', 'alt', 'title', 'class']
-                    });
-                    
-                    return cleanHtml;
-                } catch (error) {
-                    console.error('Error formatting message:', error);
-                    return message.replace(/\n/g, '<br>');
+            const visualizeMessage = useCallback(async (cacheKey, messageContent) => {
+                if (typeof messageContent !== 'string' || !messageContent) {
+                    alert('No message content to visualize.');
+                    return;
                 }
-            };
 
-            const renderMessage = (message, index) => {
-                const getSourceInfo = (source) => {
-                    switch (source) {
-                        case 'user': return { 
-                            name: 'You', 
-                            color: isDarkMode ? 'text-blue-200' : 'text-blue-700', 
-                            bg: isDarkMode ? 'bg-blue-800/40' : 'bg-blue-50', 
-                            avatar: '👤' 
+                setVisualizationCache(prev => ({
+                    ...prev,
+                    [cacheKey]: {
+                        ...prev[cacheKey],
+                        lite: { loading: true, content: prev[cacheKey]?.lite?.content || null },
+                        pro: visualizationMode === 'dual' ? { loading: true, content: prev[cacheKey]?.pro?.content || null } : prev[cacheKey]?.pro
+                    }
+                }));
+
+                const fetchVisualization = async (model, modelKey) => {
+                    try {
+                        const response = await fetch(`/api/visualize`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ description: messageContent, model: model })
+                        });
+                        const html = await response.text();
+                        
+                        const newContent = {
+                            loading: false,
+                            content: response.ok ? html : `<div class="p-4 text-red-500 dark:text-red-400">Error: ${html}</div>`
                         };
-                        case 'model': return { 
-                            name: 'AI Assistant', 
-                            color: isDarkMode ? 'text-emerald-400' : 'text-emerald-700', 
-                            bg: isDarkMode ? 'bg-emerald-900/30' : 'bg-emerald-50', 
-                            avatar: '🤖' 
+
+                        setVisualizationCache(prev => ({
+                            ...prev,
+                            [cacheKey]: {
+                                ...prev[cacheKey],
+                                [modelKey]: newContent
+                            }
+                        }));
+
+                    } catch (error) {
+                        console.error(`Error visualizing with ${model}:`, error);
+                        const errorContent = {
+                            loading: false,
+                            content: `<div class="p-4 text-red-500 dark:text-red-400">A network error occurred.</div>`
                         };
-                        case 'agent': return { 
-                            name: 'AI Assistant', 
-                            color: isDarkMode ? 'text-emerald-400' : 'text-emerald-700', 
-                            bg: isDarkMode ? 'bg-emerald-900/30' : 'bg-emerald-50', 
-                            avatar: '🤖' 
-                        };
-                        default: return { 
-                            name: 'System', 
-                            color: isDarkMode ? 'text-gray-400' : 'text-gray-700', 
-                            bg: isDarkMode ? 'bg-gray-800' : 'bg-gray-50', 
-                            avatar: '⚙️' 
-                        };
+                        setVisualizationCache(prev => ({
+                            ...prev,
+                            [cacheKey]: {
+                                ...prev[cacheKey],
+                                [modelKey]: errorContent
+                            }
+                        }));
                     }
                 };
 
-                const sourceInfo = getSourceInfo(message.Source);
-
-                // Helper function to find the corresponding tool response
-                const findToolResponse = (requestIndex) => {
-                    for (let i = requestIndex + 1; i < messages.length; i++) {
-                        if (messages[i].Type === 'tool-call-response') {
-                            return messages[i];
-                        }
-                        // Stop looking if we hit another request or different message type
-                        if (messages[i].Type === 'tool-call-request' || messages[i].Type === 'text') {
-                            break;
-                        }
-                    }
-                    return null;
-                };
-
-                const MessageWrapper = ({ children, className = "" }) => (
-                    <div className={"message-enter mb-6 " + className}>
-                        <div className="flex items-start space-x-3">
-                            <div className={"flex-shrink-0 w-8 h-8 rounded-full " + sourceInfo.bg + " flex items-center justify-center text-sm"}>
-                                {sourceInfo.avatar}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                                <div className={"text-sm font-medium " + sourceInfo.color + " mb-1"}>
-                                    {sourceInfo.name}
-                                </div>
-                                {children}
-                            </div>
-                        </div>
-                    </div>
-                );
-
-                switch (message.Type) {
-                    case 'text':
-                    case 'user-input-request':
-                        return (
-                            <MessageWrapper key={index}>
-                                <div className={`prose leading-relaxed ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}
-                                     dangerouslySetInnerHTML={{ __html: formatMessage(message.Payload) }} />
-                            </MessageWrapper>
-                        );
-                    
-                    case 'error':
-                        return (
-                            <MessageWrapper key={index} className="error-message">
-                                <div className={`${isDarkMode ? 'bg-red-900/30 border-red-800' : 'bg-red-50 border-red-200'} border rounded-lg p-4`}>
-                                    <div className="flex items-center">
-                                        <span className={`${isDarkMode ? 'text-red-400' : 'text-red-600'} text-lg mr-2`}>⚠️</span>
-                                        <div className={`${isDarkMode ? 'text-red-300' : 'text-red-800'} font-medium`}>Error</div>
-                                    </div>
-                                    <div className={`${isDarkMode ? 'text-red-400' : 'text-red-700'} mt-1`}>{message.Payload}</div>
-                                </div>
-                            </MessageWrapper>
-                        );
-                    
-                    case 'tool-call-request':
-                        const toolResponse = findToolResponse(index);
-                        const isCompleted = toolResponse !== null;
-                        const isOutputExpanded = expandedOutputs.has(index);
-                        
-                        // Extract stdout from the tool response
-                        const getOutputText = (response) => {
-                            if (!response || !response.Payload) return '';
-                            
-                            let payload = response.Payload;
-                            if (typeof payload === 'string') {
-                                try {
-                                    payload = JSON.parse(payload);
-                                } catch (e) {
-                                    return payload; // Return as-is if not valid JSON
-                                }
-                            }
-                            
-                            // Try to extract stdout field, fallback to full payload
-                            if (payload && payload.stdout) {
-                                return payload.stdout;
-                            } else if (payload && typeof payload === 'object') {
-                                return JSON.stringify(payload, null, 2);
-                            } else {
-                                return String(payload);
-                            }
-                        };
-                        
-                        const outputText = isCompleted ? getOutputText(toolResponse) : '';
-                        const hasOutput = outputText && outputText.trim().length > 0;
-                        
-                        return (
-                            <MessageWrapper key={index}>
-                                <div className={`border rounded-lg p-4 ${isCompleted ? (isDarkMode ? 'border-emerald-700 bg-emerald-900/20' : 'border-emerald-200 bg-emerald-50') : (isDarkMode ? 'border-blue-700 bg-blue-900/20' : 'border-blue-200 bg-blue-50')}`}>
-                                    <div className="flex items-center">
-                                        {isCompleted ? (
-                                            <span className={`${isDarkMode ? 'text-emerald-400' : 'text-emerald-600'} text-lg mr-3`}>✅</span>
-                                        ) : (
-                                            <div className={`animate-spin rounded-full h-4 w-4 border-b-2 ${isDarkMode ? 'border-blue-400' : 'border-blue-600'} mr-3`}></div>
-                                        )}
-                                        <span className={`font-medium ${isCompleted ? (isDarkMode ? 'text-emerald-300' : 'text-emerald-800') : (isDarkMode ? 'text-blue-300' : 'text-blue-800')}`}>
-                                            {isCompleted ? "Completed" : "Executing"}
-                                        </span>
-                                    </div>
-                                    <div className={`font-mono text-sm mt-2 rounded px-3 py-2 ${isCompleted ? (isDarkMode ? 'text-emerald-300 bg-emerald-900/30' : 'text-emerald-700 bg-emerald-100') : (isDarkMode ? 'text-blue-300 bg-blue-900/30' : 'text-blue-700 bg-blue-100')}`}>
-                                        {message.Payload}
-                                    </div>
-                                    {isCompleted && hasOutput && (
-                                        <div className={`mt-3 pt-3 border-t ${isDarkMode ? 'border-emerald-700' : 'border-emerald-200'}`}>
-                                            <button 
-                                                onClick={() => toggleOutput(index)}
-                                                className={`flex items-center space-x-2 ${isDarkMode ? 'text-emerald-400 hover:text-emerald-300' : 'text-emerald-600 hover:text-emerald-700'} focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-1 rounded px-2 py-1 transition-colors`}
-                                            >
-                                                <span className="text-xs font-medium">
-                                                    {isOutputExpanded ? 'Hide output' : 'Show output'}
-                                                </span>
-                                                <svg 
-                                                    className={"w-3 h-3 transition-transform duration-200 " + (isOutputExpanded ? "rotate-180" : "")}
-                                                    fill="none" 
-                                                    stroke="currentColor" 
-                                                    viewBox="0 0 24 24"
-                                                >
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                                                </svg>
-                                            </button>
-                                            {isOutputExpanded && (
-                                                <div className={`mt-2 text-sm rounded px-3 py-2 font-mono text-xs overflow-x-auto max-h-96 overflow-y-auto ${isDarkMode ? 'text-emerald-300 bg-emerald-900/30' : 'text-emerald-700 bg-emerald-100'}`}>
-                                                    <pre className="whitespace-pre-wrap">{outputText}</pre>
-                                                </div>
-                                            )}
-                                        </div>
-                                    )}
-                                </div>
-                            </MessageWrapper>
-                        );
-                    
-                    case 'tool-call-response':
-                        // Skip rendering individual tool responses since they're shown with the request
-                        return null;
-                    
-                    case 'user-choice-request':
-                        const choiceRequest = message.Payload;
-                        return (
-                            <MessageWrapper key={index}>
-                                <div className={`border rounded-xl p-6 shadow-sm ${isDarkMode ? 'border-amber-700 bg-amber-900/20' : 'border-amber-200 bg-amber-50'}`}>
-                                    <div className="flex items-center mb-4">
-                                        <span className={`${isDarkMode ? 'text-amber-400' : 'text-amber-600'} text-lg mr-2`}>🤔</span>
-                                        <span className={`${isDarkMode ? 'text-amber-300' : 'text-amber-800'} font-semibold`}>Decision Required</span>
-                                    </div>
-                                    <div className={`prose mb-4 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}
-                                         dangerouslySetInnerHTML={{ __html: formatMessage(choiceRequest.Prompt) }} />
-                                    <div className="space-y-3">
-                                        {choiceRequest.Options.map((option, idx) => (
-                                            <button
-                                                key={idx}
-                                                onClick={() => chooseOption(idx + 1)}
-                                                className={`choice-button w-full text-left px-4 py-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition-colors ${
-                                                    isDarkMode 
-                                                        ? 'bg-gray-800 border-gray-600 hover:border-brand-500 hover:bg-gray-700' 
-                                                        : 'bg-white border-gray-200 hover:border-brand-300 hover:bg-brand-50'
-                                                }`}
-                                            >
-                                                <div className="flex items-center">
-                                                    <span className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-sm font-medium mr-3 ${
-                                                        isDarkMode 
-                                                            ? 'bg-brand-900/50 text-brand-300' 
-                                                            : 'bg-brand-100 text-brand-700'
-                                                    }`}>
-                                                        {idx + 1}
-                                                    </span>
-                                                    <span className={`font-medium ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>{option.label}</span>
-                                                </div>
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
-                            </MessageWrapper>
-                        );
-                    
-                    default:
-                        return (
-                            <MessageWrapper key={index}>
-                                <div className={`border rounded-lg p-4 ${isDarkMode ? 'bg-yellow-900/20 border-yellow-700' : 'bg-yellow-50 border-yellow-200'}`}>
-                                    <div className={`font-medium mb-2 ${isDarkMode ? 'text-yellow-300' : 'text-yellow-800'}`}>Debug Information</div>
-                                    <pre className={`text-xs overflow-x-auto font-mono ${isDarkMode ? 'text-yellow-400' : 'text-yellow-700'}`}>
-                                        {JSON.stringify(message, null, 2)}
-                                    </pre>
-                                </div>
-                            </MessageWrapper>
-                        );
+                fetchVisualization('gemini-2.5-flash-lite', 'lite');
+                if (visualizationMode === 'dual') {
+                    fetchVisualization('gemini-2.5-flash', 'pro');
                 }
-            };
+            }, [visualizationMode]);
+
+
+            // Helper function to find the corresponding tool response
+            const findToolResponse = useCallback((requestIndex) => {
+                for (let i = requestIndex + 1; i < messages.length; i++) {
+                    if (messages[i].Type === 'tool-call-response') {
+                        return messages[i];
+                    }
+                    // Stop looking if we hit another request or different message type
+                    if (messages[i].Type === 'tool-call-request' || messages[i].Type === 'text') {
+                        break;
+                    }
+                }
+                return null;
+            }, [messages]);
 
             const canSendMessage = agentState === 'idle' || agentState === 'done' || agentState === 'waiting-for-input';
             const isWaitingForChoice = agentState === 'waiting-for-input' && messages.length > 0 && 
@@ -707,7 +1004,7 @@
                         </div>
                         <div className="flex-1 min-w-0">
                             <div className={`text-sm font-medium mb-1 ${isDarkMode ? 'text-emerald-400' : 'text-emerald-700'}`}>
-                                AI Assistant
+                                k8
                             </div>
                             <div className="flex items-center space-x-2">
                                 <div className="flex items-center space-x-1">
@@ -738,18 +1035,93 @@
 
             const statusInfo = getAgentStatusInfo();
 
+            const createNewSession = async (name, query) => {
+                try {
+                    const payload = {};
+                    if (name) {
+                        payload.name = name;
+                    }
+                    if (query) {
+                        payload.query = query;
+                    }
+
+                    const data = await fetchJSON('/api/sessions', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload),
+                    });
+
+                    await fetchSessions(); // refresh list
+                    setCurrentSessionId(data.id);
+                } catch (err) {
+                    console.error('Error creating session', err);
+                }
+            };
+
+            async function toggleDrawer() {
+                if (!showDrawer && promptGroups.length === 0) {
+                    try {
+                        const data = await fetchJSON('/api/prompts');
+                        setPromptGroups(data);
+                    } catch(err) { console.error('fetch prompts', err);}    
+                }
+                setShowDrawer(!showDrawer);
+            }
+
+            const renameSessionPrompt = async (session) => {
+                const newName = prompt('Enter new session name:', session.Name || 'New Session');
+                if (newName && newName.trim() !== '') {
+                    try {
+                        await fetch(`/api/sessions/${session.ID}/rename`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                            body: 'name=' + encodeURIComponent(newName.trim())
+                        });
+                        await fetchSessions(); // refresh list
+                    } catch (err) {
+                        console.error('Error renaming session:', err);
+                        alert('Failed to rename session.');
+                    }
+                }
+            };
+
+            const deleteSession = async (session) => {
+                if (confirm(`Are you sure you want to delete session "${session.Name || 'session-'+session.ID.slice(0,8)}"?`)) {
+                    try {
+                        await fetch(`/api/sessions/${session.ID}`, { method: 'DELETE' });
+                        await fetchSessions(); // refresh list
+                        if (currentSessionId === session.ID) {
+                            setCurrentSessionId(null);
+                        }
+                    } catch (err) {
+                        console.error('Error deleting session:', err);
+                        alert('Failed to delete session.');
+                    }
+                }
+            };
+
+            const shareSession = (session) => {
+                const shareUrl = `${window.location.origin}?session=${session.ID}`;
+                navigator.clipboard.writeText(shareUrl).then(()=>{
+                    alert('Share link copied to clipboard');
+                }).catch(()=>{
+                    prompt('Copy session link:', shareUrl);
+                });
+            };
+
             return (
-                <div className={`flex flex-col h-screen ${isDarkMode ? 'bg-gradient-to-br from-slate-900 to-gray-900' : 'bg-gradient-to-br from-slate-50 to-blue-50'}`}>
+                <>
+                <div className={`flex flex-col h-screen ${isDarkMode ? 'bg-gray-900 text-gray-200' : 'bg-white text-gray-900'}`}>
                     {/* Header */}
-                    <div className={`${isDarkMode ? 'bg-gray-800/80' : 'bg-white/80'} backdrop-blur-sm ${isDarkMode ? 'border-gray-700' : 'border-gray-200'} border-b px-6 py-4 shadow-sm`}>
+                    <div className={`${isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-100'} border-b px-6 py-4 flex-shrink-0`}>
                         <div className="flex items-center justify-between">
                             <div className="flex items-center space-x-3">
                                 <div className="w-8 h-8 bg-gradient-to-br from-brand-500 to-brand-600 rounded-lg flex items-center justify-center">
                                     <span className="text-white font-bold text-sm">K8</span>
                                 </div>
                                 <div>
-                                    <h1 className={`text-xl font-bold ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>kubectl-ai</h1>
-                                    <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>Your intelligent Kubernetes assistant</p>
+                                    <h1 className={`text-xl font-bold ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>k8</h1>
+                                    <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>Intelligent interface to your k8s</p>
                                 </div>
                             </div>
                             <div className="flex items-center space-x-4">
@@ -785,48 +1157,72 @@
                                         </svg>
                                     )}
                                 </button>
+                                {/* Visualization Mode Toggle */}
+                                <div className="relative">
+                                    <select
+                                        value={visualizationMode}
+                                        onChange={(e) => setVisualizationMode(e.target.value)}
+                                        className={`p-2 rounded-lg appearance-none transition-colors duration-200 text-sm ${
+                                            isDarkMode 
+                                                ? 'bg-gray-700 hover:bg-gray-600 text-white' 
+                                                : 'bg-gray-100 hover:bg-gray-200 text-gray-800'
+                                        }`}
+                                        title="Select visualization mode"
+                                    >
+                                        <option value="single">Single Viz</option>
+                                        <option value="dual">Dual Viz</option>
+                                    </select>
+                                    <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-700 dark:text-gray-400">
+                                        <svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
                     
-                    {/* Messages Area */}
-                    <div className="flex-1 overflow-y-auto px-6 py-6 custom-scrollbar">
-                        <div className="max-w-4xl mx-auto">
-                            {messages.length === 0 ? (
-                                <div className="text-center py-16">
-                                    <div className="w-16 h-16 bg-gradient-to-br from-brand-500 to-brand-600 rounded-2xl flex items-center justify-center mx-auto mb-4">
-                                        <span className="text-white text-2xl">🚀</span>
+                    <div className="flex flex-1 min-h-0">
+                        {/* Sidebar */}
+                        <div
+                            ref={sidebarRef}
+                            style={{ width: `${sidebarWidth}px`, flexShrink: 0 }}
+                            className={`${isDarkMode ? 'bg-gray-900 border-gray-700' : 'bg-white border-gray-100'} border-r flex flex-col`}
+                        > 
+                            <div className="flex items-center justify-between px-4 py-3 border-b border-transparent">
+                                <span className={`${isDarkMode ? 'text-white' : 'text-gray-800'} font-semibold`}>Sessions</span>
+                                <button onClick={() => {
+                                    const name = prompt('Enter new session name (optional):');
+                                    if (name !== null) {
+                                        createNewSession(name);
+                                    }
+                                }} className="text-sm px-2 py-1 rounded bg-brand-500 hover:bg-brand-600 text-white">+ New</button>
+                            </div>
+                            <div className="flex-1 overflow-y-auto custom-scrollbar">
+                                {sessions.map((s) => (
+                                    <div key={s.ID} className={`px-2 py-1 mx-2 my-1 rounded-md ${currentSessionId===s.ID ? (isDarkMode ? 'bg-gray-800' : 'bg-brand-100') : 'hover:bg-slate-200 dark:hover:bg-slate-800'}`}> 
+                                        <div className="flex items-center">
+                                            <button onClick={() => setCurrentSessionId(s.ID)} className="flex-1 text-left p-1">
+                                                <div className={`${isDarkMode ? 'text-gray-200' : 'text-gray-800'} truncate`}>{s.Name || ('session-'+s.ID.slice(0,8))}</div>
+                                                <div className="text-xs text-gray-500 truncate">{s.LastMessage || ''}</div>
+                                            </button>
+                                            <button onClick={() => renameSessionPrompt(s)} className="ml-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 p-1 rounded-md" title="Rename">
+                                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10" />
+                                                </svg>
+                                            </button>
+                                            <button onClick={() => deleteSession(s)} className="ml-1 text-gray-400 hover:text-red-600 dark:hover:text-red-400 p-1 rounded-md" title="Delete">
+                                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.134-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.067-2.09.92-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+                                                </svg>
+                                            </button>
+                                            <button onClick={() => shareSession(s)} className="ml-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 p-1 rounded-md" title="Share">
+                                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244" />
+                                                </svg>
+                                            </button>
+                                        </div>
                                     </div>
-                                    <h2 className={`text-2xl font-bold ${isDarkMode ? 'text-white' : 'text-gray-900'} mb-2`}>Welcome to kubectl-ai</h2>
-                                    <p className={`${isDarkMode ? 'text-gray-300' : 'text-gray-600'} mb-8 max-w-md mx-auto`}>
-                                        I'm your intelligent Kubernetes assistant. I can help you manage deployments, 
-                                        troubleshoot issues, and answer questions about your cluster.
-                                    </p>
-                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-2xl mx-auto">
-                                        <div className={`${isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} rounded-lg p-4 shadow-sm border`}>
-                                            <div className="text-2xl mb-2">⚙️</div>
-                                            <div className={`font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Manage Resources</div>
-                                            <div className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>Scale deployments, update configs</div>
-                                        </div>
-                                        <div className={`${isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} rounded-lg p-4 shadow-sm border`}>
-                                            <div className="text-2xl mb-2">🔍</div>
-                                            <div className={`font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Debug Issues</div>
-                                            <div className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>Find and fix problems quickly</div>
-                                        </div>
-                                        <div className={`${isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} rounded-lg p-4 shadow-sm border`}>
-                                            <div className="text-2xl mb-2">📊</div>
-                                            <div className={`font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Get Insights</div>
-                                            <div className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>Monitor and analyze your cluster</div>
-                                        </div>
-                                    </div>
-                                </div>
-                            ) : (
-                                <>
-                                    {messages.map((message, index) => renderMessage(message, index))}
-                                    {showTypingIndicator && <TypingIndicator />}
-                                </>
-                            )}
-                            <div ref={messagesEndRef} />
+                                ))}
+                            </div>
                         </div>
                     </div>
                     
@@ -874,10 +1270,52 @@
                         </div>
                     </div>
                 </div>
+
+                {/* Prompt Drawer */}
+                {showDrawer && (
+                    <div 
+                        className="fixed inset-0 bg-black/40 z-40"
+                        onClick={toggleDrawer}
+                    ></div>
+                )}
+                <div className={`fixed bottom-20 right-4 w-11/12 sm:w-96 max-h-[60vh] bg-white dark:bg-gray-900 shadow-2xl rounded-2xl transform transition-transform duration-300 ease-in-out flex flex-col z-50 ${showDrawer ? 'translate-y-0 visible' : 'translate-y-full invisible'}`}>
+                    <div className="flex items-center justify-between px-4 py-3 border-b dark:border-gray-700 flex-shrink-0">
+                        <span className={`font-semibold ${isDarkMode? 'text-white':'text-gray-800'}`}>Prompt Library</span>
+                        <button onClick={toggleDrawer} className={`p-1 rounded-full ${isDarkMode? 'text-gray-400 hover:bg-gray-700':'text-gray-500 hover:bg-gray-200'}`}>
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+                            </svg>
+                        </button>
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
+                        {(promptGroups || []).map(pg => (
+                            <details key={pg.group} className="mb-3" open>
+                                <summary className="cursor-pointer font-semibold mb-2 text-brand-600 dark:text-brand-400">{pg.group}</summary>
+                                <div className="mt-2 space-y-2">
+                                    {(pg.items || []).map((it, idx) => (
+                                        <button key={`${pg.group}-${idx}`} onClick={(e) => {
+                                            if (e.shiftKey) {
+                                                createNewSession(it, it);
+                                            } else {
+                                                setInput(it);
+                                                inputRef.current.focus();
+                                            }
+                                            setShowDrawer(false);
+                                        }} className="block w-full text-left px-3 py-2 bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg cursor-pointer">
+                                            {it}
+                                        </button>
+                                    ))}
+                                </div>
+                            </details>
+                        ))}
+                    </div>
+                </div>
+                </>
             );
         }
 
-        ReactDOM.render(<App />, document.getElementById('root'));
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
     </script>
 </body>
 </html> 
