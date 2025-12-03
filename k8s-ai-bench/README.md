@@ -161,6 +161,23 @@ The `analyze-evals.sh` script analyzes the results from the previous run.
 
 The results will be saved to `.build/k8s-ai-bench.md` and `.build/k8s-ai-bench.json`.
 
+### Visualization
+
+The `site` directory contains a static website for visualizing the benchmark results.
+
+To view the visualization locally:
+
+1.  Ensure you have a `combined_results.jsonl` file in the `site` directory. You can generate this by running the `analyze` command with the `jsonl` output format:
+    ```sh
+    ./k8s-ai-bench analyze --input-dir .build/k8s-ai-bench --output-format jsonl --results-filepath site/combined_results.jsonl
+    ```
+2.  Serve the site locally (browsers block `file://` access to local files for security reasons):
+    ```sh
+    cd site
+    python3 -m http.server
+    ```
+3.  Open [http://localhost:8000](http://localhost:8000) in your browser.
+
 ### Contributions
 
 We're open to contributions in k8s-ai-bench, check out the [contributions guide.](contributing.md)
