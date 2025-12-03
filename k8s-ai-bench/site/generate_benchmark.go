@@ -1,10 +1,26 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-	<meta charset="UTF-8">
-	<meta name="viewport" content="width=device-width, initial-scale=1.0">
-	<title>About</title>
-	<style>
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+)
+
+// --- CONFIGURATION ---
+const (
+	DataFilename = "combined_results.jsonl"
+	RepoTaskURL  = "https://github.com/GoogleCloudPlatform/kubectl-ai/tree/main/k8s-ai-bench/tasks/"
+	RepoBaseURL  = "https://github.com/GoogleCloudPlatform/kubectl-ai/tree/main/k8s-ai-bench"
+)
+
+// Model Keywords for categorization
+var ModelKeywords = map[string]string{
+	"gemini": "Proprietary",
+	// Add others here
+}
+
+// --- 1. CSS ---
+const Styles = `
 	body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 0; background-color: #f6f8fa; color: #24292e; display: flex; flex-direction: column; min-height: 100vh; }
 	.navbar { background-color: #24292e; padding: 1rem 2rem; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
 	.nav-brand { color: white; font-weight: bold; font-size: 1.2rem; text-decoration: none; margin-right: 2rem; }
@@ -55,11 +71,15 @@
 	.task-link:hover { color: #0969da; text-decoration: underline; }
 	.back-link { display: inline-block; margin-bottom: 1rem; color: #0969da; text-decoration: none; font-weight: 600; }
 	.back-link:hover { text-decoration: underline; }
-</style>
-	
+`
+
+// --- 2. JAVASCRIPT ---
+func getSharedJS() string {
+	keywordsJSON, _ := json.Marshal(ModelKeywords)
+	return fmt.Sprintf(`
 	<script>
-		const DATA_URL = "combined_results.jsonl";
-		const MODEL_KEYWORDS = {"gemini":"Proprietary"};
+		const DATA_URL = "%s";
+		const MODEL_KEYWORDS = %s;
 
 		async function loadData() {
 			try {
@@ -219,11 +239,11 @@
 		function getHue(percentage) { return (percentage / 100) * 120; }
 		
 		function createMiniBar(val, hue) {
-			return '<div style="height: 6px; width: 100%; background: #eee; border-radius: 3px; margin-top: 5px; overflow: hidden;"><div style="height: 100%; width: '+val+'%; background-color: hsla('+hue+', 85%, 40%, 1.0);"></div></div>';
+			return '<div style="height: 6px; width: 100%%; background: #eee; border-radius: 3px; margin-top: 5px; overflow: hidden;"><div style="height: 100%%; width: '+val+'%%; background-color: hsla('+hue+', 85%%, 40%%, 1.0);"></div></div>';
 		}
 		
 		function createBar(val, hue) {
-			return '<div class="score-bar-wrapper"><div class="bar-segment" style="width: '+val+'%; background-color: hsla('+hue+', 85%, 40%, 1.0);"></div></div>';
+			return '<div class="score-bar-wrapper"><div class="bar-segment" style="width: '+val+'%%; background-color: hsla('+hue+', 85%%, 40%%, 1.0);"></div></div>';
 		}
 		
 		function sortTable(table, colIndex) {
@@ -237,7 +257,7 @@
 				const bTxt = b.children[colIndex].innerText.trim();
 				const aNum = parseFloat(aTxt.replace(/[^0-9.-]+/g,""));
 				const bNum = parseFloat(bTxt.replace(/[^0-9.-]+/g,""));
-				if (!isNaN(aNum) && !isNaN(bNum) && (aTxt.includes('%') || aTxt.match(/^\\d/))) return (aNum - bNum) * dir;
+				if (!isNaN(aNum) && !isNaN(bNum) && (aTxt.includes('%%') || aTxt.match(/^\\d/))) return (aNum - bNum) * dir;
 				return aTxt.localeCompare(bTxt, undefined, {numeric: true}) * dir;
 			});
 			tbody.innerHTML = '';
@@ -254,20 +274,274 @@
 			});
 		});
 	</script>
-	
+	`, DataFilename, string(keywordsJSON))
+}
+
+// --- 3. PAGE WRITING HELPER ---
+
+func writePage(filename, title, activeNav, bodyContent string) {
+	navCls := func(name string) string {
+		if name == activeNav {
+			return "nav-btn active"
+		}
+		return "nav-btn"
+	}
+
+	html := fmt.Sprintf(`<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>%s</title>
+	<style>%s</style>
+	%s
 </head>
 <body>
 	<nav class="navbar">
 		<a href="index.html" class="nav-brand">k8s-ai-bench</a>
 		<div class="nav-links">
-			<a href="index.html" class="nav-btn">Leaderboard</a>
-			<a href="tasks.html" class="nav-btn">Tasks</a>
-			<a href="about.html" class="nav-btn active">About</a>
+			<a href="index.html" class="%s">Leaderboard</a>
+			<a href="tasks.html" class="%s">Tasks</a>
+			<a href="about.html" class="%s">About</a>
 			<a href="https://github.com/GoogleCloudPlatform/kubectl-ai" class="nav-btn" target="_blank">GitHub &nearr;</a>
 		</div>
 	</nav>
 	<div class="container">
+		%s
+	</div>
+</body>
+</html>`, title, Styles, getSharedJS(), navCls("leaderboard"), navCls("tasks"), navCls("about"), bodyContent)
+
+	err := os.WriteFile(filename, []byte(html), 0644)
+	if err != nil {
+		fmt.Printf("Error writing %s: %v\n", filename, err)
+	} else {
+		fmt.Printf("Generated %s\n", filename)
+	}
+}
+
+// --- 4. PAGE CONTENTS ---
+
+func genIndex() {
+	body := fmt.Sprintf(`
+		<h1>k8s-ai-bench Leaderboard</h1>
+		<div class="intro-container">
+			<div class="intro-row"><span class="intro-label">Goal:</span> Determine which LLM is best suited for solving Kubernetes tasks.</div>
+			<div class="intro-row"><span class="intro-label">Method:</span> Evaluation against 24 specific tasks in the <a href="%s" target="_blank" style="color: #0969da; text-decoration: none;">k8s-ai-bench</a> repository (totaling 120 execution runs per model).</div>
+			<div class="intro-row" style="margin-top: 10px; border-top: 1px dashed #e1e4e8; padding-top: 10px;">
+				<div class="intro-label" style="margin-bottom: 5px;">Metrics:</div>
+				<div class="metric-def"><strong>Pass@1:</strong> The probability of passing a task on the first try. This represents the average performance of the model.</div>
+				<div class="metric-def"><strong>Pass@5:</strong> The probability of passing a task within 5 tries. This represents the potential of the model.</div>
+				<div class="metric-def"><strong>Pass All 5:</strong> The percent of tasks that passed on every run.</div>
+			</div>
+		</div>
 		
+		<div class="controls-area">
+			<div class="control-row">
+				<span style="font-weight:600; font-size:0.9em;">Metric:</span>
+				<div class="toggle-group">
+					<button class="toggle-btn" onclick="setMetric('p1')" id="btn-p1">Pass@1</button>
+					<button class="toggle-btn active" onclick="setMetric('p5')" id="btn-p5">Pass@5</button>
+					<button class="toggle-btn" onclick="setMetric('pAll')" id="btn-pAll">Pass All 5</button>
+				</div>
+			</div>
+			<div class="control-row">
+				<span style="font-weight:600; font-size:0.9em;">Filter Models:</span>
+				<label class="checkbox-label"><input type="checkbox" id="chk-prop" checked onchange="renderPage()"> Proprietary</label>
+				<label class="checkbox-label"><input type="checkbox" id="chk-open" checked onchange="renderPage()"> Open Source</label>
+			</div>
+			<div class="disclaimer-box" id="pAll-disclaimer">
+				<strong>Note:</strong> We are still evaluating whether "Pass All 5" is a robust metric. It represents the percentage of tasks where the model succeeded in every single attempt (Consistency).
+			</div>
+		</div>
+		
+		<div style="max-width: 900px; margin: 0 auto;">
+			<table id="leaderboard-table">
+				<thead>
+					<tr>
+						<th data-idx="0" style="width: 250px;">Model</th>
+						<th data-idx="1">Score</th>
+						<th data-idx="2" style="width: 100px;">Type</th>
+					</tr>
+				</thead>
+				<tbody></tbody>
+			</table>
+		</div>
+		<p style="text-align:center; color:#6e7781; margin-top: 2rem;">Click on a model name to view detailed logs.</p>
+		
+		<script>
+			let currentMetric = 'p5';
+			function setMetric(metric) {
+				currentMetric = metric;
+				document.querySelectorAll('.toggle-btn').forEach(b => b.classList.remove('active'));
+				document.getElementById('btn-' + metric).classList.add('active');
+				const disclaimer = document.getElementById('pAll-disclaimer');
+				if (metric === 'pAll') disclaimer.classList.add('visible');
+				else disclaimer.classList.remove('visible');
+				renderPage();
+			}
+			window.renderPage = function() {
+				if(!window.PROCESSED_DATA) return;
+				const tbody = document.querySelector('#leaderboard-table tbody');
+				const showProp = document.getElementById('chk-prop').checked;
+				const showOpen = document.getElementById('chk-open').checked;
+				
+				let data = window.PROCESSED_DATA.leaderboard.filter(row => {
+					if (row.type === 'Proprietary' && !showProp) return false;
+					if (row.type === 'Open Source' && !showOpen) return false;
+					return true;
+				});
+				data.sort((a, b) => b[currentMetric] - a[currentMetric]);
+				
+				tbody.innerHTML = data.map(row => {
+					const val = row[currentMetric];
+					const hue = getHue(val);
+					return '<tr><td><a href="model.html?id='+encodeURIComponent(row.id)+'" class="model-link">'+row.id+'</a></td>' +
+						   '<td><div class="score-container"><div class="score-text" style="font-weight:bold;">'+val+'%%</div>' +
+						   createBar(val, hue) + '</div></td>' +
+						   '<td><span style="font-size:0.85em; color:#57606a;">'+row.type+'</span></td></tr>';
+				}).join('');
+			}
+		</script>
+	`, RepoBaseURL)
+	writePage("index.html", "k8s-ai-bench Leaderboard", "leaderboard", body)
+}
+
+func genTasks() {
+	body := fmt.Sprintf(`
+		<h1>Task Difficulty Leaderboard</h1>
+		<p style="text-align: center; max-width: 800px; margin: 0 auto; color: #57606a;">
+			Click task name to view source on Github. Click 'View Stats' to see task results for all models.
+		</p>
+		<table id="tasks-table">
+			<thead>
+				<tr>
+					<th data-idx="0" style="width: 50%%;">Task Name</th>
+					<th data-idx="1" style="width: 30%%;">Overall Pass@1</th>
+					<th data-idx="2" style="width: 20%%;">Details</th>
+				</tr>
+			</thead>
+			<tbody></tbody>
+		</table>
+		<script>
+			window.renderPage = function() {
+				if(!window.PROCESSED_DATA) return;
+				const tbody = document.querySelector('#tasks-table tbody');
+				const repoUrl = "%s";
+				tbody.innerHTML = window.PROCESSED_DATA.tasks.map(t => {
+					return '<tr><td><a href="'+repoUrl+encodeURIComponent(t.name)+'" class="task-link" target="_blank"><strong>'+t.name+'</strong> &nearr;</a></td>' +
+						   '<td>'+t.p1+'%% '+createMiniBar(t.p1, getHue(t.p1))+'</td>' +
+						   '<td><a href="task_detail.html?id='+encodeURIComponent(t.name)+'" class="log-link">View Stats &rarr;</a></td></tr>';
+				}).join('');
+			}
+		</script>
+	`, RepoTaskURL)
+	writePage("tasks.html", "Task Difficulty Leaderboard", "tasks", body)
+}
+
+func genTaskDetail() {
+	body := `
+		<a href="tasks.html" class="back-link">&larr; Back to Tasks List</a>
+		<h1 id="task-title">Loading...</h1>
+		<table id="task-detail-table">
+			<thead>
+				<tr>
+					<th data-idx="0" style="width: 40%;">Model</th>
+					<th data-idx="1" style="width: 20%;">Pass Rate</th>
+					<th data-idx="2" style="width: 40%;">Run Outcomes</th>
+				</tr>
+			</thead>
+			<tbody></tbody>
+		</table>
+		<script>
+			window.renderPage = function() {
+				if(!window.PROCESSED_DATA) return;
+				const params = new URLSearchParams(window.location.search);
+				const taskId = params.get('id');
+				const data = window.PROCESSED_DATA.task_details[taskId];
+				if (!data) {
+					document.getElementById('task-title').innerText = 'Task Not Found';
+					return;
+				}
+				document.getElementById('task-title').innerText = taskId;
+				const tbody = document.querySelector('#task-detail-table tbody');
+				tbody.innerHTML = data.map(row => {
+					const dots = row.runs.map(r => '<div class="run-dot '+r.val+'" title="Run '+r.r+': '+r.val+'"></div>').join('');
+					return '<tr><td><a href="model.html?id='+encodeURIComponent(row.model)+'" class="model-link">'+row.model+'</a></td>' +
+						   '<td>'+row.p1+'%%</td><td>'+dots+'</td></tr>';
+				}).join('');
+			}
+		</script>
+	`
+	writePage("task_detail.html", "Task Details", "tasks", body)
+}
+
+func genModel() {
+	body := `
+		<a href="index.html" class="back-link">&larr; Back to Leaderboard</a>
+		<h1 id="model-title">Loading...</h1>
+		<div class="controls-area" style="flex-direction: row; margin-bottom: 1rem;">
+			<span style="font-weight:600;">Run Filter:</span>
+			<select id="run-select" onchange="renderPage()" style="padding: 5px; font-size:1rem;">
+				<option value="all">All Runs</option>
+				<option value="1">Run 1</option>
+				<option value="2">Run 2</option>
+				<option value="3">Run 3</option>
+				<option value="4">Run 4</option>
+				<option value="5">Run 5</option>
+			</select>
+		</div>
+		<table id="details-table">
+			<thead>
+				<tr>
+					<th data-idx="0" style="width: 30%;">Task Name</th>
+					<th data-idx="1" style="width: 10%;">Run #</th>
+					<th data-idx="2" style="width: 10%;">Result</th>
+					<th style="width: 50%;">Details</th>
+				</tr>
+			</thead>
+			<tbody></tbody>
+		</table>
+		<script>
+			window.renderPage = function() {
+				if(!window.PROCESSED_DATA) return;
+				const params = new URLSearchParams(window.location.search);
+				const modelId = params.get('id');
+				const data = window.PROCESSED_DATA.details[modelId];
+				const runFilter = document.getElementById('run-select').value;
+				
+				if (!data) {
+					document.getElementById('model-title').innerText = 'Model Not Found';
+					return;
+				}
+				document.getElementById('model-title').innerText = 'Details: ' + modelId;
+				const tbody = document.querySelector('#details-table tbody');
+				
+				let filteredData = data;
+				if (runFilter !== 'all') {
+					const targetRun = parseInt(runFilter);
+					filteredData = data.filter(r => r.run === targetRun);
+				}
+
+				tbody.innerHTML = filteredData.map(row => {
+					const badgeClass = row.result === 'success' ? 'success' : 'fail';
+					let detailsHTML = '<span style="color:#999">-</span>';
+					if (row.result === 'fail') {
+						const msg = row.message || "No failure message provided.";
+						detailsHTML = '<div class="failure-box"><div class="failure-msg">'+msg+'</div></div>';
+					}
+					return '<tr><td>'+row.task+'</td><td>'+row.run+'</td>' +
+						   '<td><span class="result-badge '+badgeClass+'">'+row.result+'</span></td>' +
+						   '<td>'+detailsHTML+'</td></tr>';
+				}).join('');
+			}
+		</script>
+	`
+	writePage("model.html", "Model Details", "leaderboard", body)
+}
+
+func genAbout() {
+	body := `
 		<div class="container" style="max-width: 800px;">
 			<h1>About Project</h1>
 			<div style="background: white; padding: 2rem; border: 1px solid #dfe2e5; border-radius: 6px; line-height: 1.6;">
@@ -276,7 +550,19 @@
 				<p>The benchmark runs a series of 24 predefined tasks against different LLMs. Each task is attempted multiple times to gauge consistency and potential.</p>
 			</div>
 		</div>
-	
-	</div>
-</body>
-</html>
+	`
+	writePage("about.html", "About", "about", body)
+}
+
+// --- MAIN ---
+
+func main() {
+	fmt.Println("Generating HTML Shells (Data will be fetched client-side)...")
+	genIndex()
+	genTasks()
+	genTaskDetail()
+	genModel()
+	genAbout()
+	fmt.Println("Done!")
+	fmt.Println("REMINDER: To view this, you must run a local server: python3 -m http.server (or similar)")
+}
