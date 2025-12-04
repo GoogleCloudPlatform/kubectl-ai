@@ -581,6 +581,11 @@ func repl(ctx context.Context, initialQuery string, ui ui.UI, agent *agent.Agent
 		return fmt.Errorf("running UI: %w", err)
 	}
 
+	// Ensure UI resources are cleaned up
+	if closeErr := ui.Close(); closeErr != nil {
+		klog.Errorf("Error closing UI: %v", closeErr)
+	}
+
 	return nil
 }
 
