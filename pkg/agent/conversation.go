@@ -165,7 +165,71 @@ func (c *Agent) addMessage(source api.MessageSource, messageType api.MessageType
 	c.Session.ChatMessageStore.AddChatMessage(message)
 	c.Session.LastModified = time.Now()
 	c.Output <- message
+	c.recordJournalMessage(message)
 	return message
+}
+
+func (c *Agent) recordJournalMessage(msg *api.Message) {
+	if c.Recorder == nil || msg == nil {
+		return
+	}
+
+	logMessage := journal.Message{
+		ID:        msg.ID,
+		Timestamp: msg.Timestamp,
+		Content:   formatPayloadForJournal(msg.Payload),
+	}
+
+	switch msg.Source {
+	case api.MessageSourceModel:
+		if c.Provider != "" {
+			logMessage.Type = c.Provider
+		} else {
+			logMessage.Type = string(msg.Source)
+		}
+		logMessage.Model = c.Model
+	default:
+		logMessage.Type = string(msg.Source)
+	}
+
+	c.writeJournalEvent(&journal.Event{
+		Timestamp: msg.Timestamp,
+		Action:    journal.ActionSessionMessage,
+		Payload:   logMessage,
+	})
+}
+
+func (c *Agent) writeJournalEvent(event *journal.Event) {
+	if c.Recorder == nil || event == nil {
+		return
+	}
+
+	if event.Timestamp.IsZero() {
+		event.Timestamp = time.Now()
+	}
+
+	if err := c.Recorder.Write(context.Background(), event); err != nil {
+		klog.Warningf("error writing journal event: %v", err)
+	}
+}
+
+func formatPayloadForJournal(payload any) string {
+	if payload == nil {
+		return ""
+	}
+
+	switch v := payload.(type) {
+	case string:
+		return v
+	case fmt.Stringer:
+		return v.String()
+	default:
+		if b, err := json.Marshal(v); err == nil {
+			return string(b)
+		}
+	}
+
+	return fmt.Sprintf("%v", payload)
 }
 
 // setAgentState updates the agent state and ensures LastModified is updated

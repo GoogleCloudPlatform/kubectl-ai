@@ -485,6 +485,15 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 		defer recorder.Close()
 	}
 
+	var sessionID string
+	if session != nil {
+		sessionID = session.ID
+	}
+	journal.RecordSessionMetadata(ctx, recorder, journal.SessionMetadata{
+		SessionID:   sessionID,
+		ProjectHash: commit,
+	})
+
 	k8sAgent := &agent.Agent{
 		Model:              opt.ModelID,
 		Provider:           opt.ProviderID,

@@ -159,18 +159,6 @@ type InvokeToolOptions struct {
 	Executor sandbox.Executor
 }
 
-type ToolRequestEvent struct {
-	CallID    string         `json:"id,omitempty"`
-	Name      string         `json:"name,omitempty"`
-	Arguments map[string]any `json:"arguments,omitempty"`
-}
-
-type ToolResponseEvent struct {
-	CallID   string `json:"id,omitempty"`
-	Response any    `json:"response,omitempty"`
-	Error    string `json:"error,omitempty"`
-}
-
 // InvokeTool handles the execution of a single action
 func (t *ToolCall) InvokeTool(ctx context.Context, opt InvokeToolOptions) (any, error) {
 	recorder := journal.RecorderFromContext(ctx)
@@ -178,11 +166,13 @@ func (t *ToolCall) InvokeTool(ctx context.Context, opt InvokeToolOptions) (any, 
 	callID := uuid.NewString()
 	recorder.Write(ctx, &journal.Event{
 		Timestamp: time.Now(),
-		Action:    "tool-request",
-		Payload: ToolRequestEvent{
-			CallID:    callID,
-			Name:      t.name,
-			Arguments: t.arguments,
+		Action:    journal.ActionToolRequest,
+		Payload: journal.ToolRequestEvent{
+			CallID:      callID,
+			Name:        t.name,
+			Arguments:   t.arguments,
+			Description: t.Description(),
+			DisplayName: t.name,
 		},
 	})
 
@@ -195,16 +185,20 @@ func (t *ToolCall) InvokeTool(ctx context.Context, opt InvokeToolOptions) (any, 
 	response, err := t.tool.Run(ctx, t.arguments)
 
 	{
-		ev := ToolResponseEvent{
-			CallID:   callID,
-			Response: response,
+		ev := journal.ToolResponseEvent{
+			CallID:        callID,
+			Response:      response,
+			ResultDisplay: toolResultDisplay(response),
 		}
 		if err != nil {
 			ev.Error = err.Error()
+			if ev.ResultDisplay == "" {
+				ev.ResultDisplay = err.Error()
+			}
 		}
 		recorder.Write(ctx, &journal.Event{
 			Timestamp: time.Now(),
-			Action:    "tool-response",
+			Action:    journal.ActionToolResponse,
 			Payload:   ev,
 		})
 	}
@@ -236,6 +230,23 @@ func ToolResultToMap(result any) (map[string]any, error) {
 		return map[string]any{"content": result}, nil
 	}
 	return m, nil
+}
+
+func toolResultDisplay(result any) string {
+	if result == nil {
+		return ""
+	}
+	switch v := result.(type) {
+	case string:
+		return v
+	case []byte:
+		return string(v)
+	default:
+		if b, err := json.Marshal(v); err == nil {
+			return string(b)
+		}
+	}
+	return fmt.Sprintf("%v", result)
 }
 
 // LoadAndRegisterCustomTools loads tool configurations from a YAML file
