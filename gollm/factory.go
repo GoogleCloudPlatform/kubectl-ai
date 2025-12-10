@@ -54,6 +54,8 @@ type ClientOptions struct {
 	URL           *url.URL
 	SkipVerifySSL bool
 	// Extend with more options as needed
+	// ModelID is the ID of the model to use.e.g. gemini-2.0-flash-thinking-exp-01-21, gemini-2.0-flash
+	ModelID string
 }
 
 // Option is a functional option for configuring ClientOptions.
@@ -63,6 +65,13 @@ type Option func(*ClientOptions)
 func WithSkipVerifySSL() Option {
 	return func(o *ClientOptions) {
 		o.SkipVerifySSL = true
+	}
+}
+
+// WithModelID sets the model ID to use for the client.
+func WithModelID(modelID string) Option {
+	return func(o *ClientOptions) {
+		o.ModelID = modelID
 	}
 }
 
@@ -110,6 +119,7 @@ func (r *registry) NewClient(ctx context.Context, providerID string, opts ...Opt
 	clientOpts := ClientOptions{
 		URL: u,
 	}
+
 	// Support environment variable override for SkipVerifySSL
 	if v := os.Getenv("LLM_SKIP_VERIFY_SSL"); v == "1" || strings.ToLower(v) == "true" {
 		clientOpts.SkipVerifySSL = true

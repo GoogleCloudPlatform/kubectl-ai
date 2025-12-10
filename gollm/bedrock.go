@@ -55,6 +55,8 @@ func newBedrockClientFactory(ctx context.Context, opts ClientOptions) (Client, e
 		return nil, err
 	}
 
+	bedrockOpts.ModelSource = getModelSource(bedrockOpts)
+
 	return NewBedrockClient(ctx, bedrockOpts)
 }
 
@@ -81,6 +83,7 @@ type BedrockClientOptions struct {
 	ClientOptions
 	AWSRegionSource string
 	AWSAuthMethod   string
+	ModelSource     string
 }
 
 // getAWSRegionSource determines the source of the AWS region for the Bedrock client
@@ -220,6 +223,24 @@ func isValidAWSRegion(region string) bool {
 	}
 
 	return hasDigit
+}
+
+// AWS Model Source constants for Bedrock provider
+// Options Priority: URL > Environment > Default
+const (
+	AWSModelSourceURL  = "url"
+	AWSModelSourceEnv  = "env"
+	AWSModelSourceAuto = "auto"
+)
+
+func getModelSource(opts BedrockClientOptions) string {
+	if opts.URL != nil && opts.URL.Path != "" && strings.HasPrefix(opts.URL.Path, "/model/") {
+		return AWSModelSourceURL
+	}
+	if opts.ClientOptions.ModelID != "" {
+		return AWSModelSourceEnv
+	}
+	return AWSModelSourceAuto
 }
 
 // NewBedrockClient creates a new client for interacting with AWS Bedrock models

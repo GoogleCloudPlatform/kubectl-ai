@@ -342,3 +342,4 @@ func TestBedrockClient(t *testing.T) {
 		}
 	})
 }
+

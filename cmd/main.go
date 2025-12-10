@@ -375,9 +375,10 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 
 	var llmClient gollm.Client
 	if opt.SkipVerifySSL {
-		llmClient, err = gollm.NewClient(ctx, opt.ProviderID, gollm.WithSkipVerifySSL())
+		llmClient, err = gollm.NewClient(ctx, opt.ProviderID, gollm.WithModelID(opt.ModelID),
+			gollm.WithSkipVerifySSL())
 	} else {
-		llmClient, err = gollm.NewClient(ctx, opt.ProviderID)
+		llmClient, err = gollm.NewClient(ctx, opt.ProviderID, gollm.WithModelID(opt.ModelID))
 	}
 	if err != nil {
 		return fmt.Errorf("creating llm client: %w", err)
