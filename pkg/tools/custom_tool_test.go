@@ -15,7 +15,11 @@
 package tools
 
 import (
+	"context"
+	"strings"
 	"testing"
+
+	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/sandbox"
 )
 
 func TestCustomTool_AddCommandPrefix(t *testing.T) {
@@ -109,5 +113,66 @@ func TestCustomTool_AddCommandPrefix(t *testing.T) {
 				t.Errorf("expected %q, got %q", tt.expectedOutput, output)
 			}
 		})
+	}
+}
+
+// MockExecutor implements sandbox.Executor for testing
+type MockExecutor struct {
+	CapturedCommand string
+	CapturedEnv     []string
+	CapturedWorkDir string
+}
+
+func (m *MockExecutor) Execute(ctx context.Context, command string, env []string, workDir string) (*sandbox.ExecResult, error) {
+	m.CapturedCommand = command
+	m.CapturedEnv = env
+	m.CapturedWorkDir = workDir
+	return &sandbox.ExecResult{Stdout: "executed"}, nil
+}
+
+func (m *MockExecutor) Close(ctx context.Context) error {
+	return nil
+}
+
+func TestCustomTool_CloneWithExecutor(t *testing.T) {
+	config := CustomToolConfig{
+		Name:    "test-tool",
+		Command: "echo",
+	}
+
+	tool, err := NewCustomTool(config)
+	if err != nil {
+		t.Fatalf("failed to create tool: %v", err)
+	}
+
+	mockExec := &MockExecutor{}
+	clonedTool := tool.CloneWithExecutor(mockExec)
+
+	ctx := context.WithValue(context.Background(), WorkDirKey, "/tmp")
+	args := map[string]any{
+		"command": "hello",
+	}
+
+	result, err := clonedTool.Run(ctx, args)
+	if err != nil {
+		t.Fatalf("tool run failed: %v", err)
+	}
+
+	execResult, ok := result.(*sandbox.ExecResult)
+	if !ok {
+		t.Fatalf("expected *sandbox.ExecResult, got %T", result)
+	}
+	if execResult.Stdout != "executed" {
+		t.Errorf("expected Stdout 'executed', got %q", execResult.Stdout)
+	}
+
+	if mockExec.CapturedCommand != "echo hello" {
+		t.Errorf("expected command 'echo hello', got %q", mockExec.CapturedCommand)
+	}
+	if !strings.Contains(strings.Join(mockExec.CapturedEnv, "\n"), "PATH") {
+		t.Errorf("expected captured environment to contain PATH")
+	}
+	if mockExec.CapturedWorkDir != "/tmp" {
+		t.Errorf("expected workdir '/tmp', got %q", mockExec.CapturedWorkDir)
 	}
 }

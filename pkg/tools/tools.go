@@ -98,6 +98,25 @@ func (t *Tools) RegisterTool(tool Tool) {
 	t.tools[name] = tool
 }
 
+// CloneWithExecutor creates a shallow copy of the Tools collection,
+// but clones any tools that need a session-specific executor (like CustomTool).
+func (t *Tools) CloneWithExecutor(executor sandbox.Executor) Tools {
+	newTools := Tools{
+		tools: make(map[string]Tool),
+	}
+
+	for name, tool := range t.tools {
+		// If it's a CustomTool, we need to clone it with the session-specific executor
+		if ct, ok := tool.(*CustomTool); ok {
+			newTools.tools[name] = ct.CloneWithExecutor(executor)
+		} else {
+			// For other tools (like MCP tools), we reuse the existing instance
+			newTools.tools[name] = tool
+		}
+	}
+	return newTools
+}
+
 type ToolCall struct {
 	tool      Tool
 	name      string

@@ -36,7 +36,8 @@ type CustomToolConfig struct {
 
 // CustomTool implements the Tool interface for external commands.
 type CustomTool struct {
-	config CustomToolConfig
+	config   CustomToolConfig
+	executor sandbox.Executor
 }
 
 // NewCustomTool creates a new CustomTool instance.
@@ -139,11 +140,9 @@ func (t *CustomTool) Run(ctx context.Context, args map[string]any) (any, error) 
 	workDir := ctx.Value(WorkDirKey).(string)
 	env := os.Environ()
 
-	// Get executor from context or default to local
-	var executor sandbox.Executor
-	if v := ctx.Value(ExecutorKey); v != nil {
-		executor = v.(sandbox.Executor)
-	} else {
+	// Use the injected executor, or fallback to local if not set (e.g. for global instance)
+	executor := t.executor
+	if executor == nil {
 		executor = sandbox.NewLocalExecutor()
 	}
 
@@ -158,4 +157,13 @@ func (t *CustomTool) Run(ctx context.Context, args map[string]any) (any, error) 
 func (t *CustomTool) CheckModifiesResource(args map[string]any) string {
 	// For custom tools, we'll conservatively use "unknown" since we can't
 	return "unknown"
+}
+
+// CloneWithExecutor creates a copy of the CustomTool with the given executor.
+// This is used to create a session-specific instance of the tool.
+func (t *CustomTool) CloneWithExecutor(executor sandbox.Executor) *CustomTool {
+	return &CustomTool{
+		config:   t.config,
+		executor: executor,
+	}
 }
