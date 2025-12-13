@@ -72,6 +72,25 @@ func BuildRootCommand(opt *Options) (*cobra.Command, error) {
 		},
 	})
 
+	saveConfigCmd := &cobra.Command{
+		Use:   "save-config",
+		Short: "Save the current configuration to the default config path",
+		Long:  "This command saves the current configuration to the default config path. It is useful for persisting the configuration across runs.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			configPath, err := opt.WriteConfigurationFile()
+			if err != nil {
+				return fmt.Errorf("failed to write config file: %w", err)
+			}
+			fmt.Printf(`Configuration saved to "%s"`, configPath)
+			return nil // Exit early if we are just saving the config
+		},
+	}
+	rootCmd.AddCommand(saveConfigCmd)
+
+	if err := opt.bindCLIFlags(saveConfigCmd.Flags()); err != nil {
+		return nil, err
+	}
+
 	if err := opt.bindCLIFlags(rootCmd.Flags()); err != nil {
 		return nil, err
 	}
@@ -106,9 +125,9 @@ type Options struct {
 
 	PromptTemplateFilePath string   `json:"promptTemplateFilePath,omitempty"`
 	ExtraPromptPaths       []string `json:"extraPromptPaths,omitempty"`
-	TracePath              string   `json:"tracePath,omitempty"`
+	TracePath              string   `json:"-"`
 	RemoveWorkDir          bool     `json:"removeWorkDir,omitempty"`
-	ToolConfigPaths        []string `json:"toolConfigPaths,omitempty"`
+	ToolConfigPaths        []string `json:"-"`
 
 	// UIType is the type of user interface to use.
 	UIType ui.Type `json:"uiType,omitempty"`
@@ -199,42 +218,76 @@ func (o *Options) LoadConfiguration(b []byte) error {
 	return nil
 }
 
+// expandConfigPath replaces {CONFIG} and {HOME} tokens in a path with actual directories.
+func expandConfigPath(configPath string) (string, error) {
+	pathWithPlaceholdersExpanded := configPath
+
+	if strings.Contains(pathWithPlaceholdersExpanded, "{CONFIG}") {
+		configDir, err := os.UserConfigDir()
+		if err != nil {
+			return "", fmt.Errorf("getting user config directory (for config file path %q): %w", configPath, err)
+		}
+		pathWithPlaceholdersExpanded = strings.ReplaceAll(pathWithPlaceholdersExpanded, "{CONFIG}", configDir)
+	}
+
+	if strings.Contains(pathWithPlaceholdersExpanded, "{HOME}") {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("getting user home directory (for config file path %q): %w", configPath, err)
+		}
+		pathWithPlaceholdersExpanded = strings.ReplaceAll(pathWithPlaceholdersExpanded, "{HOME}", homeDir)
+	}
+	return pathWithPlaceholdersExpanded, nil
+}
+
 func (o *Options) LoadConfigurationFile() error {
-	configPaths := defaultConfigPaths
-	for _, configPath := range configPaths {
-		pathWithPlaceholdersExpanded := configPath
-
-		if strings.Contains(pathWithPlaceholdersExpanded, "{CONFIG}") {
-			configDir, err := os.UserConfigDir()
-			if err != nil {
-				return fmt.Errorf("getting user config directory (for config file path %q): %w", configPath, err)
-			}
-			pathWithPlaceholdersExpanded = strings.ReplaceAll(pathWithPlaceholdersExpanded, "{CONFIG}", configDir)
+	for _, configPath := range defaultConfigPaths {
+		finalPath, err := expandConfigPath(configPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not expand config path %q: %v\n", configPath, err)
+			continue
 		}
-
-		if strings.Contains(pathWithPlaceholdersExpanded, "{HOME}") {
-			homeDir, err := os.UserHomeDir()
-			if err != nil {
-				return fmt.Errorf("getting user home directory (for config file path %q): %w", configPath, err)
-			}
-			pathWithPlaceholdersExpanded = strings.ReplaceAll(pathWithPlaceholdersExpanded, "{HOME}", homeDir)
-		}
-
-		configPath = filepath.Clean(pathWithPlaceholdersExpanded)
-		configBytes, err := os.ReadFile(configPath)
+		configBytes, err := os.ReadFile(filepath.Clean(finalPath))
 		if err != nil {
 			if os.IsNotExist(err) {
 				// ignore missing config files, they are optional
 			} else {
-				fmt.Fprintf(os.Stderr, "warning: could not load defaults from %q: %v\n", configPath, err)
+				fmt.Fprintf(os.Stderr, "warning: could not load defaults from %q: %v\n", finalPath, err)
 			}
 		} else if len(configBytes) > 0 {
 			if err := o.LoadConfiguration(configBytes); err != nil {
-				fmt.Fprintf(os.Stderr, "warning: error loading configuration from %q: %v\n", configPath, err)
+				fmt.Fprintf(os.Stderr, "warning: error loading configuration from %q: %v\n", finalPath, err)
 			}
 		}
 	}
 	return nil
+}
+
+func (o *Options) WriteConfigurationFile() (string, error) {
+	configData, err := yaml.Marshal(o)
+	if err != nil {
+		return "", fmt.Errorf("marshaling config: %w", err)
+	}
+
+	var writeErrors []error
+	for _, configPath := range defaultConfigPaths {
+		finalPath, err := expandConfigPath(configPath)
+		if err != nil {
+			writeErrors = append(writeErrors, fmt.Errorf("expand path %q: %w", configPath, err))
+			continue
+		}
+		// Ensure parent directory exists
+		if err := os.MkdirAll(filepath.Dir(finalPath), 0o755); err != nil {
+			writeErrors = append(writeErrors, fmt.Errorf("mkdir %q: %w", filepath.Dir(finalPath), err))
+			continue
+		}
+		if err := os.WriteFile(finalPath, configData, 0o644); err != nil {
+			writeErrors = append(writeErrors, fmt.Errorf("write file %q: %w", finalPath, err))
+			continue
+		}
+		return finalPath, nil
+	}
+	return "", fmt.Errorf("failed to write config to any path: %v", writeErrors)
 }
 
 func main() {
@@ -297,11 +350,7 @@ func run(ctx context.Context) error {
 	// do this early, before the third-party code logs anything.
 	redirectStdLogToKlog()
 
-	if err := rootCmd.ExecuteContext(ctx); err != nil {
-		return err
-	}
-
-	return nil
+	return rootCmd.ExecuteContext(ctx)
 }
 
 func (opt *Options) bindCLIFlags(f *pflag.FlagSet) error {
