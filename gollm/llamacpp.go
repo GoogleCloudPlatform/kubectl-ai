@@ -300,6 +300,10 @@ func (c *LlamaCppChat) Initialize(messages []*api.Message) error {
 	return nil
 }
 
+func (c *LlamaCppChat) SaveMessages(path string) error {
+	return fmt.Errorf("SaveMessages is not implemented for LlamaCpp")
+}
+
 func ptrTo[T any](t T) *T {
 	return &t
 }

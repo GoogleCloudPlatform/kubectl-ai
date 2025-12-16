@@ -214,6 +214,10 @@ func (c *OllamaChat) Initialize(messages []*kctlApi.Message) error {
 	return nil
 }
 
+func (c *OllamaChat) SaveMessages(path string) error {
+	return fmt.Errorf("SaveMessages is not implemented for Ollama")
+}
+
 type OllamaChatResponse struct {
 	candidates     []*OllamaCandidate
 	ollamaResponse api.ChatResponse

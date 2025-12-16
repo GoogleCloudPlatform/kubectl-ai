@@ -277,6 +277,7 @@ func (c *GoogleAIClient) StartChat(systemPrompt string, model string) Chat {
 			TopP:             &topP,
 			MaxOutputTokens:  maxOutputTokens,
 			ResponseMIMEType: "text/plain",
+			ThinkingConfig:   &genai.ThinkingConfig{IncludeThoughts: true},
 		},
 		history: []*genai.Content{},
 	}
@@ -500,6 +501,183 @@ func (c *GeminiChat) Initialize(messages []*api.Message) error {
 		c.history = append(c.history, content)
 	}
 	return nil
+}
+
+func (c *GeminiChat) SaveMessages(path string) error {
+	klog.Infof("Saving messages to %s", path)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to open history file: %w", err)
+	}
+	defer f.Close()
+
+	// We want to save serialized version of the list of messages.
+	// Since we are appending line by line, we just marshal the whole history as one JSON object per line.
+	// c.history is []*genai.Content
+
+	bytes, err := json.Marshal(c.history)
+	if err != nil {
+		return fmt.Errorf("failed to marshal history: %w", err)
+	}
+
+	// Unmarshal to generic map to perform sanitization (stripping thoughtSignature and coalescing)
+	var rawHistory []map[string]interface{}
+	if err := json.Unmarshal(bytes, &rawHistory); err != nil {
+		return fmt.Errorf("failed to unmarshal history for cleaning: %w", err)
+	}
+
+	// Recursively remove thoughtSignature
+	removeKey(rawHistory, "thoughtSignature")
+
+	// Coalesce history to merge consecutive messages and parts
+	cleanHistory := coalesceHistory(rawHistory)
+
+	cleanBytes, err := json.Marshal(cleanHistory)
+	if err != nil {
+		return fmt.Errorf("failed to marshal clean history: %w", err)
+	}
+
+	if _, err := f.Write(cleanBytes); err != nil {
+		return fmt.Errorf("failed to write history to file: %w", err)
+	}
+	if _, err := f.WriteString("\n"); err != nil {
+		return fmt.Errorf("failed to write newline to file: %w", err)
+	}
+	return nil
+}
+
+func coalesceHistory(history []map[string]interface{}) []map[string]interface{} {
+	if len(history) == 0 {
+		return history
+	}
+
+	var coalesced []map[string]interface{}
+	var currentMsg map[string]interface{}
+
+	for _, msg := range history {
+		if currentMsg == nil {
+			currentMsg = msg
+			continue
+		}
+
+		// Check if we can merge with currentMsg
+		// We merge if the role is the same
+		currRole, _ := currentMsg["role"].(string)
+		nextRole, _ := msg["role"].(string)
+
+		if currRole == nextRole && currRole != "" {
+			// Merge parts
+			currParts, ok1 := currentMsg["parts"].([]interface{})
+			nextParts, ok2 := msg["parts"].([]interface{})
+			if ok1 && ok2 {
+				currentMsg["parts"] = append(currParts, nextParts...)
+			}
+		} else {
+			coalesced = append(coalesced, currentMsg)
+			currentMsg = msg
+		}
+	}
+	if currentMsg != nil {
+		coalesced = append(coalesced, currentMsg)
+	}
+
+	// Now coalesce parts within each message
+	for _, msg := range coalesced {
+		if parts, ok := msg["parts"].([]interface{}); ok {
+			msg["parts"] = coalesceParts(parts)
+		}
+	}
+
+	return coalesced
+}
+
+func coalesceParts(parts []interface{}) []interface{} {
+	if len(parts) == 0 {
+		return parts
+	}
+
+	var coalesced []interface{}
+	var currentPart map[string]interface{}
+
+	for _, p := range parts {
+		part, ok := p.(map[string]interface{})
+		if !ok {
+			// specific part is not a map, just append current and this one
+			if currentPart != nil {
+				coalesced = append(coalesced, currentPart)
+				currentPart = nil
+			}
+			coalesced = append(coalesced, p)
+			continue
+		}
+
+		if currentPart == nil {
+			currentPart = part
+			continue
+		}
+
+		// Check if we can merge consecutive parts
+		// We can merge if:
+		// 1. Both are text (and thought status matches)
+		// 2. We do NOT merge function calls usually as they are distinct items, but if they are fragmented...
+		//    The user only mentioned "combining consecutive parts of same type (thought: true or functionCall or text)".
+		//    Visual observation of example shows text fragments.
+
+		// Check types
+		isText1, text1 := getText(currentPart)
+		isText2, text2 := getText(part)
+
+		isThought1 := isThought(currentPart)
+		isThought2 := isThought(part)
+
+		if isText1 && isText2 && isThought1 == isThought2 {
+			// Merge text
+			currentPart["text"] = text1 + text2
+			continue
+		}
+
+		// If not mergeable, append current and start new
+		coalesced = append(coalesced, currentPart)
+		currentPart = part
+	}
+	if currentPart != nil {
+		coalesced = append(coalesced, currentPart)
+	}
+
+	return coalesced
+}
+
+func getText(part map[string]interface{}) (bool, string) {
+	if t, ok := part["text"].(string); ok {
+		return true, t
+	}
+	return false, ""
+}
+
+func isThought(part map[string]interface{}) bool {
+	// check for "thought": true
+	if v, ok := part["thought"].(bool); ok {
+		return v
+	}
+	return false
+}
+
+func removeKey(v interface{}, key string) {
+	switch v := v.(type) {
+	case []map[string]interface{}:
+		for _, m := range v {
+			removeKey(m, key)
+		}
+	case map[string]interface{}:
+		delete(v, key)
+		for _, val := range v {
+			removeKey(val, key)
+		}
+	case []interface{}:
+		for _, val := range v {
+			removeKey(val, key)
+		}
+	}
 }
 
 func (c *GeminiChat) messageToContent(msg *api.Message) (*genai.Content, error) {

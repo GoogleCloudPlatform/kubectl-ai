@@ -527,6 +527,10 @@ func (c *bedrockChat) IsRetryableError(err error) bool {
 	return DefaultIsRetryableError(err)
 }
 
+func (c *bedrockChat) SaveMessages(path string) error {
+	return fmt.Errorf("SaveMessages is not implemented for Bedrock")
+}
+
 // bedrockResponse implements ChatResponse for regular (non-streaming) responses
 type bedrockResponse struct {
 	output *bedrockruntime.ConverseOutput

@@ -62,6 +62,9 @@ type Chat interface {
 
 	// Initialize initializes the chat with a previous conversation history.
 	Initialize(messages []*api.Message) error
+
+	// SaveMessages saves the conversation history to a file.
+	SaveMessages(path string) error
 }
 
 // CompletionRequest is a request to generate a completion for a given prompt.

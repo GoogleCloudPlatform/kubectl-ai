@@ -666,6 +666,16 @@ func (c *Agent) Run(ctx context.Context, initialQuery string) error {
 						log.Info("Empty response with no tool calls from LLM.")
 						c.addMessage(api.MessageSourceAgent, api.MessageTypeText, "Empty response from LLM")
 					}
+
+					// Save conversation history to file if configured
+					// We check for GEMINI_HISTORY_PATH environment variable for now as a quick way to enable this
+					if historyPath := os.Getenv("GEMINI_HISTORY_PATH"); historyPath != "" {
+						if err := c.llmChat.SaveMessages(historyPath); err != nil {
+							log.Error(err, "Failed to save conversation history", "path", historyPath)
+						} else {
+							log.Info("Saved conversation history", "path", historyPath)
+						}
+					}
 					continue
 				}
 
