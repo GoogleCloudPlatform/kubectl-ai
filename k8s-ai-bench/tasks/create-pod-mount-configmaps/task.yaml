@@ -1,6 +1,0 @@
-script:
-- prompt: "Create namespace 'color-size-settings' with two ConfigMaps - 'color-settings' with key 'color=blue' and 'size-settings' with key 'size=medium'. Create an nginx:alpine pod 'pod1' in namespace 'color-size-settings'. The pod `pod1` should use the value of 'color' key from 'color-settings' ConfigMap as an env var 'COLOR' and mounts all keys in the 'size-settings' ConfigMap under '/etc/sizes/' directory."
-difficulty: medium
-setup: setup.sh
-verifier: verify.sh
-cleanup: cleanup.sh 

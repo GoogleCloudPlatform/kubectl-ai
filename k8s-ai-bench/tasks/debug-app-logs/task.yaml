@@ -1,7 +1,0 @@
-script:
-- prompt: "What wrong with my calc-app-pod in the calc-app namespace?"
-setup: "setup.sh"
-cleanup: "cleanup.sh"
-difficulty: "medium"
-expect:
-- contains: "division by zero"

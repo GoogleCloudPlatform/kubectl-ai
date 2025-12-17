@@ -1,6 +1,0 @@
-script:
-  - prompt: "We want to test a new version of our recommendation engine (image tag 1.29) in production without disturbing the existing stable deployment. Can you deploy it as a canary (as engine-v2-1)? We want about 50% of traffic to go to the new version. The current deployment is named engine-v2-0 in the canary-deployment-ns."
-setup: "setup.sh"
-verifier: "verify.sh"
-cleanup: "cleanup.sh"
-difficulty: "hard"

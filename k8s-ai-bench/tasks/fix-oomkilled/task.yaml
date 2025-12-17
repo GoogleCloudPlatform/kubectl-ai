@@ -1,7 +1,0 @@
-script:
-  - prompt: "I have a web application running in the 'webapp-backend' namespace that keeps crashing. Can you help me figure out what's going wrong and fix it?"
-setup: "setup.sh"
-verifier: "verify.sh"
-cleanup: "cleanup.sh"
-difficulty: "medium"
-disabled: true

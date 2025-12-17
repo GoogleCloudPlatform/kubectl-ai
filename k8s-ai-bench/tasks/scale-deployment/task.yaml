@@ -1,6 +1,0 @@
-script:
-- prompt: "Scale up the replicas of deployment 'web-app' in namespace 'scale-test' by 100%"
-setup: "setup.sh"
-verifier: "verify.sh"
-cleanup: "cleanup.sh"
-difficulty: "medium" 

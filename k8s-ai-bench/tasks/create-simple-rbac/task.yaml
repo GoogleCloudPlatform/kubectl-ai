@@ -1,6 +1,0 @@
-script:
-- prompt: "Create a read-only role for pods bound to my reader-sa service account in the create-simple-rbac namespace."
-setup: "setup.sh"
-verifier: "verify.sh"
-cleanup: "cleanup.sh"
-difficulty: "medium"

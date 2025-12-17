@@ -1,6 +1,0 @@
-script:
-- prompt: "Create a HorizontalPodAutoscaler for deployment 'web-app' in namespace 'hpa-test' targeting 50% CPU utilization with min=1 and max=3 replicas"
-setup: "setup.sh"
-verifier: "verify.sh"
-cleanup: "cleanup.sh"
-difficulty: "hard"

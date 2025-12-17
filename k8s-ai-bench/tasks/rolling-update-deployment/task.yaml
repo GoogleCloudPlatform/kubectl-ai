@@ -1,6 +1,0 @@
-script:
-- prompt: "Update the image of the web-app in rollout-test namespace to 1.22 version. Ensure there is zero downtime (or minimize disruption)"
-setup: "setup.sh"
-verifier: "verify.sh"
-cleanup: "cleanup.sh"
-difficulty: "medium"

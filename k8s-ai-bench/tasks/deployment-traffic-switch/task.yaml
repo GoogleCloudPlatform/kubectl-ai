@@ -1,6 +1,0 @@
-script:
-  - prompt: "Our new checkout-service-green deployment in the e-commerce namespace has passed all tests. The current live version is checkout-service-blue. Can you switch all live traffic over to the green version now?"
-setup: "setup.sh"
-verifier: "verify.sh"
-cleanup: "cleanup.sh"
-difficulty: "easy"

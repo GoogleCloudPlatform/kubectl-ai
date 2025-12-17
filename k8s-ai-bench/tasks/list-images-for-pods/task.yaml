@@ -1,8 +1,0 @@
-script:
-- prompt: "What images are all pods running in the cluster?"
-setup: "setup.sh"
-cleanup: "cleanup.sh"
-# disabled: true
-difficulty: "medium"
-expect:
-- contains: "mysql:8.0.36"

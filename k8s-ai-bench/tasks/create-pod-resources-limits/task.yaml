@@ -1,6 +1,0 @@
-script:
-- prompt: "Create namespace 'limits-test' with a pod 'resource-limits-pod' using httpd:alpine image. Container 'my-container' should have CPU request 60m, limit 600m, and memory request/limit of 62Mi."
-difficulty: easy
-setup: setup.sh
-verifier: verify.sh
-cleanup: cleanup.sh 

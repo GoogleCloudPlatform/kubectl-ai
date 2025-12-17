@@ -1,6 +1,0 @@
-script:
-- prompt: "My pod homepage-pod in homepage-ns is stuck in pending state. Can you fix the issue so that pod status is in running state?"
-setup: "setup.sh"
-verifier: "verify.sh"
-cleanup: "cleanup.sh"
-difficulty: "easy"

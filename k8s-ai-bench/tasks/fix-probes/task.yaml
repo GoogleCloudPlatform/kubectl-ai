@@ -1,6 +1,0 @@
-script:
-- prompt: "My webapp in the orders namespace is not working? Can you please fix it?"
-setup: "setup.sh"
-verifier: "verify.sh"
-cleanup: "cleanup.sh"
-difficulty: "medium"

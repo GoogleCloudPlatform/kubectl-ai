@@ -1,6 +1,0 @@
-script:
-- prompt: "resize the storage volume to 15Gi for the storage-pod in `resize-pv` namespace"
-setup: "setup.sh"
-verifier: "verify.sh"
-cleanup: "cleanup.sh"
-difficulty: "easy"
