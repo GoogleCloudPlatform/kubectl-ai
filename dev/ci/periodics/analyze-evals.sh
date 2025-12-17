@@ -10,7 +10,7 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd ${REPO_ROOT}
 
 if [[ -z "${OUTPUT_DIR:-}" ]]; then
-    OUTPUT_DIR="${REPO_ROOT}/.build/k8saibench"
+    OUTPUT_DIR="${REPO_ROOT}/.build/k8s-ai-bench"
     mkdir -p "${OUTPUT_DIR}"
 fi
 

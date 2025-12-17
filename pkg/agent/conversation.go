@@ -438,6 +438,7 @@ func (c *Agent) Run(ctx context.Context, initialQuery string) error {
 					log.Info("RunOnce mode, exiting agent loop")
 					c.setAgentState(api.AgentStateExited)
 					c.addMessage(api.MessageSourceAgent, api.MessageTypeText, "It has been a pleasure assisting you. Have a great day!")
+					close(c.Output)
 					return
 				}
 				log.Info("initiating user input")
@@ -452,6 +453,7 @@ func (c *Agent) Run(ctx context.Context, initialQuery string) error {
 						log.Info("Agent loop done, EOF received")
 						c.setAgentState(api.AgentStateExited)
 						c.addMessage(api.MessageSourceAgent, api.MessageTypeText, "It has been a pleasure assisting you. Have a great day!")
+						close(c.Output)
 						return
 					}
 					query, ok := userInput.(*api.UserInputResponse)
@@ -525,13 +527,14 @@ func (c *Agent) Run(ctx context.Context, initialQuery string) error {
 							c.setAgentState(api.AgentStateDone)
 							c.pendingFunctionCalls = []ToolCallAnalysis{}
 							c.Session.LastModified = time.Now()
-							c.addMessage(api.MessageSourceAgent, api.MessageTypeError, "Error: "+err.Error())
 							// In RunOnce mode, exit on tool execution error
 							if c.RunOnce {
 								c.setAgentState(api.AgentStateExited)
+								c.addMessage(api.MessageSourceAgent, api.MessageTypeError, "Error: "+err.Error())
 								c.lastErr = err
 								return
 							}
+							c.addMessage(api.MessageSourceAgent, api.MessageTypeError, "Error: "+err.Error())
 							continue
 						}
 						// Clear pending function calls after execution
