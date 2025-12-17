@@ -437,6 +437,7 @@ func (c *Agent) Run(ctx context.Context, initialQuery string) error {
 				if c.RunOnce {
 					log.Info("RunOnce mode, exiting agent loop")
 					c.setAgentState(api.AgentStateExited)
+					c.addMessage(api.MessageSourceAgent, api.MessageTypeText, "It has been a pleasure assisting you. Have a great day!")
 					return
 				}
 				log.Info("initiating user input")

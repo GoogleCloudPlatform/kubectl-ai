@@ -469,7 +469,7 @@ func (c *GeminiChat) SendStreaming(ctx context.Context, contents ...any) (ChatRe
 			partsIsEmpty := true
 			if content != nil {
 				for _, part := range content.Parts {
-					if part.Text != "" || part.FunctionCall != nil {
+					if part.Text != "" || part.FunctionCall != nil || part.Thought {
 						partsIsEmpty = false
 						break
 					}
