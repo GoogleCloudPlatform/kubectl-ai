@@ -41,7 +41,6 @@ Quick notes about the various directories:
 - Source code for `kubectl-ai` CLI lives under `cmd/` and `pkg/` directories.
 - gollm directory is an independent Go module that implements LLM clients for
 different LLM providers.
-- `k8s-ai-bench` directory contains source code and tasks for the evaluation benchmark. `k8s-ai-bench` has its own [contribution guidelines.](k8s-ai-bench/contributing.md)
 - `modelserving` directory contains utilities and configuration to build and run
 open source AI models locally or in a kubernetes cluster.
 - `kubectl-utils` is an independent Go package/binary to help with the benchmarks tasks

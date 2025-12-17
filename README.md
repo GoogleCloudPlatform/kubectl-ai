@@ -22,7 +22,6 @@ efficient.
 - [MCP Client Mode](#mcp-client-mode)
 - [Extras](#extras)
 - [MCP Server Mode](#mcp-server-mode)
-- [k8s-bench](#k8s-bench)
 - [Start Contributing](#start-contributing)
 - [Learning Resources](#learning-resources)
 
@@ -456,27 +455,6 @@ This starts an MCP endpoint at `http://localhost:9080/mcp`.
 The enhanced mode provides AI clients with access to both Kubernetes operations and general-purpose tools (filesystem, web search, databases, etc.) through a single MCP endpoint.
 
 📖 **For detailed configuration, examples, and troubleshooting, see the [MCP Server Documentation](docs/mcp-server.md).**
-
-## k8s-ai-bench
-
-kubectl-ai project includes [k8s-ai-bench](./k8s-ai-bench/README.md) - a benchmark to evaluate performance of different LLM models on Kubernetes related tasks.
-
-### Latest Benchmark Results (August 2025)
-
-Comprehensive evaluation on identical 10-task Kubernetes benchmark with proper CNI environment:
-
-| Model | Success | Fail | Success Rate |
-|-------|---------|------|--------------|
-| gemini-2.5-flash-preview-04-17 | 10 | 0 | 100% |
-| gemini-2.5-pro-preview-03-25 | 10 | 0 | 100% |
-| AWS Bedrock Claude 3.7 Sonnet | 10 | 0 | 100% |
-| AWS Bedrock Claude Sonnet 4 | 10 | 0 | 100% |
-| gemma-3-27b-it | 8 | 2 | 80% |
-
-**Test Environment**: Kind cluster v1.27.3 with Calico CNI (full NetworkPolicy support)
-**Tasks**: create-pod, create-pod-mount-configmaps, create-pod-resources-limits, create-network-policy, fix-crashloop, fix-image-pull, fix-service-routing, list-images-for-pods, scale-deployment, scale-down-deployment
-
-See [full report](./k8s-ai-bench.md) for more details.
 
 ## Start Contributing
 

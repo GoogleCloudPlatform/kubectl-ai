@@ -5,6 +5,5 @@ toolchain go1.24.4
 use (
 	.
 	./gollm
-	./k8s-ai-bench
 	./kubectl-utils
 )
