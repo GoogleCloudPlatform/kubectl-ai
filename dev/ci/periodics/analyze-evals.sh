@@ -10,15 +10,18 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd ${REPO_ROOT}
 
 if [[ -z "${OUTPUT_DIR:-}" ]]; then
-    OUTPUT_DIR="${REPO_ROOT}/.build/k8saibench"
+    OUTPUT_DIR="${REPO_ROOT}/.build/k8s-ai-bench"
     mkdir -p "${OUTPUT_DIR}"
 fi
 
 BINDIR="${REPO_ROOT}/.build/bin"
 mkdir -p "${BINDIR}"
 
-cd "${REPO_ROOT}/k8s-ai-bench"
-go build -o "${BINDIR}/k8s-ai-bench" .
+K8S_AI_BENCH_SRC="${REPO_ROOT}/.build/k8s-ai-bench-src"
+rm -rf "${K8S_AI_BENCH_SRC}"
+git clone https://github.com/gke-labs/k8s-ai-bench "${K8S_AI_BENCH_SRC}"
+cd "${K8S_AI_BENCH_SRC}"
+GOWORK=off go build -o "${BINDIR}/k8s-ai-bench" .
 
 cd "${REPO_ROOT}"
 
