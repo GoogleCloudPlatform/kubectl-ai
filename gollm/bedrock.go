@@ -301,16 +301,95 @@ func (c *BedrockClient) StartChat(systemPrompt, model string) Chat {
 
 // GenerateCompletion generates a single completion for the given request
 func (c *BedrockClient) GenerateCompletion(ctx context.Context, req *CompletionRequest) (CompletionResponse, error) {
-	chat := c.StartChat("", req.Model)
-	chatResponse, err := chat.Send(ctx, req.Prompt)
+
+	err := req.validate()
 	if err != nil {
 		return nil, err
 	}
 
+	var prompt json.RawMessage
+	switch {
+	case strings.Contains(req.Model, "amazon"):
+		// handle Amazon-specific pathcase
+		amzResp := &AmazonTitanRequest{
+			Prompt: req.Prompt,
+		}
+		prompt, err = json.Marshal(amzResp)
+		if err != nil {
+			return nil, err
+		}
+
+	case strings.Contains(req.Model, "anthropic"):
+		// handle Anthropic-specific path
+		anthropicResp := &AnthropicClaudeRequest{
+			Role:    "User",
+			Content: req.Prompt,
+		}
+		prompt, err = json.Marshal(anthropicResp)
+		if err != nil {
+			return nil, err
+		}
+
+	default: // fallback handling
+		return nil, fmt.Errorf("model not supported, only specific amazon and anthropic models supported")
+	}
+
+	//Input
+	input := &bedrockruntime.InvokeModelInput{
+		ModelId:     aws.String(req.Model),
+		ContentType: aws.String("application/json"), // or text/plain depending on your payload
+		Body:        []byte(prompt),
+		Accept:      aws.String("application/json"),
+		Trace:       types.TraceEnabledFull,
+	}
+
+	//Output
+	output, err := c.client.InvokeModel(ctx, input)
+	if err != nil {
+		return nil, fmt.Errorf("InvokeModel error: %w", err)
+	}
+
 	// Wrap ChatResponse in a CompletionResponse
 	return &bedrockCompletionResponse{
-		chatResponse: chatResponse,
+		output: output,
 	}, nil
+
+}
+
+// bedrockCompletionResponse wraps a ChatResponse to implement CompletionResponse
+type bedrockCompletionResponse struct {
+	output *bedrockruntime.InvokeModelOutput
+}
+
+var _ CompletionResponse = (*bedrockCompletionResponse)(nil)
+
+func (r *bedrockCompletionResponse) Response() string {
+	if r.output == nil {
+		return ""
+	}
+
+	return string(r.output.Body)
+}
+
+// TODO (nisran) : Implement correclty
+func (r *bedrockCompletionResponse) UsageMetadata() any {
+
+	if r.output == nil {
+		return nil
+	}
+
+	return fmt.Errorf("not supported")
+}
+
+// Input Message Format - Amazon Titan Text Model
+type AmazonTitanRequest struct {
+	Prompt string `json:"inputText,omitempty"`
+}
+
+// Input Message Format - Anthropic Claude Message
+type AnthropicClaudeRequest struct {
+	Role    string `json:"role,omitempty"`
+	Content string `json:"content,omitempty"`
 }
 
 // SetResponseSchema sets the response schema for the client (not supported by Bedrock)
@@ -951,35 +1030,4 @@ func getBedrockModel(model string) string {
 	defaultModel := "us.anthropic.claude-sonnet-4-20250514-v1:0"
 	klog.V(1).Infof("Using default model: %s", defaultModel)
 	return defaultModel
-}
-
-// bedrockCompletionResponse wraps a ChatResponse to implement CompletionResponse
-type bedrockCompletionResponse struct {
-	chatResponse ChatResponse
-}
-
-var _ CompletionResponse = (*bedrockCompletionResponse)(nil)
-
-func (r *bedrockCompletionResponse) Response() string {
-	if r.chatResponse == nil {
-		return ""
-	}
-	candidates := r.chatResponse.Candidates()
-	if len(candidates) == 0 {
-		return ""
-	}
-	parts := candidates[0].Parts()
-	for _, part := range parts {
-		if text, ok := part.AsText(); ok {
-			return text
-		}
-	}
-	return ""
-}
-
-func (r *bedrockCompletionResponse) UsageMetadata() any {
-	if r.chatResponse == nil {
-		return nil
-	}
-	return r.chatResponse.UsageMetadata()
 }

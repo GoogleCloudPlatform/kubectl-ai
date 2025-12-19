@@ -19,6 +19,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
+
 	"iter"
 
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/api"
@@ -68,6 +70,20 @@ type Chat interface {
 type CompletionRequest struct {
 	Model  string `json:"model,omitempty"`
 	Prompt string `json:"prompt,omitempty"`
+}
+
+func (r *CompletionRequest) validate() error {
+	if r == nil {
+		return fmt.Errorf("completion request cannot be nil")
+	}
+
+	if strings.TrimSpace(r.Model) == "" {
+		return fmt.Errorf("model must be specified for single-turn completion")
+	}
+	if strings.TrimSpace(r.Prompt) == "" {
+		return fmt.Errorf("prompt must be provided for single-turn completion")
+	}
+	return nil
 }
 
 // CompletionResponse is a response from the GenerateCompletion method.

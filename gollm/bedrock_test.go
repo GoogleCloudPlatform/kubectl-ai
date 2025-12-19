@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestBedrockClient is a single entry point that validates Client Options
@@ -291,10 +292,21 @@ func TestBedrockClient(t *testing.T) {
 		t.Logf("✓ Correctly returned error for missing credentials: %v", err)
 	})
 
+}
+
+func TestListModels(t *testing.T) {
 	t.Run("LIVE: Network connectivity check with real Bedrock API call", func(t *testing.T) {
 		// TODO (nisranjan) Remove the short mode check
 		if testing.Short() {
 			t.Skip("Skipping live network test in short mode")
+		}
+
+		// Force the test to use Bedrock so we create the right client.
+		t.Setenv("LLM_CLIENT", "bedrock://bedrock.ap-south-1.amazonaws.com")
+		//t.Setenv("BEDROCK_MODEL", "us.anthropic.claude-sonnet-4-20250514-v1:0")
+
+		if !hasBedrockCredentials() {
+			t.Skip("Skipping Bedrock GenerateCompletion test because AWS credentials are not configured")
 		}
 
 		ctx := context.Background()
@@ -343,3 +355,119 @@ func TestBedrockClient(t *testing.T) {
 	})
 }
 
+func TestGenerateCompletion(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping Bedrock GenerateCompletion live test in short mode")
+	}
+
+	// Force the test to use Bedrock so we create the right client.
+	t.Setenv("LLM_CLIENT", "bedrock://bedrock.ap-south-1.amazonaws.com")
+	t.Setenv("BEDROCK_MODEL", "amazon.titan-text-express-v1")
+
+	if !hasBedrockCredentials() {
+		t.Skip("Skipping Bedrock GenerateCompletion test because AWS credentials are not configured")
+	}
+
+	ctx := context.Background()
+	client, err := NewClient(ctx, "")
+	if err != nil {
+		t.Fatalf("failed to create Bedrock client: %v", err)
+	}
+	defer client.Close()
+
+	validModel := getBedrockModel("")
+
+	testCases := []struct {
+		name           string
+		req            *CompletionRequest
+		expectErr      bool
+		errContains    string
+		expectResponse bool
+	}{
+		{
+			name: "model does not support messages",
+			req: &CompletionRequest{
+				Model:  "amazon.titan-text-express-v1",
+				Prompt: "Check if the model can handle simple messages.",
+			},
+			expectErr: true,
+		},
+		{
+			name: "model specified but no prompt",
+			req: &CompletionRequest{
+				Model: validModel,
+			},
+			expectErr:   true,
+			errContains: "prompt must be provided",
+		},
+		{
+			name: "prompt provided but no model",
+			req: &CompletionRequest{
+				Prompt: "This prompt is missing a model ID.",
+			},
+			expectErr:   true,
+			errContains: "model must be specified",
+		},
+		{
+			name: "unsupported models",
+			req: &CompletionRequest{
+				Model:  "openai.gpt-oss-20b-1:0",
+				Prompt: "This prompt is using an unsupported model.",
+			},
+			expectErr:   true,
+			errContains: "model not supported",
+		},
+		{
+			name: "valid completion request",
+			req: &CompletionRequest{
+				Model:  validModel,
+				Prompt: "List a couple of kubectl commands that describe namespaces.",
+			},
+			expectErr:      false,
+			expectResponse: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			reqCtx, cancel := context.WithTimeout(ctx, time.Minute)
+			defer cancel()
+
+			resp, err := client.GenerateCompletion(reqCtx, tc.req)
+			if tc.expectErr {
+				if err == nil {
+					t.Fatalf("expected error for %q, got nil", tc.name)
+				}
+				if tc.errContains != "" && !strings.Contains(strings.ToLower(err.Error()), strings.ToLower(tc.errContains)) {
+					t.Fatalf("expected error to contain %q, got %v", tc.errContains, err)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("unexpected error for %q: %v", tc.name, err)
+			}
+
+			if resp == nil {
+				t.Fatalf("expected non-nil response for %q, got nil", tc.name)
+			}
+
+			if tc.expectResponse {
+				if strings.TrimSpace(resp.Response()) == "" {
+					t.Fatalf("expected response text for %q, got empty string", tc.name)
+				}
+			}
+		})
+	}
+}
+
+func hasBedrockCredentials() bool {
+	if os.Getenv("AWS_BEARER_TOKEN_BEDROCK") != "" {
+		return true
+	}
+	if os.Getenv("AWS_ACCESS_KEY_ID") != "" && os.Getenv("AWS_SECRET_ACCESS_KEY") != "" {
+		return true
+	}
+	return false
+}
