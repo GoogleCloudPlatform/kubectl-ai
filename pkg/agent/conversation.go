@@ -437,6 +437,8 @@ func (c *Agent) Run(ctx context.Context, initialQuery string) error {
 				if c.RunOnce {
 					log.Info("RunOnce mode, exiting agent loop")
 					c.setAgentState(api.AgentStateExited)
+					c.addMessage(api.MessageSourceAgent, api.MessageTypeText, "It has been a pleasure assisting you. Have a great day!")
+					close(c.Output)
 					return
 				}
 				log.Info("initiating user input")
@@ -451,6 +453,7 @@ func (c *Agent) Run(ctx context.Context, initialQuery string) error {
 						log.Info("Agent loop done, EOF received")
 						c.setAgentState(api.AgentStateExited)
 						c.addMessage(api.MessageSourceAgent, api.MessageTypeText, "It has been a pleasure assisting you. Have a great day!")
+						close(c.Output)
 						return
 					}
 					query, ok := userInput.(*api.UserInputResponse)
@@ -524,13 +527,14 @@ func (c *Agent) Run(ctx context.Context, initialQuery string) error {
 							c.setAgentState(api.AgentStateDone)
 							c.pendingFunctionCalls = []ToolCallAnalysis{}
 							c.Session.LastModified = time.Now()
-							c.addMessage(api.MessageSourceAgent, api.MessageTypeError, "Error: "+err.Error())
 							// In RunOnce mode, exit on tool execution error
 							if c.RunOnce {
 								c.setAgentState(api.AgentStateExited)
+								c.addMessage(api.MessageSourceAgent, api.MessageTypeError, "Error: "+err.Error())
 								c.lastErr = err
 								return
 							}
+							c.addMessage(api.MessageSourceAgent, api.MessageTypeError, "Error: "+err.Error())
 							continue
 						}
 						// Clear pending function calls after execution
@@ -665,6 +669,16 @@ func (c *Agent) Run(ctx context.Context, initialQuery string) error {
 						// IMPORTANT: This also prevents UIs from getting blocked on reading from the output channel.
 						log.Info("Empty response with no tool calls from LLM.")
 						c.addMessage(api.MessageSourceAgent, api.MessageTypeText, "Empty response from LLM")
+					}
+
+					// Save conversation history to file if configured
+					// We check for GEMINI_HISTORY_PATH environment variable for now as a quick way to enable this
+					if historyPath := os.Getenv("GEMINI_HISTORY_PATH"); historyPath != "" {
+						if err := c.llmChat.SaveMessages(historyPath); err != nil {
+							log.Error(err, "Failed to save conversation history", "path", historyPath)
+						} else {
+							log.Info("Saved conversation history", "path", historyPath)
+						}
 					}
 					continue
 				}

@@ -145,8 +145,12 @@ func (cs *openAIResponseChatSession) IsRetryableError(err error) bool {
 }
 
 func (cs *openAIResponseChatSession) Initialize(messages []*api.Message) error {
-	klog.Warning("chat history persistence is not supported for provider 'openai', using in-memory chat history")
+	klog.Warning("chat history persistence is not supported for provider 'openai-responses', using in-memory chat history")
 	return nil
+}
+
+func (cs *openAIResponseChatSession) SaveMessages(path string) error {
+	return fmt.Errorf("SaveMessages is not implemented for OpenAI Response API")
 }
 
 // Helper structs for ChatResponse interface

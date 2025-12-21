@@ -469,6 +469,10 @@ func (cs *openAIChatSession) Initialize(messages []*api.Message) error {
 	return nil
 }
 
+func (cs *openAIChatSession) SaveMessages(path string) error {
+	return fmt.Errorf("SaveMessages is not implemented for OpenAI")
+}
+
 // Helper structs for ChatResponse interface
 
 type openAIChatResponse struct {

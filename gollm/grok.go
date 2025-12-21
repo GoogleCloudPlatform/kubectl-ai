@@ -385,6 +385,10 @@ func (cs *grokChatSession) Initialize(messages []*api.Message) error {
 	return nil
 }
 
+func (cs *grokChatSession) SaveMessages(path string) error {
+	return fmt.Errorf("SaveMessages is not implemented for Grok")
+}
+
 // --- Helper structs for ChatResponse interface ---
 
 type grokChatResponse struct {

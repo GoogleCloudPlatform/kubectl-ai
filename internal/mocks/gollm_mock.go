@@ -166,6 +166,20 @@ func (mr *MockChatMockRecorder) IsRetryableError(arg0 any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsRetryableError", reflect.TypeOf((*MockChat)(nil).IsRetryableError), arg0)
 }
 
+// SaveMessages mocks base method.
+func (m *MockChat) SaveMessages(path string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SaveMessages", path)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// SaveMessages indicates an expected call of SaveMessages.
+func (mr *MockChatMockRecorder) SaveMessages(path any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SaveMessages", reflect.TypeOf((*MockChat)(nil).SaveMessages), path)
+}
+
 // Send mocks base method.
 func (m *MockChat) Send(ctx context.Context, contents ...any) (gollm.ChatResponse, error) {
 	m.ctrl.T.Helper()

@@ -24,6 +24,6 @@ package mocks
 // tools interface
 //   - Tool
 
-//go:generate mockgen -destination=gollm_mock.go -package=mocks github.com/GoogleCloudPlatform/kubectl-ai/gollm Client,Chat
-//go:generate mockgen -destination=tools_mock.go -package=mocks github.com/GoogleCloudPlatform/kubectl-ai/pkg/tools Tool
-//go:generate mockgen -destination=agent_mock.go -package=mocks github.com/GoogleCloudPlatform/kubectl-ai/pkg/api ChatMessageStore
+//go:generate go run go.uber.org/mock/mockgen -destination=gollm_mock.go -package=mocks github.com/GoogleCloudPlatform/kubectl-ai/gollm Client,Chat
+//go:generate go run go.uber.org/mock/mockgen -destination=tools_mock.go -package=mocks github.com/GoogleCloudPlatform/kubectl-ai/pkg/tools Tool
+//go:generate go run go.uber.org/mock/mockgen -destination=agent_mock.go -package=mocks github.com/GoogleCloudPlatform/kubectl-ai/pkg/api ChatMessageStore

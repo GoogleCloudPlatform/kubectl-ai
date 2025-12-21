@@ -275,6 +275,10 @@ func (c *AzureOpenAIChat) Initialize(messages []*api.Message) error {
 	return nil
 }
 
+func (c *AzureOpenAIChat) SaveMessages(path string) error {
+	return fmt.Errorf("SaveMessages is not implemented for AzureOpenAI")
+}
+
 func (c *AzureOpenAIChat) SendStreaming(ctx context.Context, contents ...any) (ChatResponseIterator, error) {
 	// TODO: Implement streaming
 	response, err := c.Send(ctx, contents...)
