@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -279,6 +280,8 @@ func (c *BedrockClient) StartChat(systemPrompt, model string) Chat {
 
 	// Enhance system prompt for tool-use shim compatibility
 	// Detect if tool-use shim is enabled by looking for JSON formatting instructions
+
+	/*TODO (nisran) - find alternate solutions if this is required
 	enhancedPrompt := systemPrompt
 	if strings.Contains(systemPrompt, "```json") && strings.Contains(systemPrompt, "\"action\"") {
 		// Tool-use shim is enabled - add stronger JSON formatting instructions for all Bedrock models
@@ -289,17 +292,18 @@ func (c *BedrockClient) StartChat(systemPrompt, model string) Chat {
 		enhancedPrompt += "4. This is critical for proper parsing. Example format:\n"
 		enhancedPrompt += "```json\n{\"thought\": \"your reasoning\", \"action\": {\"name\": \"tool_name\", \"command\": \"command\"}}\n```\n"
 		enhancedPrompt += "Note the comma after the \"thought\" field! Malformed JSON will cause failures."
-	}
+	}*/
 
 	return &bedrockChat{
-		client:       c,
-		systemPrompt: enhancedPrompt,
-		model:        selectedModel,
-		messages:     []types.Message{},
+		client: c,
+		//systemPrompt: enhancedPrompt,
+		model:    selectedModel,
+		messages: []types.Message{},
 	}
 }
 
 // GenerateCompletion generates a single completion for the given request
+// https://docs.aws.amazon.com/bedrock/latest/userguide/inference-invoke.html
 func (c *BedrockClient) GenerateCompletion(ctx context.Context, req *CompletionRequest) (CompletionResponse, error) {
 
 	err := req.validate()
@@ -307,6 +311,7 @@ func (c *BedrockClient) GenerateCompletion(ctx context.Context, req *CompletionR
 		return nil, err
 	}
 
+	// Support for Amazon Titan and Anthropic Claude
 	var prompt json.RawMessage
 	switch {
 	case strings.Contains(req.Model, "amazon"):
@@ -378,6 +383,7 @@ func (r *bedrockCompletionResponse) UsageMetadata() any {
 		return nil
 	}
 
+	//TODO (nisran) check if we can support this
 	return fmt.Errorf("not supported")
 }
 
@@ -479,39 +485,45 @@ func (cs *bedrockChat) Initialize(history []*api.Message) error {
 }
 
 // Send sends a message to the chat and returns the response
-func (c *bedrockChat) Send(ctx context.Context, contents ...any) (ChatResponse, error) {
+func (chat *bedrockChat) Send(ctx context.Context, contents ...any) (ChatResponse, error) {
 	if len(contents) == 0 {
 		return nil, errors.New("no content provided")
 	}
 
 	// Process and append contents to conversation history
-	if err := c.addContentsToHistory(contents); err != nil {
+	if err := chat.addContentsToHistory(contents); err != nil {
 		return nil, err
 	}
 
 	// Prepare the request
 	input := &bedrockruntime.ConverseInput{
-		ModelId:  aws.String(c.model),
-		Messages: c.messages,
+		ModelId:  aws.String(chat.model),
+		Messages: chat.messages,
+		/* (nisran) Max Token needs implementaiton at Client Interface
 		InferenceConfig: &types.InferenceConfiguration{
 			MaxTokens: aws.Int32(4096),
-		},
+		},*/
 	}
 
 	// Add system prompt if provided
-	if c.systemPrompt != "" {
-		input.System = []types.SystemContentBlock{
-			&types.SystemContentBlockMemberText{Value: c.systemPrompt},
+	if chat.systemPrompt != "" {
+		if isSystemPromptSupported(chat.model) {
+			input.System = []types.SystemContentBlock{
+				&types.SystemContentBlockMemberText{Value: chat.systemPrompt},
+			}
+		} else {
+			return nil, fmt.Errorf("model %s doesn't support system prompts", chat.model)
 		}
+
 	}
 
 	// Add tool configuration if functions are defined
-	if c.toolConfig != nil {
-		input.ToolConfig = c.toolConfig
+	if chat.toolConfig != nil {
+		input.ToolConfig = chat.toolConfig
 	}
 
 	// Call the Bedrock Converse API
-	output, err := c.client.client.Converse(ctx, input)
+	output, err := chat.client.client.Converse(ctx, input)
 	if err != nil {
 		return nil, fmt.Errorf("bedrock converse error: %w", err)
 	}
@@ -519,17 +531,39 @@ func (c *bedrockChat) Send(ctx context.Context, contents ...any) (ChatResponse, 
 	// Extract response content and update conversation history
 	response := &bedrockResponse{
 		output: output,
-		model:  c.model,
+		model:  chat.model,
 	}
 
 	// Update conversation history with assistant's response
 	if output.Output != nil {
 		if msg, ok := output.Output.(*types.ConverseOutputMemberMessage); ok {
-			c.messages = append(c.messages, msg.Value)
+			chat.messages = append(chat.messages, msg.Value)
 		}
 	}
 
 	return response, nil
+}
+
+// Certain Models don't support system prompts via ConverseAPI
+// see https://docs.aws.amazon.com/bedrock/latest/userguide/conversation-inference-supported-models-features.html
+// Includes Mistral AI Instruct with ModelID as mistral.mistral-7b-instruct etc.
+
+var systemPromptBlacklistPrefixes = []string{
+	"amazon.titan-",
+	"cohere.command-",
+}
+
+var systemPromptBlacklistRegex = regexp.MustCompile(`^mistral\.mistral-\d+[a-z]-instruct$`)
+
+func isSystemPromptSupported(modelID string) bool {
+	for _, prefix := range systemPromptBlacklistPrefixes {
+		if strings.HasPrefix(modelID, prefix) {
+			return false
+		}
+	}
+
+	return !systemPromptBlacklistRegex.MatchString(modelID)
+
 }
 
 // SendStreaming sends a message and returns a streaming response
@@ -732,6 +766,7 @@ func (c *bedrockChat) addContentsToHistory(contents []any) error {
 					}
 				}
 				// Check for status field
+				//(nisran) only used for Nova, Claude 3 & 4
 				if statusVal, hasStatus := c.Result["status"]; hasStatus {
 					if statusStr, isString := statusVal.(string); isString &&
 						(statusStr == "failed" || statusStr == "error") {
@@ -739,15 +774,16 @@ func (c *bedrockChat) addContentsToHistory(contents []any) error {
 					}
 				}
 			}
-
 			// Convert to AWS Bedrock ToolResultBlock format per official docs
 			toolResult := types.ToolResultBlock{
 				ToolUseId: aws.String(c.ID),
 				Content: []types.ToolResultContentBlock{
+					//(nisran) this could be ToolResultContentBlockText
 					&types.ToolResultContentBlockMemberJson{
 						Value: document.NewLazyDocument(c.Result),
 					},
 				},
+				//(nisran) only used for Nova, Claude 3 & 4
 				Status: status,
 			}
 			contentBlocks = append(contentBlocks, &types.ContentBlockMemberToolResult{Value: toolResult})
@@ -769,6 +805,11 @@ func (c *bedrockChat) addContentsToHistory(contents []any) error {
 
 // SetFunctionDefinitions configures the available functions for tool use
 func (c *bedrockChat) SetFunctionDefinitions(functions []*FunctionDefinition) error {
+
+	if !isFunctionCallingSupported(c.model) {
+		return fmt.Errorf("model %s does not support tools", c.model)
+	}
+
 	c.functionDefs = functions
 
 	if len(functions) == 0 {
@@ -780,6 +821,7 @@ func (c *bedrockChat) SetFunctionDefinitions(functions []*FunctionDefinition) er
 	for _, fn := range functions {
 		// Convert gollm function definition to AWS tool specification
 		inputSchema := make(map[string]interface{})
+
 		if fn.Parameters != nil {
 			// Convert Schema to map[string]interface{}
 			jsonData, err := json.Marshal(fn.Parameters)
@@ -789,6 +831,9 @@ func (c *bedrockChat) SetFunctionDefinitions(functions []*FunctionDefinition) er
 			if err := json.Unmarshal(jsonData, &inputSchema); err != nil {
 				return fmt.Errorf("failed to unmarshal function parameters: %w", err)
 			}
+
+			//fmt.Printf("func pointer as JSON %s\n", jsonData)
+			//fmt.Printf("inputSchema %+v \n", inputSchema)
 		}
 
 		toolSpec := types.ToolSpecification{
@@ -800,16 +845,41 @@ func (c *bedrockChat) SetFunctionDefinitions(functions []*FunctionDefinition) er
 		}
 
 		tools = append(tools, &types.ToolMemberToolSpec{Value: toolSpec})
+
 	}
 
+	/* TODO (nisran) validate this*/
 	c.toolConfig = &types.ToolConfiguration{
 		Tools: tools,
-		ToolChoice: &types.ToolChoiceMemberAny{
-			Value: types.AnyToolChoice{},
-		},
 	}
 
 	return nil
+}
+
+// Not all ModelIDs support FunctionalCalling in Bedrock
+// see https://docs.aws.amazon.com/bedrock/latest/userguide/conversation-inference-supported-models-features.html
+
+var functionCallBlacklist = []struct {
+	prefix string
+	re     *regexp.Regexp
+}{
+	{prefix: "amazon.titan-"},
+	{prefix: "cohere.command-"},
+	{prefix: "meta.llama3-"},
+	{prefix: "mistral.mixtral-8x7b-instruct-v0:1"}, //TODO: add this to regex
+	{re: regexp.MustCompile(`^mistral\.mistral-\d+[a-z]-instruct`)},
+}
+
+func isFunctionCallingSupported(modelID string) bool {
+	for _, entry := range functionCallBlacklist {
+		if entry.prefix != "" && strings.HasPrefix(modelID, entry.prefix) {
+			return false
+		}
+		if entry.re != nil && entry.re.MatchString(modelID) {
+			return false
+		}
+	}
+	return true
 }
 
 // IsRetryableError determines if an error is retryable

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	//"github.com/GoogleCloudPlatform/kubectl-ai/gollm"
 )
 
 // TestBedrockClient is a single entry point that validates Client Options
@@ -462,6 +463,74 @@ func TestGenerateCompletion(t *testing.T) {
 	}
 }
 
+func TestStartChat(t *testing.T) {
+	if testing.Short() {
+		t.Skip("live Bedrock tests skipped in short mode")
+	}
+	if !hasBedrockCredentials() {
+		t.Skip("AWS credentials are required for Bedrock StartChat tests")
+	}
+
+	t.Setenv("LLM_CLIENT", "bedrock://bedrock.ap-south-1.amazonaws.com")
+	ctx := context.Background()
+	client, err := NewClient(ctx, "")
+	if err != nil {
+		t.Fatalf("failed to create Bedrock client: %v", err)
+	}
+	defer client.Close()
+
+	bedrockClient, ok := client.(*BedrockClient)
+	if !ok {
+		t.Fatalf("expected *BedrockClient, got %T", client)
+	}
+
+	models, err := bedrockClient.ListModels(ctx)
+	if err != nil {
+		t.Fatalf("ListModels failed: %v", err)
+	}
+	if len(models) == 0 {
+		t.Fatal("expected at least one Bedrock model from ListModels")
+	}
+	validModel := models[0]
+
+	testCases := []struct {
+		name       string
+		model      string
+		expectErr  string
+		expectChat bool
+	}{
+		{
+			name:      "nonexistent model",
+			model:     "does-not-exist-model",
+			expectErr: "model",
+		},
+		{
+			name:      "model not in ListModels",
+			model:     "some-virtual-but-not-in-list",
+			expectErr: "model not available",
+		},
+		{
+			name:       "valid model",
+			model:      validModel,
+			expectChat: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			chat := bedrockClient.StartChat("system prompt", tc.model)
+			if tc.expectErr != "" {
+				// StartChat would have to return (Chat, error) or expose validation; adapt once that change exists
+				t.Fatalf("expected error %q but StartChat currently cannot return errors", tc.expectErr)
+			}
+			if tc.expectChat && chat == nil {
+				t.Fatalf("expected a Chat, got nil")
+			}
+		})
+	}
+}
+
 func hasBedrockCredentials() bool {
 	if os.Getenv("AWS_BEARER_TOKEN_BEDROCK") != "" {
 		return true
@@ -470,4 +539,378 @@ func hasBedrockCredentials() bool {
 		return true
 	}
 	return false
+}
+
+func TestSend(t *testing.T) {
+	// ... existing short/credential guard ...
+	if testing.Short() {
+		t.Skip("live Bedrock tests skipped in short mode")
+	}
+	if !hasBedrockCredentials() {
+		t.Skip("AWS credentials are required for Bedrock chat tests")
+	}
+
+	// Force the test to use Bedrock so we create the right client.
+	t.Setenv("BEDROCK_MODEL", "amazon.titan-text-express-v1")
+	t.Setenv("LLM_CLIENT", "bedrock://bedrock.ap-south-1.amazonaws.com")
+
+	ctx := context.Background()
+	client, err := NewClient(ctx, "")
+	if err != nil {
+		t.Fatalf("failed to create Bedrock client: %v", err)
+	}
+	defer client.Close()
+
+	bedrockClient, ok := client.(*BedrockClient)
+	if !ok {
+		t.Fatalf("expected *BedrockClient, got %T", client)
+	}
+
+	models, err := bedrockClient.ListModels(ctx)
+	if err != nil {
+		t.Fatalf("ListModels failed: %v", err)
+	}
+	if len(models) == 0 {
+		t.Fatal("expected at least one Bedrock model")
+	}
+	validModel := models[0]
+
+	testCases := []struct {
+		name        string
+		model       string
+		contents    []any
+		expectErr   string
+		expectReply bool
+	}{
+		{
+			name:      "missing message",
+			model:     validModel,
+			contents:  nil,
+			expectErr: "message",
+		},
+		{
+			name:        "first message",
+			model:       validModel,
+			contents:    []any{"Hello from the test"},
+			expectReply: true,
+		},
+	}
+
+	if len(models) > 1 {
+		for i := range models {
+			testCases = append(testCases, struct {
+				name        string
+				model       string
+				contents    []any
+				expectErr   string
+				expectReply bool
+			}{
+				name:        "different model",
+				model:       models[i],
+				contents:    []any{"Hello from another model"},
+				expectReply: true,
+			})
+		}
+
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			chat := bedrockClient.StartChat("You are a helpful assistant.", tc.model)
+			if chat == nil {
+				t.Fatalf("expected chat, got nil")
+			}
+
+			resp, err := chat.Send(ctx, tc.contents...)
+			if tc.expectErr != "" {
+				if err == nil || !strings.Contains(strings.ToLower(err.Error()), strings.ToLower(tc.expectErr)) {
+					t.Fatalf("expected error containing %q, got %v", tc.expectErr, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if resp == nil {
+				t.Fatalf("expected non-nil response")
+			}
+			candidates := resp.Candidates()
+			if tc.expectReply {
+				if len(candidates) == 0 {
+					t.Fatalf("expected at least one candidate, got none")
+				}
+				if usage := resp.UsageMetadata(); usage == nil {
+					t.Fatalf("expected usage metadata from response")
+				}
+				return
+			}
+			if len(candidates) != 0 {
+				t.Fatalf("expected no candidates, got %d", len(candidates))
+			}
+		})
+	}
+}
+
+func TestSendStreaming(t *testing.T) {
+	if testing.Short() {
+		t.Skip("live Bedrock tests skipped in short mode")
+	}
+	if !hasBedrockCredentials() {
+		t.Skip("AWS credentials are required for Bedrock chat tests")
+	}
+
+	t.Setenv("BEDROCK_MODEL", "amazon.titan-text-express-v1")
+	t.Setenv("LLM_CLIENT", "bedrock://bedrock.ap-south-1.amazonaws.com")
+
+	ctx := context.Background()
+	client, err := NewClient(ctx, "")
+	if err != nil {
+		t.Fatalf("failed to create Bedrock client: %v", err)
+	}
+	defer client.Close()
+
+	bedrockClient, ok := client.(*BedrockClient)
+	if !ok {
+		t.Fatalf("expected *BedrockClient, got %T", client)
+	}
+
+	models, err := bedrockClient.ListModels(ctx)
+	if err != nil {
+		t.Fatalf("ListModels failed: %v", err)
+	}
+	if len(models) == 0 {
+		t.Fatal("expected at least one Bedrock model")
+	}
+	validModel := models[0]
+
+	chat := bedrockClient.StartChat("You are a helpful assistant.", validModel)
+	if chat == nil {
+		t.Fatal("expected chat, got nil")
+	}
+
+	streamCtx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+
+	iter, err := chat.SendStreaming(streamCtx, "List two kubectl commands that describe namespaces.")
+	if err != nil {
+		t.Fatalf("unexpected streaming error: %v", err)
+	}
+	if iter == nil {
+		t.Fatal("expected streaming iterator, got nil")
+	}
+
+	var sawText bool
+	iter(func(resp ChatResponse, err error) bool {
+		if err != nil {
+			t.Fatalf("streaming error: %v", err)
+		}
+		for _, candidate := range resp.Candidates() {
+			for _, part := range candidate.Parts() {
+				if text, ok := part.AsText(); ok {
+					if trimmed := strings.TrimSpace(text); trimmed != "" {
+						sawText = true
+						t.Logf("Streaming chunk: %q", trimmed)
+					}
+				}
+			}
+		}
+		return true
+	})
+
+	if !sawText {
+		t.Fatalf("expected non-empty streaming response")
+	}
+}
+
+func TestFunctionCalling(t *testing.T) {
+	if testing.Short() {
+		t.Skip("live Bedrock tests skipped in short mode")
+	}
+	if !hasBedrockCredentials() {
+		t.Skip("AWS credentials are required for Bedrock function-calling tests")
+	}
+
+	t.Setenv("LLM_CLIENT", "bedrock://bedrock.ap-south-1.amazonaws.com")
+	t.Setenv("BEDROCK_MODEL", "qwen.qwen3-vl-235b-a22b")
+
+	ctx := context.Background()
+	client, err := NewClient(ctx, "")
+	if err != nil {
+		t.Fatalf("failed to create Bedrock client: %v", err)
+	}
+	defer client.Close()
+
+	bedrockClient, ok := client.(*BedrockClient)
+	if !ok {
+		t.Fatalf("expected *BedrockClient, got %T", client)
+	}
+
+	chat := bedrockClient.StartChat("You are a helpful assistant.", "")
+	if chat == nil {
+		t.Fatalf("expected chat, got nil")
+	}
+
+	// Define a simple tool that lists files in the working directory
+	toolDef := &FunctionDefinition{
+		Name:        "list_files",
+		Description: "Lists all files in given directory",
+		Parameters: &Schema{
+			Type: TypeObject,
+			Properties: map[string]*Schema{
+				"directory": {
+					Type:        TypeString,
+					Description: "The directory whose files are to be listed",
+				},
+			},
+			Required: []string{"directory"},
+		},
+	}
+	if err := chat.SetFunctionDefinitions([]*FunctionDefinition{toolDef}); err != nil {
+		t.Fatalf("failed to set function definitions: %v", err)
+	}
+
+	response, err := chat.Send(ctx, "What are all the files with go extension in the current directory?")
+	if err != nil {
+		t.Fatalf("Send error: %v", err)
+	}
+
+	var gotToolCall bool
+
+	for _, candidate := range response.Candidates() {
+		for _, part := range candidate.Parts() {
+			if calls, ok := part.AsFunctionCalls(); ok {
+				gotToolCall = true
+				for _, call := range calls {
+					// Simulate the tool: run `ls` and send the result back
+					if call.Name != "list_files" {
+						t.Fatalf("unexpected function call %q", call.Name)
+					}
+					args, ok := call.Arguments["directory"].(string)
+					if !ok || args == "" {
+						args = "."
+					}
+					output, err := os.ReadDir(args)
+					if err != nil {
+						t.Fatalf("failed to list directory %q: %v", args, err)
+					}
+					files := []string{}
+					for _, entry := range output {
+						if strings.HasSuffix(entry.Name(), ".go") {
+							files = append(files, entry.Name())
+						}
+						//(nisran) Uncomment to see all files
+						//t.Logf("Got file %s", entry)
+					}
+					result := map[string]any{
+						"files": files,
+					}
+
+					resp, err := chat.Send(ctx, FunctionCallResult{
+						ID:     call.ID,
+						Name:   call.Name,
+						Result: result,
+						//Status: types.
+					})
+					if err != nil {
+						t.Fatalf("failed to send function result: %v", err)
+					}
+					t.Logf("Send response candidates: %d", len(resp.Candidates()))
+					/* Uncomment to see LLM output
+					for _, candi := range resp.Candidates() {
+						t.Logf("Candidate: %s", candi.String())
+						for _, prt := range candi.Parts() {
+							if prtText, isText := prt.AsText(); isText {
+								t.Logf("Parts: %s", prtText)
+							}
+							_, isText := prt.AsFunctionCalls()
+							if isText {
+								t.Logf("Parts is FunctionCall")
+							}
+						}
+					}
+					*/
+				}
+			}
+		}
+	}
+
+	if !gotToolCall {
+		t.Fatalf("expected Bedrock to invoke the function call")
+	}
+}
+
+func TestFunctionCalling_Coverage(t *testing.T) {
+	if testing.Short() {
+		t.Skip("live Bedrock tests skipped in short mode")
+	}
+	if !hasBedrockCredentials() {
+		t.Skip("AWS credentials are required for Bedrock function-calling coverage tests")
+	}
+
+	t.Setenv("LLM_CLIENT", "bedrock://bedrock.ap-south-1.amazonaws.com")
+	ctx := context.Background()
+	client, err := NewClient(ctx, "")
+	if err != nil {
+		t.Fatalf("failed to create Bedrock client: %v", err)
+	}
+	defer client.Close()
+
+	bedrockClient, ok := client.(*BedrockClient)
+	if !ok {
+		t.Fatalf("expected *BedrockClient, got %T", client)
+	}
+
+	models, err := bedrockClient.ListModels(ctx)
+	if err != nil {
+		t.Fatalf("ListModels failed: %v", err)
+	}
+	if len(models) == 0 {
+		t.Fatal("ListModels returned no models")
+	}
+
+	toolDef := &FunctionDefinition{
+		Name:        "list_files",
+		Description: "List go files in the current directory",
+		Parameters: &Schema{
+			Type: TypeObject,
+			Properties: map[string]*Schema{
+				"directory": {
+					Type:        TypeString,
+					Description: "Directory to list",
+				},
+			},
+			Required: []string{"directory"},
+		},
+	}
+
+	for _, modelID := range models {
+		modelID := modelID
+		t.Run(modelID, func(t *testing.T) {
+			chat := bedrockClient.StartChat("You are a helpful assistant.", modelID)
+			if chat == nil {
+				t.Fatalf("StartChat returned nil for %q", modelID)
+			}
+
+			err := chat.SetFunctionDefinitions([]*FunctionDefinition{toolDef})
+			supported := isFunctionCallingSupported(modelID)
+			if !supported {
+				if err == nil {
+					t.Fatalf("expected SetFunctionDefinitions to fail for unsupported model %q", modelID)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error setting functions for %q: %v", modelID, err)
+			}
+
+			resp, err := chat.Send(ctx, "List files in the current directory.")
+			if err != nil {
+				t.Fatalf("unexpected error calling Send for %q: %v", modelID, err)
+			}
+			if resp == nil || len(resp.Candidates()) == 0 {
+				t.Fatalf("expected candidates from %q", modelID)
+			}
+		})
+	}
 }
