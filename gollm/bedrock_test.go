@@ -2,10 +2,14 @@ package gollm
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/bedrock"
 	//"github.com/GoogleCloudPlatform/kubectl-ai/gollm"
 )
 
@@ -675,51 +679,82 @@ func TestSendStreaming(t *testing.T) {
 		t.Fatalf("expected *BedrockClient, got %T", client)
 	}
 
-	models, err := bedrockClient.ListModels(ctx)
+	streamingModels, nonStreamingModels, err := GetModelStreamingNotSupported(ctx, bedrockClient)
 	if err != nil {
-		t.Fatalf("ListModels failed: %v", err)
+		t.Fatalf("failed to determine streaming support: %v", err)
 	}
-	if len(models) == 0 {
-		t.Fatal("expected at least one Bedrock model")
-	}
-	validModel := models[0]
-
-	chat := bedrockClient.StartChat("You are a helpful assistant.", validModel)
-	if chat == nil {
-		t.Fatal("expected chat, got nil")
+	if len(streamingModels) == 0 {
+		t.Skip("no streaming-supported models discovered via Bedrock APIs")
 	}
 
-	streamCtx, cancel := context.WithTimeout(ctx, time.Minute)
-	defer cancel()
+	const prompt = "List two kubectl commands that describe namespaces."
 
-	iter, err := chat.SendStreaming(streamCtx, "List two kubectl commands that describe namespaces.")
-	if err != nil {
-		t.Fatalf("unexpected streaming error: %v", err)
-	}
-	if iter == nil {
-		t.Fatal("expected streaming iterator, got nil")
-	}
+	for _, modelID := range streamingModels {
+		modelID := modelID
+		t.Run("streaming/"+modelID, func(t *testing.T) {
+			chat := bedrockClient.StartChat("You are a helpful assistant.", modelID)
+			if chat == nil {
+				t.Fatalf("expected chat, got nil for %s", modelID)
+			}
 
-	var sawText bool
-	iter(func(resp ChatResponse, err error) bool {
-		if err != nil {
-			t.Fatalf("streaming error: %v", err)
-		}
-		for _, candidate := range resp.Candidates() {
-			for _, part := range candidate.Parts() {
-				if text, ok := part.AsText(); ok {
-					if trimmed := strings.TrimSpace(text); trimmed != "" {
-						sawText = true
-						t.Logf("Streaming chunk: %q", trimmed)
+			reqCtx, cancel := context.WithTimeout(ctx, time.Minute)
+			defer cancel()
+
+			iter, err := chat.SendStreaming(reqCtx, prompt)
+			if err != nil {
+				t.Fatalf("unexpected streaming error for %s: %v", modelID, err)
+			}
+			if iter == nil {
+				t.Fatalf("expected streaming iterator for %s, got nil", modelID)
+			}
+
+			var sawText bool
+			iter(func(resp ChatResponse, err error) bool {
+				if err != nil {
+					t.Fatalf("streaming error for %s: %v", modelID, err)
+				}
+				for _, candidate := range resp.Candidates() {
+					for _, part := range candidate.Parts() {
+						if text, ok := part.AsText(); ok {
+							if trimmed := strings.TrimSpace(text); trimmed != "" {
+								sawText = true
+								t.Logf("Streaming chunk [%s]: %q", modelID, trimmed)
+							}
+						}
 					}
 				}
-			}
-		}
-		return true
-	})
+				return true
+			})
 
-	if !sawText {
-		t.Fatalf("expected non-empty streaming response")
+			if !sawText {
+				t.Fatalf("expected non-empty streaming response for %s", modelID)
+			}
+		})
+	}
+
+	if len(nonStreamingModels) == 0 {
+		t.Skip("no non-streaming models discovered via Bedrock APIs")
+	}
+
+	for _, modelID := range nonStreamingModels {
+		modelID := modelID
+		t.Run("nonstreaming/"+modelID, func(t *testing.T) {
+			chat := bedrockClient.StartChat("You are a helpful assistant.", modelID)
+			if chat == nil {
+				t.Fatalf("expected chat, got nil for %s", modelID)
+			}
+
+			reqCtx, cancel := context.WithTimeout(ctx, time.Minute)
+			defer cancel()
+
+			_, err := chat.SendStreaming(reqCtx, prompt)
+			if err == nil {
+				t.Fatalf("expected streaming error for non-streaming model %s, got nil", modelID)
+			}
+			if !strings.Contains(err.Error(), "model does not support streaming chat") {
+				t.Fatalf("expected streaming rejection for %s, got: %v", modelID, err)
+			}
+		})
 	}
 }
 
@@ -913,4 +948,46 @@ func TestFunctionCalling_Coverage(t *testing.T) {
 			}
 		})
 	}
+}
+
+func GetModelStreamingNotSupported(ctx context.Context, bedrockClient *BedrockClient) (streaming, nonStreaming []string, err error) {
+	if bedrockClient == nil || bedrockClient.controlPlane == nil {
+		return nil, nil, fmt.Errorf("bedrock client not initialized")
+	}
+
+	output, err := bedrockClient.controlPlane.ListFoundationModels(ctx, &bedrock.ListFoundationModelsInput{})
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to list foundation models: %w", err)
+	}
+
+	streamingSupport := make(map[string]bool, len(output.ModelSummaries))
+	for _, summary := range output.ModelSummaries {
+		if summary.ModelId == nil {
+			continue
+		}
+		streamingSupport[aws.ToString(summary.ModelId)] = aws.ToBool(summary.ResponseStreamingSupported)
+	}
+
+	models, err := bedrockClient.ListModels(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to list available models: %w", err)
+	}
+
+	for _, modelID := range models {
+		supported, ok := streamingSupport[modelID]
+		if !ok {
+			continue
+		}
+		if supported && len(streaming) < 5 {
+			streaming = append(streaming, modelID)
+		}
+		if !supported && len(nonStreaming) < 5 {
+			nonStreaming = append(nonStreaming, modelID)
+		}
+		if len(streaming) >= 5 && len(nonStreaming) >= 5 {
+			break
+		}
+	}
+
+	return streaming, nonStreaming, nil
 }

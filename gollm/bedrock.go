@@ -28,6 +28,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/bedrock"
+	bedrocktypes "github.com/aws/aws-sdk-go-v2/service/bedrock/types"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/document"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
@@ -63,8 +64,9 @@ func newBedrockClientFactory(ctx context.Context, opts ClientOptions) (Client, e
 
 // BedrockClient implements the gollm.Client interface for AWS Bedrock models
 type BedrockClient struct {
-	client        *bedrockruntime.Client
-	bedrockClient *bedrock.Client
+	runtime      *bedrockruntime.Client
+	controlPlane *bedrock.Client
+	models       []*bedrocktypes.FoundationModelSummary
 }
 
 // Ensure BedrockClient implements the Client interface
@@ -263,9 +265,27 @@ func NewBedrockClient(ctx context.Context, opts BedrockClientOptions) (*BedrockC
 
 	cfg.Region = finalRegion
 
+	controlPlane := bedrock.NewFromConfig(cfg)
+	runtime := bedrockruntime.NewFromConfig(cfg)
+
+	// Filter text only models
+	input := &bedrock.ListFoundationModelsInput{
+		ByOutputModality: bedrocktypes.ModelModalityText,
+	}
+	output, err := controlPlane.ListFoundationModels(ctx, input)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list foundation models: %w", err)
+	}
+
+	modelSummaries := make([]*bedrocktypes.FoundationModelSummary, len(output.ModelSummaries))
+	for i := range output.ModelSummaries {
+		modelSummaries[i] = &output.ModelSummaries[i]
+	}
+
 	return &BedrockClient{
-		client:        bedrockruntime.NewFromConfig(cfg),
-		bedrockClient: bedrock.NewFromConfig(cfg),
+		controlPlane: controlPlane,
+		runtime:      runtime,
+		models:       modelSummaries,
 	}, nil
 }
 
@@ -276,29 +296,31 @@ func (c *BedrockClient) Close() error {
 
 // StartChat starts a new chat session with the specified system prompt and model
 func (c *BedrockClient) StartChat(systemPrompt, model string) Chat {
+
 	selectedModel := getBedrockModel(model)
 
-	// Enhance system prompt for tool-use shim compatibility
-	// Detect if tool-use shim is enabled by looking for JSON formatting instructions
-
-	/*TODO (nisran) - find alternate solutions if this is required
-	enhancedPrompt := systemPrompt
-	if strings.Contains(systemPrompt, "```json") && strings.Contains(systemPrompt, "\"action\"") {
-		// Tool-use shim is enabled - add stronger JSON formatting instructions for all Bedrock models
-		enhancedPrompt += "\n\nCRITICAL JSON FORMATTING REQUIREMENTS:\n"
-		enhancedPrompt += "1. You MUST ALWAYS wrap your JSON responses in ```json code blocks exactly as shown in the examples above.\n"
-		enhancedPrompt += "2. NEVER respond with raw JSON without the markdown ```json formatting.\n"
-		enhancedPrompt += "3. Ensure your JSON is syntactically correct with proper commas between fields.\n"
-		enhancedPrompt += "4. This is critical for proper parsing. Example format:\n"
-		enhancedPrompt += "```json\n{\"thought\": \"your reasoning\", \"action\": {\"name\": \"tool_name\", \"command\": \"command\"}}\n```\n"
-		enhancedPrompt += "Note the comma after the \"thought\" field! Malformed JSON will cause failures."
-	}*/
+	var modelSummary *bedrocktypes.FoundationModelSummary
+	for _, modelSumm := range c.models {
+		if modelSumm == nil || modelSumm.ModelId == nil {
+			continue
+		}
+		if *modelSumm.ModelId == selectedModel {
+			modelSummary = modelSumm
+			break
+		}
+	}
+	//TODO (nisran) : should be able to retutn errors
+	if modelSummary == nil {
+		return nil
+	}
 
 	return &bedrockChat{
 		client: c,
+		//TODO: handle systemPrompts for models which support
 		//systemPrompt: enhancedPrompt,
-		model:    selectedModel,
-		messages: []types.Message{},
+		model:        selectedModel,
+		modelSummary: modelSummary,
+		messages:     []types.Message{},
 	}
 }
 
@@ -349,7 +371,7 @@ func (c *BedrockClient) GenerateCompletion(ctx context.Context, req *CompletionR
 	}
 
 	//Output
-	output, err := c.client.InvokeModel(ctx, input)
+	output, err := c.runtime.InvokeModel(ctx, input)
 	if err != nil {
 		return nil, fmt.Errorf("InvokeModel error: %w", err)
 	}
@@ -405,20 +427,13 @@ func (c *BedrockClient) SetResponseSchema(schema *Schema) error {
 
 // ListModels returns the list of supported Bedrock models by calling the AWS Bedrock API
 func (c *BedrockClient) ListModels(ctx context.Context) ([]string, error) {
-	if c.bedrockClient == nil {
+	if c.controlPlane == nil {
 		return nil, fmt.Errorf("bedrock client not initialized")
 	}
 
-	// Call ListFoundationModels API
-	input := &bedrock.ListFoundationModelsInput{}
-	output, err := c.bedrockClient.ListFoundationModels(ctx, input)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list foundation models: %w", err)
-	}
-
-	// Extract model IDs from the response
+	// Extract model IDs from the client.models
 	var modelIDs []string
-	for _, modelSummary := range output.ModelSummaries {
+	for _, modelSummary := range c.models {
 		if modelSummary.ModelId != nil {
 			modelIDs = append(modelIDs, *modelSummary.ModelId)
 		}
@@ -432,6 +447,7 @@ type bedrockChat struct {
 	client       *BedrockClient
 	systemPrompt string
 	model        string
+	modelSummary *bedrocktypes.FoundationModelSummary
 	messages     []types.Message
 	toolConfig   *types.ToolConfiguration
 	functionDefs []*FunctionDefinition
@@ -523,7 +539,7 @@ func (chat *bedrockChat) Send(ctx context.Context, contents ...any) (ChatRespons
 	}
 
 	// Call the Bedrock Converse API
-	output, err := chat.client.client.Converse(ctx, input)
+	output, err := chat.client.runtime.Converse(ctx, input)
 	if err != nil {
 		return nil, fmt.Errorf("bedrock converse error: %w", err)
 	}
@@ -572,6 +588,11 @@ func (c *bedrockChat) SendStreaming(ctx context.Context, contents ...any) (ChatR
 		return nil, errors.New("no content provided")
 	}
 
+	// Validate if modelID support streaming
+	if c.modelSummary == nil || !aws.ToBool(c.modelSummary.ResponseStreamingSupported) {
+		return nil, fmt.Errorf("model does not support streaming")
+	}
+
 	// Process and append contents to conversation history
 	if err := c.addContentsToHistory(contents); err != nil {
 		return nil, err
@@ -586,10 +607,14 @@ func (c *bedrockChat) SendStreaming(ctx context.Context, contents ...any) (ChatR
 		},
 	}
 
-	// Add system prompt if provided
+	// Add system prompt if provided & supported
 	if c.systemPrompt != "" {
-		input.System = []types.SystemContentBlock{
-			&types.SystemContentBlockMemberText{Value: c.systemPrompt},
+		if isSystemPromptSupported(c.model) {
+			input.System = []types.SystemContentBlock{
+				&types.SystemContentBlockMemberText{Value: c.systemPrompt},
+			}
+		} else {
+			return nil, fmt.Errorf("model %s doesn't support system prompts", c.model)
 		}
 	}
 
@@ -599,7 +624,7 @@ func (c *bedrockChat) SendStreaming(ctx context.Context, contents ...any) (ChatR
 	}
 
 	// Start the streaming request
-	output, err := c.client.client.ConverseStream(ctx, input)
+	output, err := c.client.runtime.ConverseStream(ctx, input)
 	if err != nil {
 		return nil, fmt.Errorf("bedrock stream error: %w", err)
 	}
@@ -611,6 +636,16 @@ func (c *bedrockChat) SendStreaming(ctx context.Context, contents ...any) (ChatR
 				stream.Close()
 			}
 		}()
+
+		emit := func(resp *bedrockStreamResponse) bool {
+			if resp == nil {
+				return true
+			}
+			if len(resp.Candidates()) == 0 {
+				return true
+			}
+			return yield(resp, nil)
+		}
 
 		var assistantMessage types.Message
 		assistantMessage.Role = types.ConversationRoleAssistant
@@ -640,7 +675,7 @@ func (c *bedrockChat) SendStreaming(ctx context.Context, contents ...any) (ChatR
 						done:    false,
 					}
 
-					if !yield(response, nil) {
+					if !emit(response) {
 						return
 					}
 				}
@@ -700,7 +735,7 @@ func (c *bedrockChat) SendStreaming(ctx context.Context, contents ...any) (ChatR
 						toolUses:      []types.ToolUseBlock{toolUse},
 						streamingArgs: map[int]map[string]any{0: args},
 					}
-					if !yield(response, nil) {
+					if !emit(response) {
 						return
 					}
 
@@ -716,7 +751,9 @@ func (c *bedrockChat) SendStreaming(ctx context.Context, contents ...any) (ChatR
 						model:   c.model,
 						done:    true,
 					}
-					yield(finalResponse, nil)
+					if !emit(finalResponse) {
+						return
+					}
 				}
 			}
 		}
