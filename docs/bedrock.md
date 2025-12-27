@@ -1,6 +1,12 @@
 # AWS Bedrock Provider
 
-kubectl-ai supports AWS Bedrock models including Claude Sonnet 4 and Claude 3.7.
+kubectl-ai supports AWS Bedrock models as a command line tool and also provides a Client API for programmatic use. 
+
+For more details on usage as a command line tool see [Home Page] (../README.md) For more detailed usage as a Client API to call from Go programs, see [Gollm Page](../gollm/README.md)
+
+The tool supports all models where the output modality is TEXT. [Here is a list of models available in Bedrock. ](https://docs.aws.amazon.com/bedrock/latest/userguide/models-supported.html) However only a handful are useful for the current usecase, since they should be TEXT models, also if you intend to use multi-turn chat (which is built on streaming) then models need to support streaming; further if you want to use tools to complete your response then models needs to support tools. [Here is a list of models and supported features](https://docs.aws.amazon.com/bedrock/latest/userguide/conversation-inference-supported-models-features.html).
+
+In this release, Anthropic Claude models are not supported, including Claude Sonnet 4 and Claude 3.7. Open a ticket if you need that and I will enable that.
 
 ## Setup
 
