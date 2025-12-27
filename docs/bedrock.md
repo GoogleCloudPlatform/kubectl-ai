@@ -1,6 +1,6 @@
-# AWS Bedrock Provider
+# Bedrock Provider
 
-kubectl-ai supports AWS Bedrock models as a command line tool and also provides a Client API for programmatic use. 
+kubectl-ai supports a sub-set of models available in Bedrock when used as a command line tool, within a docker container, or when a Go program uses `bedrockClient` API. [Bedrock](https://aws.amazon.com/bedrock/) is the Generative AI Platform for Amazon Web Services.
 
 ## Usage
 
@@ -29,63 +29,73 @@ In this release, Anthropic Claude models are not supported, including Claude Son
 
 Currently supported:
 
+- Amazon Titan Text Lite : `amazon.titan-text-lite-v1`
 - Google Gemma 3: `google.gemma-3-4b-it`
 - Google Gemma 3: `google.gemma-3-27b-it`
 - Qwen3 Coder 480B: `qwen.qwen3-coder-480b-a35b-v1:0`
 - Qwen3 VL 235B : `qwen.qwen3-235b-a22b-2507-v1:0`
 - Nvidia Nemotron Nano : `nvidia.nemotron-nano-3-30b`
-- Minimax : `nvidia.nemotron-nano-3-30b`
-- Mistral AI : `mistral.voxtral-mini-3b-2507`
+- Mistral AI Voxtral: `mistral.voxtral-mini-3b-2507`
 - Deepseek V3 : `deepseek.v3-v1:0`
-- Amazon Titan Text Lite : `amazon.titan-text-lite-v1`
 
-Many of these models do not support tools.
+This is not an exhaustive list of models supported (depending on the region the list of models might change). Many of these models do not support tools.
 
 ## Setup
 
-### AWS Credentials
+### Authentication
 
-Configure AWS credentials using standard AWS SDK methods:
+To use the Bedrock provider, we need a AWS IAM User, configured such that the user has `AmazonBedrockFullAccess` policy attached to it. We also need to create an `Access Key` for this user, and it's corresponding `Secret Access Key`. 
+
+<details>
+  <summary>Creating and Setting up AWS User</summary>
+
+  If you don't have an IAM User, use this sections to create an IAM User, configure it with `AmazonBedrockFullAccess` policy ; if you have a IAM User with correctly configured policy use create an `Acess Key`and it's corresponding `Secret Access Key` in section below. 
+
+  - Sign into AWS Console (with root user account)
+  - Goto -> IAM (Identity and Access Management) Service
+  
+  #### Creating an IAM User, attaching AmazonBedrockFullAccess policy
+ 
+  - select the User link on side panel, press "Create User" button
+  - provide "User name" in text field, press "Next" button
+  - on "Set Permission" page, select "Attach policies directly" choice
+  - search and attach policy `AmazonBedrockFullAccess`, press "Next" button
+  - on "Review and create" page, press "Create User" button
+
+
+  #### For existing IAM User, create Access Key
+  - Select the created IAM User on the right side listing page
+  - In the "Summary" panel, press "Select access key" to create "Access Key 1"
+  - In "Access key best practises & alternatives" page, select "Third-party service", also select "Confirmation", press "Next"
+  - In "Description tag" value, you can leave blank, press "Create Access key"
+  - Save the `Acess Key` as `AWS_ACCESS_KEY_ID`
+  - Click on show to view `Secret Access Key`, save as `AWS_SECRET_ACCESS_KEY`
+   
+</details>
+
+#### Configure AWS credentials in your shell as below
 
 ```bash
 # Using Environment variables
 export AWS_ACCESS_KEY_ID="your-access-key"
-export AWS_SECRET_ACCESS_KEY="your-secret-key"
-export AWS_REGION="us-east-1"
+export AWS_SECRET_ACCESS_KEY="your-secret-access-key"
 ```
 
 ### Model Configuration
+
+This is required if you are planning to use `bedrockClient` API programatically
 
 ```bash
 # Required: For using bedrockClient API
 export BEDROCK_MODEL="google.gemma-3-4b-it"
 ```
 
+### Region Configuration
 
-## Authentication
-
-kubectl-ai uses the standard AWS SDK credential provider chain:
-
-1. Environment variables (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY)
-2. AWS credentials file (~/.aws/credentials)
-3. AWS config file (~/.aws/config)
-4. IAM roles for EC2 instances
-5. IAM roles for ECS tasks
-6. IAM roles for Lambda functions
-
-For more details, see [AWS SDK Go Configuration](https://aws.github.io/aws-sdk-go-v2/docs/configuring-sdk/).
-
-## Region Configuration
-
-Bedrock is available in specific AWS regions. Set your region using:
+Bedrock is available in specific AWS regions. 
+Set your region using:
 
 ```bash
 export AWS_REGION="ap-south-1"  # Primary Bedrock region
 ```
 
-Alternatively, configure region in `~/.aws/config`:
-
-```ini
-[default]
-region = ap-south-1
-```
