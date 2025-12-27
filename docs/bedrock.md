@@ -2,11 +2,42 @@
 
 kubectl-ai supports AWS Bedrock models as a command line tool and also provides a Client API for programmatic use. 
 
-For more details on usage as a command line tool see [Home Page] (../README.md) For more detailed usage as a Client API to call from Go programs, see [Gollm Page](../gollm/README.md)
+## Usage
 
-The tool supports all models where the output modality is TEXT. [Here is a list of models available in Bedrock. ](https://docs.aws.amazon.com/bedrock/latest/userguide/models-supported.html) However only a handful are useful for the current usecase, since they should be TEXT models, also if you intend to use multi-turn chat (which is built on streaming) then models need to support streaming; further if you want to use tools to complete your response then models needs to support tools. [Here is a list of models and supported features](https://docs.aws.amazon.com/bedrock/latest/userguide/conversation-inference-supported-models-features.html).
+```bash
+# Use default model (Claude Sonnet 4)
+kubectl-ai --provider bedrock "explain this deployment"
+
+# Specify model explicitly
+kubectl-ai --provider bedrock --model us.anthropic.claude-3-7-sonnet-20250219-v1:0 "help me debug this pod"
+```
+- For more details on usage as a command line tool (i.e. kubectl-ai), see [Home Page Readme]( ../README.md)
+- For more details on usage for development, as a docker build also, see [Home Page Readme]( ../README.md)
+- For more detailed usage as a Client API to call from Go programs, see [Gollm Page Readme](../gollm/README.md)
+
+## Supported Models
+
+See [AWS Bedrock documentation](https://docs.aws.amazon.com/bedrock/latest/userguide/model-ids.html) for current model availability and regional support.
+
+The tool supports all models where the output modality is TEXT. [Here is a list of models available in Bedrock. ](https://docs.aws.amazon.com/bedrock/latest/userguide/models-supported.html) 
+
+However only a handful are useful for the current usecase, since they should be TEXT models, also if you intend to use multi-turn chat (which is built on streaming) then models need to support streaming; further if you want to use tools to complete your response then models needs to support tools. [Here is a list of models and supported features](https://docs.aws.amazon.com/bedrock/latest/userguide/conversation-inference-supported-models-features.html).
 
 In this release, Anthropic Claude models are not supported, including Claude Sonnet 4 and Claude 3.7. Open a ticket if you need that and I will enable that.
+
+Currently supported:
+
+- Google Gemma 3: `google.gemma-3-4b-it`
+- Google Gemma 3: `google.gemma-3-27b-it`
+- Qwen3 Coder 480B: `qwen.qwen3-coder-480b-a35b-v1:0`
+- Qwen3 VL 235B : `qwen.qwen3-235b-a22b-2507-v1:0`
+- Nvidia Nemotron Nano : `nvidia.nemotron-nano-3-30b`
+- Minimax : `nvidia.nemotron-nano-3-30b`
+- Mistral AI : `mistral.voxtral-mini-3b-2507`
+- Deepseek V3 : `deepseek.v3-v1:0`
+- Amazon Titan Text Lite : `amazon.titan-text-lite-v1`
+
+Many of these models do not support tools.
 
 ## Setup
 
@@ -15,16 +46,9 @@ In this release, Anthropic Claude models are not supported, including Claude Son
 Configure AWS credentials using standard AWS SDK methods:
 
 ```bash
-# Option 1: Environment variables
+# Using Environment variables
 export AWS_ACCESS_KEY_ID="your-access-key"
 export AWS_SECRET_ACCESS_KEY="your-secret-key"
-export AWS_REGION="us-east-1"
-
-# Option 2: AWS Profile (recommended)
-export AWS_PROFILE="your-profile-name"
-export AWS_REGION="us-east-1"
-
-# Option 3: Use IAM roles (on EC2/ECS/Lambda)
 export AWS_REGION="us-east-1"
 ```
 
@@ -35,24 +59,6 @@ export AWS_REGION="us-east-1"
 export BEDROCK_MODEL="us.anthropic.claude-3-7-sonnet-20250219-v1:0"
 ```
 
-## Supported Models
-
-See [AWS Bedrock documentation](https://docs.aws.amazon.com/bedrock/latest/userguide/model-ids.html) for current model availability and regional support.
-
-Currently supported:
-
-- Claude Sonnet 4: `us.anthropic.claude-sonnet-4-20250514-v1:0` (default)
-- Claude 3.7 Sonnet: `us.anthropic.claude-3-7-sonnet-20250219-v1:0`
-
-## Usage
-
-```bash
-# Use default model (Claude Sonnet 4)
-kubectl-ai --provider bedrock "explain this deployment"
-
-# Specify model explicitly
-kubectl-ai --provider bedrock --model us.anthropic.claude-3-7-sonnet-20250219-v1:0 "help me debug this pod"
-```
 
 ## Authentication
 
