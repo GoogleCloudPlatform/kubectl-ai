@@ -5,23 +5,23 @@ kubectl-ai supports AWS Bedrock models as a command line tool and also provides 
 ## Usage
 
 ```bash
-# Use default model (Claude Sonnet 4)
-kubectl-ai --provider bedrock "explain this deployment"
-
-# Specify model explicitly
-kubectl-ai --provider bedrock --model us.anthropic.claude-3-7-sonnet-20250219-v1:0 "help me debug this pod"
+# Specify provider and model explicitly
+kubectl-ai --provider bedrock --model google.gemma-3-4b-it "help me debug this pod"
 ```
-- For more details on usage as a command line tool (i.e. kubectl-ai), see [Home Page Readme]( ../README.md)
-- For more details on usage for development, as a docker build also, see [Home Page Readme]( ../README.md)
-- For more detailed usage as a Client API to call from Go programs, see [Gollm Page Readme](../gollm/README.md)
+For more details on usage as a command line tool (i.e. kubectl-ai), see [Home Page Readme]( ../README.md)
+
+```bash
+docker run --rm -it -v ~/.kube:/root/.kube -v ~/home/ubuntu/.aws:/root/.aws -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_REGION -e BEDROCK_MODEL kubectl-ai:latest --llm-provider=bedrock --model google.gemma-3-4b-it
+```
+For more details on running kubectl-ai in container, as a docker build also, see [Home Page Readme]( ../README.md)
+
+For more details on programmatic usage by using `bedrockClient`  , see [Gollm Page Readme](../gollm/README.md)
 
 ## Supported Models
 
-See [AWS Bedrock documentation](https://docs.aws.amazon.com/bedrock/latest/userguide/model-ids.html) for current model availability and regional support.
+See this for a [list of models available on Bedrock. ](https://docs.aws.amazon.com/bedrock/latest/userguide/models-supported.html) 
 
-The tool supports all models where the output modality is TEXT. [Here is a list of models available in Bedrock. ](https://docs.aws.amazon.com/bedrock/latest/userguide/models-supported.html) 
-
-However only a handful are useful for the current usecase, since they should be TEXT models, also if you intend to use multi-turn chat (which is built on streaming) then models need to support streaming; further if you want to use tools to complete your response then models needs to support tools. [Here is a list of models and supported features](https://docs.aws.amazon.com/bedrock/latest/userguide/conversation-inference-supported-models-features.html).
+However, the models which can be used by kubectl-ai should support TEXT `OutputModality`. If you intend to use kubectl-ai as a command line tool or within the docker container, this works on multi-turn chat which is built in kubectl-ai using streaming so the model should support streaming too; further if you want to use tools to complete your response then models needs to support tools in streamig mode. Howeber if you use the berockClient API, or use Single turn implementaiton then the list of models you can use widens. [This list](https://docs.aws.amazon.com/bedrock/latest/userguide/conversation-inference-supported-models-features.html) should allow you to shortlist which models can be used for your usecase. The list that follows gives a more accuratre list of models which should support all use cases. (Its not exhaustive, it might be different for your region; the list was built for ap-south-1 (Mumbai) region.
 
 In this release, Anthropic Claude models are not supported, including Claude Sonnet 4 and Claude 3.7. Open a ticket if you need that and I will enable that.
 
@@ -55,8 +55,8 @@ export AWS_REGION="us-east-1"
 ### Model Configuration
 
 ```bash
-# Optional: Set default model
-export BEDROCK_MODEL="us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+# Required: For using bedrockClient API
+export BEDROCK_MODEL="google.gemma-3-4b-it"
 ```
 
 
@@ -78,12 +78,12 @@ For more details, see [AWS SDK Go Configuration](https://aws.github.io/aws-sdk-g
 Bedrock is available in specific AWS regions. Set your region using:
 
 ```bash
-export AWS_REGION="us-east-1"  # Primary Bedrock region
+export AWS_REGION="ap-south-1"  # Primary Bedrock region
 ```
 
 Alternatively, configure region in `~/.aws/config`:
 
 ```ini
 [default]
-region = us-east-1
+region = ap-south-1
 ```
