@@ -1,0 +1,74 @@
+name: K8s-bench Presubmit
+
+on:
+  pull_request:
+    paths:
+      - "k8s-bench/tasks/**"
+
+jobs:
+  detect-changed-tasks:
+    runs-on: ubuntu-latest
+    outputs:
+      task_dirs: ${{ steps.get_tasks.outputs.dirs }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed task directories
+        id: get_tasks
+        run: |
+          echo "Fetching base branch..."
+          git fetch origin ${{ github.base_ref }} --depth=1
+
+          echo "Finding changed task folders under k8s-bench/tasks..."
+          CHANGED_DIRS=$(git diff --name-only origin/${{ github.base_ref }} HEAD -- k8s-bench/tasks/ \
+            | awk -F/ 'NF>=3 {print $3}' \
+            | sort -u)
+
+          echo "Changed folders:"
+          echo "$CHANGED_DIRS"
+
+          # Output as comma-separated string
+          echo "dirs=$(echo "$CHANGED_DIRS" | paste -sd ',' -)" >> $GITHUB_OUTPUT
+
+  run-evals:
+    needs: detect-changed-tasks
+    if: needs.detect-changed-tasks.outputs.task_dirs != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: "read"
+      id-token: "write"
+
+    strategy:
+      matrix:
+        task: ${{ fromJson('["' + needs.detect-changed-tasks.outputs.task_dirs + '"]') }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Kind Cluster Setup
+        uses: ./.github/actions/kind-cluster-setup
+        with:
+          cluster_name: ${{ github.head_ref || github.ref_name }}
+
+      - name: Run evals for task ${{ matrix.task }}
+        env:
+          TEST_ARGS: >-
+            --llm-provider vertexai
+            --models gemini-2.5-pro-preview-05-06
+            --enable-tool-use-shim=false
+            --task-pattern=${{ matrix.task }}
+        run: |
+          echo "Running eval for ${{ matrix.task }}"
+          ./dev/ci/periodics/run-evals.sh
+
+      - name: Analyze results
+        run: |
+          ./dev/ci/periodics/analyze-evals.sh
+          cat ${{ github.workspace }}/.build/k8s-bench.md >> $GITHUB_STEP_SUMMARY
