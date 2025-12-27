@@ -11,7 +11,7 @@ kubectl-ai --provider bedrock --model google.gemma-3-4b-it "help me debug this p
 For more details on usage as a command line tool (i.e. kubectl-ai), see [Home Page Readme]( ../README.md)
 
 ```bash
-docker run --rm -it -v ~/.kube:/root/.kube -v ~/home/ubuntu/.aws:/root/.aws -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_REGION -e BEDROCK_MODEL kubectl-ai:latest --llm-provider=bedrock --model google.gemma-3-4b-it
+docker run --rm -it -v ~/.kube:/root/.kube -v ~/home/ubuntu/.aws:/root/.aws -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_REGION kubectl-ai:latest --llm-provider=bedrock --model google.gemma-3-4b-it
 ```
 For more details on running kubectl-ai in container, as a docker build also, see [Home Page Readme]( ../README.md)
 
