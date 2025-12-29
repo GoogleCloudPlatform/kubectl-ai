@@ -11,7 +11,7 @@ kubectl-ai --provider bedrock --model google.gemma-3-4b-it "help me debug this p
 For more details on usage as a command line tool (i.e. kubectl-ai), see [Home Page Readme]( ../README.md)
 
 ```bash
-docker run --rm -it -v ~/.kube:/root/.kube -v ~/home/ubuntu/.aws:/root/.aws -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_REGION kubectl-ai:latest --llm-provider=bedrock --model google.gemma-3-4b-it
+docker run --rm -it -v ~/.kube:/root/.kube -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_REGION kubectl-ai:latest --llm-provider=bedrock --model google.gemma-3-4b-it
 ```
 For more details on running kubectl-ai in container, as a docker build also, see [Home Page Readme]( ../README.md)
 
@@ -19,26 +19,23 @@ For more details on programmatic usage by using `bedrockClient`  , see [Gollm Pa
 
 ## Supported Models
 
-See this for a [list of models available on Bedrock. ](https://docs.aws.amazon.com/bedrock/latest/userguide/models-supported.html) 
+[See this](https://docs.aws.amazon.com/bedrock/latest/userguide/models-supported.html)  for a list of models available on Bedrock. However a small subset of these models are supported by `kubectl-ai`.
 
-However, the models which can be used by kubectl-ai should support TEXT `OutputModality`. If you intend to use kubectl-ai as a command line tool or within the docker container, this works on multi-turn chat which is built in kubectl-ai using streaming so the model should support streaming too; further if you want to use tools to complete your response then models needs to support tools in streamig mode. Howeber if you use the `berockClient` API, or use Single turn implementation then the list of models you can use widens. [This list](https://docs.aws.amazon.com/bedrock/latest/userguide/conversation-inference-supported-models-features.html) should allow you to shortlist which models can be used for your usecase. 
+The models which can be used by kubectl-ai should support TEXT `OutputModality` because of nature of the tool. For using kubectl-ai in command line mode or from within the docker container the model should support streaming too; further if you want to use tools to complete your response then models needs to support tools in streamig mode. The limit the models which can used with this tool.
 
-The list that follows gives a more accuratre list of models which should support all use cases. (Its not exhaustive, it might be different for your region; the list was built for ap-south-1 (Mumbai) region.
+Further, in this release, only models which support `ON_DEMAND` throughput are supported. Consequently Anthropic Claude models are not supported, including Claude Sonnet 4 and Claude 3.7. If this is required for your usecase, please raise a ticket with specific needs and we will support it. The list that follows gives a more accuratre list of models which should support all use cases. (Its not exhaustive, also it might be different for your region; the list was built for ap-south-1 (Mumbai) region.
 
-In this release, Anthropic Claude models are not supported, including Claude Sonnet 4 and Claude 3.7. Open a ticket if you need that and I will enable that.
-
-Currently supported:
+#### Some models currently supported:
 
 - Amazon Titan Text Lite : `amazon.titan-text-lite-v1`
 - Google Gemma 3: `google.gemma-3-4b-it`
-- Google Gemma 3: `google.gemma-3-27b-it`
 - Qwen3 Coder 480B: `qwen.qwen3-coder-480b-a35b-v1:0`
-- Qwen3 VL 235B : `qwen.qwen3-235b-a22b-2507-v1:0`
 - Nvidia Nemotron Nano : `nvidia.nemotron-nano-3-30b`
 - Mistral AI Voxtral: `mistral.voxtral-mini-3b-2507`
 - Deepseek V3 : `deepseek.v3-v1:0`
 
-This is not an exhaustive list of models supported (depending on the region the list of models might change). Many of these models do not support tools.
+If you use the `bedrockClient` API, or use Single turn implementation then the subset of models widens as this doesn't need models which support streaming. [This list](https://docs.aws.amazon.com/bedrock/latest/userguide/conversation-inference-supported-models-features.html) should allow you to shortlist which models can be used for your usecase. 
+
 
 ## Setup
 
