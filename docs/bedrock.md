@@ -4,17 +4,20 @@ kubectl-ai supports a sub-set of models available in Bedrock when used as a comm
 
 ## Usage
 
+#### Using as command line tool
 ```bash
 # Specify provider and model explicitly
 kubectl-ai --provider bedrock --model google.gemma-3-4b-it "help me debug this pod"
 ```
 For more details on usage as a command line tool (i.e. kubectl-ai), see [Home Page Readme]( ../README.md)
 
+#### Using within a docker container
 ```bash
 docker run --rm -it -v ~/.kube:/root/.kube -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_REGION kubectl-ai:latest --llm-provider=bedrock --model google.gemma-3-4b-it
 ```
 For more details on running kubectl-ai in container, as a docker build also, see [Home Page Readme]( ../README.md)
 
+#### Using `bedrockClient` API
 For more details on programmatic usage by using `bedrockClient`  , see [Gollm Page Readme](../gollm/README.md)
 
 ## Supported Models
