@@ -19,11 +19,13 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"maps"
 	"math/rand/v2"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -103,7 +105,8 @@ func (r *registry) NewClient(ctx context.Context, providerID string, opts ...Opt
 
 	factoryFunc := r.providers[u.Scheme]
 	if factoryFunc == nil {
-		return nil, fmt.Errorf("provider %q not registered. Available providers: %v", u.Scheme, r.listProviders())
+		keys := strings.Join(slices.Collect(maps.Keys(r.providers)), ", ")
+		return nil, fmt.Errorf("provider %q not registered. Available providers: %v", u.Scheme, keys)
 	}
 
 	// Build ClientOptions
