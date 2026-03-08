@@ -838,6 +838,9 @@ func (c *Agent) handleMetaQuery(ctx context.Context, query string) (answer strin
 		return "Available models:\n\n  - " + strings.Join(models, "\n  - ") + "\n\n", true, nil
 	case "tools":
 		return "Available tools:\n\n  - " + strings.Join(c.Tools.Names(), "\n  - ") + "\n\n", true, nil
+	case "enable-permissions":
+		c.SkipPermissions = false
+		return "Permission confirmation re-enabled. I will ask for your approval before executing commands that modify resources.", true, nil
 	case "session":
 		if c.SessionBackend != "filesystem" {
 			return "Ephemeral session (memory backed). No persistent info available.", true, nil
