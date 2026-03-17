@@ -1309,7 +1309,14 @@ func extractJSON(s string) (string, bool) {
 func parseReActResponse(input string) (*ReActResponse, error) {
 	cleaned, found := extractJSON(input)
 	if !found {
-		return nil, fmt.Errorf("no JSON code block found in %q", cleaned)
+		trimmed := strings.TrimSpace(input)
+		if trimmed == "" {
+			return nil, fmt.Errorf("no JSON code block found in empty response")
+		}
+
+		// Some models return plain text even when instructed to emit JSON.
+		// Treat this as a final answer instead of failing hard.
+		return &ReActResponse{Answer: trimmed}, nil
 	}
 
 	cleaned = strings.ReplaceAll(cleaned, "\n", "")

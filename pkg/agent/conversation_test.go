@@ -404,3 +404,33 @@ func TestAgent_NewSession_NoDeadlock(t *testing.T) {
 		t.Fatal("NewSession timed out (potential deadlock)")
 	}
 }
+
+func TestParseReActResponse_JSONBlock(t *testing.T) {
+	input := "```json\n{\"thought\":\"check pods\",\"action\":{\"name\":\"kubectl\",\"reason\":\"list pods\",\"command\":\"kubectl get pods -A\",\"modifies_resource\":\"no\"}}\n```"
+
+	got, err := parseReActResponse(input)
+	if err != nil {
+		t.Fatalf("parseReActResponse returned error: %v", err)
+	}
+	if got.Action == nil {
+		t.Fatalf("expected action to be parsed")
+	}
+	if got.Action.Name != "kubectl" {
+		t.Fatalf("expected action name kubectl, got %q", got.Action.Name)
+	}
+}
+
+func TestParseReActResponse_PlainTextFallback(t *testing.T) {
+	input := "The command was executed successfully. Pods are healthy."
+
+	got, err := parseReActResponse(input)
+	if err != nil {
+		t.Fatalf("parseReActResponse returned error: %v", err)
+	}
+	if got.Answer != input {
+		t.Fatalf("expected answer %q, got %q", input, got.Answer)
+	}
+	if got.Action != nil {
+		t.Fatalf("expected nil action for plain text fallback")
+	}
+}

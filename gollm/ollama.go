@@ -201,12 +201,82 @@ func (c *OllamaChat) IsRetryableError(err error) bool {
 }
 
 func (c *OllamaChat) SendStreaming(ctx context.Context, contents ...any) (ChatResponseIterator, error) {
-	// TODO: Implement streaming
-	response, err := c.Send(ctx, contents...)
-	if err != nil {
-		return nil, err
+	log := klog.FromContext(ctx)
+
+	for _, content := range contents {
+		switch v := content.(type) {
+		case string:
+			c.history = append(c.history, api.Message{Role: "user", Content: v})
+		case FunctionCallResult:
+			c.history = append(c.history, api.Message{
+				Role:    "user",
+				Content: fmt.Sprintf("Function call result: %s", v.Result),
+			})
+		default:
+			return nil, fmt.Errorf("unsupported content type: %T", v)
+		}
 	}
-	return singletonChatResponseIterator(response), nil
+
+	req := &api.ChatRequest{
+		Model:    c.model,
+		Messages: c.history,
+		Stream:   ptrTo(true),
+		Tools:    c.tools,
+	}
+
+	iterator := func(yield func(ChatResponse, error) bool) {
+		var accumulated string
+		var lastToolCalls []api.ToolCall
+
+		respFunc := func(resp api.ChatResponse) error {
+			log.V(4).Info("received streaming chunk from ollama", "content", resp.Message.Content, "done", resp.Done)
+
+			if len(resp.Message.ToolCalls) > 0 {
+				lastToolCalls = resp.Message.ToolCalls
+			}
+
+			if resp.Message.Content != "" {
+				accumulated += resp.Message.Content
+				chunk := &OllamaChatResponse{
+					ollamaResponse: resp,
+					candidates: []*OllamaCandidate{
+						{parts: []OllamaPart{{text: resp.Message.Content}}},
+					},
+				}
+				if !yield(chunk, nil) {
+					return fmt.Errorf("iterator stopped")
+				}
+			}
+
+			if resp.Done {
+				// Append the complete message to history
+				finalMsg := api.Message{
+					Role:      "assistant",
+					Content:   accumulated,
+					ToolCalls: lastToolCalls,
+				}
+				c.history = append(c.history, finalMsg)
+
+				// If there are tool calls, yield them as a final response
+				if len(lastToolCalls) > 0 {
+					toolResp := &OllamaChatResponse{
+						ollamaResponse: resp,
+						candidates: []*OllamaCandidate{
+							{parts: []OllamaPart{{toolCalls: lastToolCalls}}},
+						},
+					}
+					yield(toolResp, nil)
+				}
+			}
+			return nil
+		}
+
+		if err := c.client.Chat(ctx, req, respFunc); err != nil {
+			yield(nil, err)
+		}
+	}
+
+	return iterator, nil
 }
 
 func (c *OllamaChat) Initialize(messages []*kctlApi.Message) error {
