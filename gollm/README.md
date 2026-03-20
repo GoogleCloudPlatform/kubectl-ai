@@ -310,13 +310,43 @@ client, err := gollm.NewClient(ctx, "openai://api.openai.com",
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `ANTHROPIC_API_KEY` | Anthropic API key (required) | — |
+| `ANTHROPIC_API_KEY` | Anthropic API key (required for direct API) | — |
+| `ANTHROPIC_VERTEX_PROJECT_ID` | GCP Project ID for Vertex AI (alternative to API key) | Falls back to `GOOGLE_CLOUD_PROJECT` |
+| `ANTHROPIC_VERTEX_LOCATION` | GCP region for Vertex AI (e.g., `us-east5`) | Falls back to `GOOGLE_CLOUD_LOCATION` or `GOOGLE_CLOUD_REGION` |
 | `ANTHROPIC_MODEL` | Default Claude model to use | `claude-sonnet-4-6` |
 | `ANTHROPIC_PROMPT_CACHING` | Enable prompt caching (`"false"` to disable) | `true` |
 | `ANTHROPIC_EXTENDED_THINKING` | Enable extended thinking(`"true"` to enable) | `false` |
 | `ANTHROPIC_MAX_TOKENS` | Max output tokens per request | `4096` |
 
 ### Anthropic provider features
+
+#### Google Vertex AI
+
+The Anthropic provider supports Claude models via [Google Vertex AI](https://cloud.google.com/vertex-ai/generative-ai/docs/partner-models/use-claude).
+When `ANTHROPIC_VERTEX_PROJECT_ID` and `ANTHROPIC_VERTEX_LOCATION` are set, the provider automatically uses
+Google Application Default Credentials instead of requiring an Anthropic API key.
+
+**Prerequisites:**
+- GCP project with Vertex AI API enabled
+- Claude models enabled in Vertex AI (available in select regions like `us-east5`, `us-central1`, `europe-west1`)
+- [Application Default Credentials](https://cloud.google.com/docs/authentication/application-default-credentials) configured (`gcloud auth application-default login`)
+
+**Example usage:**
+
+```bash
+# Set Vertex AI credentials
+export ANTHROPIC_VERTEX_PROJECT_ID=my-gcp-project
+export ANTHROPIC_VERTEX_LOCATION=us-east5
+
+# Or use standard GCP environment variables
+export GOOGLE_CLOUD_PROJECT=my-gcp-project
+export GOOGLE_CLOUD_LOCATION=us-east5
+
+# Use Claude via Vertex AI (no ANTHROPIC_API_KEY needed)
+kubectl-ai --llm-provider=anthropic --model claude-3-5-sonnet-v2@20241022 "list pods"
+```
+
+The provider automatically detects Vertex AI configuration and uses the appropriate authentication method.
 
 #### Prompt caching
 

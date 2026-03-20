@@ -26,6 +26,7 @@ import (
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/api"
 	anthropic "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
+	"github.com/anthropics/anthropic-sdk-go/vertex"
 	"k8s.io/klog/v2"
 )
 
@@ -36,11 +37,27 @@ var (
 	anthropicPromptCaching    bool
 	anthropicExtendedThinking bool
 	anthropicMaxTokens        int64
+	anthropicVertexProjectID  string
+	anthropicVertexLocation   string
 )
 
 func init() {
 	anthropicAPIKey = os.Getenv("ANTHROPIC_API_KEY")
 	anthropicDefaultModel = os.Getenv("ANTHROPIC_MODEL")
+
+	// Vertex AI environment variables (following GCP conventions)
+	anthropicVertexProjectID = os.Getenv("ANTHROPIC_VERTEX_PROJECT_ID")
+	if anthropicVertexProjectID == "" {
+		anthropicVertexProjectID = os.Getenv("GOOGLE_CLOUD_PROJECT")
+	}
+
+	anthropicVertexLocation = os.Getenv("ANTHROPIC_VERTEX_LOCATION")
+	if anthropicVertexLocation == "" {
+		anthropicVertexLocation = os.Getenv("GOOGLE_CLOUD_LOCATION")
+	}
+	if anthropicVertexLocation == "" {
+		anthropicVertexLocation = os.Getenv("GOOGLE_CLOUD_REGION")
+	}
 
 	// Prompt caching defaults to true; set ANTHROPIC_PROMPT_CACHING=false to disable
 	if v := os.Getenv("ANTHROPIC_PROMPT_CACHING"); v == "false" {
@@ -79,18 +96,37 @@ type AnthropicClient struct {
 var _ Client = &AnthropicClient{}
 
 // NewAnthropicClient creates a new client for interacting with Anthropic models.
+// It supports both direct Anthropic API and Google Vertex AI.
 func NewAnthropicClient(ctx context.Context, opts ClientOptions) (*AnthropicClient, error) {
-	apiKey := anthropicAPIKey
-	if apiKey == "" {
-		return nil, errors.New("Anthropic API key not found. Set via ANTHROPIC_API_KEY env var")
-	}
+	var clientOpts []option.RequestOption
 
-	httpClient := createCustomHTTPClient(opts.SkipVerifySSL)
-	httpClient = withJournaling(httpClient)
+	// Check if Vertex AI configuration is present
+	if anthropicVertexProjectID != "" && anthropicVertexLocation != "" {
+		klog.V(2).Infof("Using Anthropic via Google Vertex AI (project=%s, location=%s)", anthropicVertexProjectID, anthropicVertexLocation)
 
-	clientOpts := []option.RequestOption{
-		option.WithAPIKey(apiKey),
-		option.WithHTTPClient(httpClient),
+		// Use Vertex AI with Google Application Default Credentials
+		// Note: vertex.WithGoogleAuth creates its own authenticated HTTP client,
+		// so we should not override it with a custom client
+		vertexOpt := vertex.WithGoogleAuth(ctx, anthropicVertexLocation, anthropicVertexProjectID)
+		clientOpts = []option.RequestOption{
+			vertexOpt,
+		}
+	} else {
+		// Use direct Anthropic API
+		apiKey := anthropicAPIKey
+		if apiKey == "" {
+			return nil, errors.New("Anthropic API key not found. Set via ANTHROPIC_API_KEY env var, or configure Vertex AI with ANTHROPIC_VERTEX_PROJECT_ID and ANTHROPIC_VERTEX_LOCATION (or GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION)")
+		}
+
+		klog.V(2).Infof("Using Anthropic via direct API")
+
+		httpClient := createCustomHTTPClient(opts.SkipVerifySSL)
+		httpClient = withJournaling(httpClient)
+
+		clientOpts = []option.RequestOption{
+			option.WithAPIKey(apiKey),
+			option.WithHTTPClient(httpClient),
+		}
 	}
 
 	client := anthropic.NewClient(clientOpts...)
@@ -480,10 +516,9 @@ func (c *anthropicChatSession) SendStreaming(ctx context.Context, contents ...an
 		if len(acc.Content) > 0 {
 			c.messages = append(c.messages, acc.ToParam())
 		}
-		// Yield final usage so callers can observe token/cache counts
-		if acc.Usage.InputTokens > 0 || acc.Usage.OutputTokens > 0 {
-			yield(&anthropicStreamResponse{usage: &acc.Usage}, nil)
-		}
+		// Note: We don't yield usage-only responses because kubectl-ai expects
+		// all responses to have candidates. Usage metadata is available in
+		// the accumulated message's Usage field if needed.
 	}, nil
 }
 
