@@ -20,6 +20,7 @@ import (
 
 	"github.com/GoogleCloudPlatform/kubectl-ai/gollm"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/mcp"
+	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/sandbox"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/tools"
 	mcpgo "github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -36,7 +37,13 @@ type kubectlMCPServer struct {
 	httpPort      int          // Port for HTTP-based server modes
 }
 
-func newKubectlMCPServer(ctx context.Context, kubectlConfig string, tools tools.Tools, workDir string, exposeExternalTools bool, serverMode string, httpPort int) (*kubectlMCPServer, error) {
+func newKubectlMCPServer(ctx context.Context, kubectlConfig string, t tools.Tools, workDir string, exposeExternalTools bool, serverMode string, httpPort int) (*kubectlMCPServer, error) {
+	// Register built-in tools (bash and kubectl) which require an executor.
+	// In MCP server mode, we use a local executor since there's no sandbox.
+	executor := sandbox.NewLocalExecutor()
+	t.RegisterTool(tools.NewBashTool(executor))
+	t.RegisterTool(tools.NewKubectlTool(executor))
+
 	s := &kubectlMCPServer{
 		kubectlConfig: kubectlConfig,
 		workDir:       workDir,
@@ -45,7 +52,7 @@ func newKubectlMCPServer(ctx context.Context, kubectlConfig string, tools tools.
 			"0.0.1",
 			server.WithToolCapabilities(true),
 		),
-		tools:         tools,
+		tools:         t,
 		mcpServerMode: serverMode,
 		httpPort:      httpPort,
 	}
