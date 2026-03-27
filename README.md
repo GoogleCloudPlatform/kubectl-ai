@@ -40,6 +40,12 @@ curl -sSL https://raw.githubusercontent.com/GoogleCloudPlatform/kubectl-ai/main/
 <details>
 <summary>Other Installation Methods</summary>
 
+#### Install with Homebrew (macOS)
+
+```shell
+brew install kubectl-ai
+```
+
 #### Manual Installation (Linux, MacOS and Windows)
 
 1. Download the latest release from the [releases page](https://github.com/GoogleCloudPlatform/kubectl-ai/releases/latest) for your target machine.
