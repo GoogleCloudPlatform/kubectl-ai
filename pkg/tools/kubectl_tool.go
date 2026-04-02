@@ -117,6 +117,9 @@ func (t *Kubectl) Run(ctx context.Context, args map[string]any) (any, error) {
 		return &sandbox.ExecResult{Command: command, Error: err.Error()}, nil
 	}
 
+	// Auto-limit kubectl logs output to prevent token limit errors
+	command = addDefaultTailForLogs(command)
+
 	// Prepare environment
 	env := os.Environ()
 	if kubeconfig != "" {
@@ -172,6 +175,20 @@ func (t *Kubectl) CheckModifiesResource(args map[string]any) string {
 	}
 
 	return kubectlModifiesResource(command)
+}
+
+// addDefaultTailForLogs adds --tail=500 to kubectl logs commands that don't
+// already specify a --tail flag or --since flag. This prevents unbounded log
+// output from exceeding LLM token limits.
+func addDefaultTailForLogs(command string) string {
+	if !strings.Contains(command, " logs ") && !strings.Contains(command, " logs\n") {
+		return command
+	}
+	// Don't add --tail if already specified or if --since is used
+	if strings.Contains(command, "--tail") || strings.Contains(command, "--since") {
+		return command
+	}
+	return command + " --tail=500"
 }
 
 func validateKubectlCommand(command string) error {
