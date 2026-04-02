@@ -22,6 +22,7 @@ import (
 
 	"github.com/GoogleCloudPlatform/kubectl-ai/gollm"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/sandbox"
+	"mvdan.cc/sh/v3/syntax"
 )
 
 type Kubectl struct {
@@ -117,6 +118,9 @@ func (t *Kubectl) Run(ctx context.Context, args map[string]any) (any, error) {
 		return &sandbox.ExecResult{Command: command, Error: err.Error()}, nil
 	}
 
+	// Ensure kubectl prefix is present (LLMs sometimes omit it)
+	command = ensureKubectlPrefix(command)
+
 	// Prepare environment
 	env := os.Environ()
 	if kubeconfig != "" {
@@ -172,6 +176,36 @@ func (t *Kubectl) CheckModifiesResource(args map[string]any) string {
 	}
 
 	return kubectlModifiesResource(command)
+}
+
+// ensureKubectlPrefix adds the "kubectl" prefix to a command if it's missing.
+// It only adds the prefix for simple commands (no pipes, redirects, etc.).
+func ensureKubectlPrefix(command string) string {
+	if strings.HasPrefix(command, "kubectl ") || strings.HasPrefix(command, "kubectl\n") || command == "kubectl" {
+		return command
+	}
+
+	// Parse the command to check if it's a simple command
+	parser := syntax.NewParser()
+	prog, err := parser.Parse(strings.NewReader(command), "")
+	if err != nil {
+		// If we can't parse it, just prepend kubectl
+		return "kubectl " + command
+	}
+
+	// Only prepend for simple commands (no pipes, redirects, etc.)
+	if len(prog.Stmts) != 1 {
+		return command
+	}
+	stmt := prog.Stmts[0]
+	if stmt.Background || stmt.Coprocess || stmt.Negated || len(stmt.Redirs) > 0 {
+		return command
+	}
+	if _, ok := stmt.Cmd.(*syntax.CallExpr); !ok {
+		return command
+	}
+
+	return "kubectl " + command
 }
 
 func validateKubectlCommand(command string) error {
