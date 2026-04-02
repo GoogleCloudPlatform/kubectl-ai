@@ -206,7 +206,15 @@ func (u *TerminalUI) readlineInstance() (*readline.Instance, error) {
 		return u.rlInstance, nil
 	}
 	// Initialize readline input
-	historyPath := filepath.Join(os.TempDir(), "kubectl-ai-history")
+	// Use a user-specific cache directory to avoid permission conflicts in multi-user environments.
+	cacheDir, err := os.UserCacheDir()
+	if err != nil {
+		cacheDir = filepath.Join(os.TempDir(), fmt.Sprintf("kubectl-ai-user-%d", os.Getuid()))
+	} else {
+		cacheDir = filepath.Join(cacheDir, "kubectl-ai")
+	}
+	os.MkdirAll(cacheDir, 0o700)
+	historyPath := filepath.Join(cacheDir, "kubectl-ai-history")
 	rl, err := readline.NewEx(&readline.Config{
 		Prompt:      ">>> ", // Default prompt for main input
 		Stdin:       os.Stdin,
