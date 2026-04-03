@@ -656,19 +656,19 @@ func (c *Agent) Run(ctx context.Context, initialQuery string) error {
 						break
 					}
 
-					candidate := response.Candidates()[0]
+					for _, candidate := range response.Candidates() {
+						for _, part := range candidate.Parts() {
+							// Check if it's a text response
+							if text, ok := part.AsText(); ok {
+								log.Info("text response", "text", text)
+								streamedText += text
+							}
 
-					for _, part := range candidate.Parts() {
-						// Check if it's a text response
-						if text, ok := part.AsText(); ok {
-							log.Info("text response", "text", text)
-							streamedText += text
-						}
-
-						// Check if it's a function call
-						if calls, ok := part.AsFunctionCalls(); ok && len(calls) > 0 {
-							log.Info("function calls", "calls", calls)
-							functionCalls = append(functionCalls, calls...)
+							// Check if it's a function call
+							if calls, ok := part.AsFunctionCalls(); ok && len(calls) > 0 {
+								log.Info("function calls", "calls", calls)
+								functionCalls = append(functionCalls, calls...)
+							}
 						}
 					}
 				}
