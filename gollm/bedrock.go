@@ -514,8 +514,8 @@ func (c *bedrockChat) SetFunctionDefinitions(functions []*FunctionDefinition) er
 
 	c.toolConfig = &types.ToolConfiguration{
 		Tools: tools,
-		ToolChoice: &types.ToolChoiceMemberAny{
-			Value: types.AnyToolChoice{},
+		ToolChoice: &types.ToolChoiceMemberAuto{
+			Value: types.AutoToolChoice{},
 		},
 	}
 
