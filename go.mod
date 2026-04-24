@@ -24,7 +24,7 @@ require (
 	k8s.io/api v0.34.2
 	k8s.io/apimachinery v0.34.2
 	k8s.io/client-go v0.34.2
-	k8s.io/klog/v2 v2.130.1
+	k8s.io/klog/v2 v2.140.0
 	mvdan.cc/sh/v3 v3.11.0
 	sigs.k8s.io/yaml v1.6.0
 )

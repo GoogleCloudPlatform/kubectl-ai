@@ -269,6 +269,11 @@ func run(ctx context.Context) error {
 	// add commandline flags for logging
 	klogFlags := flag.NewFlagSet("klog", flag.ExitOnError)
 	klog.InitFlags(klogFlags)
+	// Opt into the new klog behavior so that -stderrthreshold is honored even
+	// when -logtostderr=true (the default).
+	// Ref: kubernetes/klog#212, kubernetes/klog#432
+	klogFlags.Set("legacy_stderr_threshold_behavior", "false") //nolint:errcheck
+	klogFlags.Set("stderrthreshold", "INFO")                   //nolint:errcheck
 
 	klogFlags.Set("logtostderr", "false")
 	klogFlags.Set("log_file", filepath.Join(os.TempDir(), "kubectl-ai.log"))
