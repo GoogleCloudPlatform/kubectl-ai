@@ -34,10 +34,11 @@ type kubectlMCPServer struct {
 	workDir       string
 	mcpManager    *mcp.Manager // Add MCP manager for external tool calls
 	mcpServerMode string       // Server mode (e.g., "streamable-http", "stdio")
+	httpHost      string       // Bind host for HTTP-based server modes
 	httpPort      int          // Port for HTTP-based server modes
 }
 
-func newKubectlMCPServer(ctx context.Context, kubectlConfig string, t tools.Tools, workDir string, exposeExternalTools bool, serverMode string, httpPort int) (*kubectlMCPServer, error) {
+func newKubectlMCPServer(ctx context.Context, kubectlConfig string, t tools.Tools, workDir string, exposeExternalTools bool, serverMode string, httpHost string, httpPort int) (*kubectlMCPServer, error) {
 	// Register built-in tools (bash and kubectl) which require an executor.
 	// In MCP server mode, we use a local executor since there's no sandbox.
 	executor := sandbox.NewLocalExecutor()
@@ -54,6 +55,7 @@ func newKubectlMCPServer(ctx context.Context, kubectlConfig string, t tools.Tool
 		),
 		tools:         t,
 		mcpServerMode: serverMode,
+		httpHost:      httpHost,
 		httpPort:      httpPort,
 	}
 
@@ -172,11 +174,26 @@ func (s *kubectlMCPServer) Serve(ctx context.Context) error {
 
 	switch s.mcpServerMode {
 	case "streamable-http":
-		// Start the server in streamable HTTP mode
-		klog.Infof("Starting MCP server in streamable HTTP mode on port %d", s.httpPort)
+		// Start the server in streamable HTTP mode.
+		//
+		// The MCP HTTP transport exposes the built-in `bash` and `kubectl`
+		// tools to any caller that can reach the listener and supply a
+		// session id; there is no auth on this port. We therefore default
+		// the bind host to loopback so a Cloud Build / coffee-shop /
+		// shared-cluster neighbour cannot reach the listener. Operators
+		// that intentionally want a remote listener can opt in with
+		// --mcp-http-bind-address=0.0.0.0 (and should put their own
+		// authentication / firewall in front of it).
+		host := s.httpHost
+		if host == "" {
+			host = "127.0.0.1"
+		}
+		if host == "0.0.0.0" || host == "::" {
+			klog.Warningf("MCP HTTP server bound to %s -- the bash and kubectl tools are reachable to anyone on the network; put authentication in front of this port", host)
+		}
+		endpoint := fmt.Sprintf("%s:%d", host, s.httpPort)
+		klog.Infof("Starting MCP server in streamable HTTP mode on %s", endpoint)
 		httpServer := server.NewStreamableHTTPServer(s.server)
-		endpoint := fmt.Sprintf(":%d", s.httpPort)
-		klog.Infof("Listening for streamable HTTP connections on port %d", s.httpPort)
 		return httpServer.Start(endpoint)
 	default:
 		return server.ServeStdio(s.server)

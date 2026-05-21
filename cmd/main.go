@@ -100,6 +100,10 @@ type Options struct {
 	MCPServerMode string `json:"mcpServerMode,omitempty"`
 	// Set the HTTP endpoint port for the MCP server when using HTTP transports like streamable-http.
 	HTTPPort int `json:"httpPort,omitempty"`
+	// MCPHTTPBindAddress is the host the MCP server listens on when using HTTP
+	// transports. Defaults to 127.0.0.1 because the MCP HTTP endpoint exposes the
+	// built-in `bash` and `kubectl` tools without authentication.
+	MCPHTTPBindAddress string `json:"mcpHTTPBindAddress,omitempty"`
 	// KubeConfigPath is the path to the kubeconfig file.
 	// If not provided, the default kubeconfig path will be used.
 	KubeConfigPath string `json:"kubeConfigPath,omitempty"`
@@ -178,6 +182,7 @@ func (o *Options) InitDefaults() {
 	o.MCPServerMode = "stdio"
 	// Default port for HTTP endpoint when using streamable-http mode
 	o.HTTPPort = 9080
+	o.MCPHTTPBindAddress = "127.0.0.1"
 
 	// Session management options
 	o.ResumeSession = ""
@@ -321,6 +326,7 @@ func (opt *Options) bindCLIFlags(f *pflag.FlagSet) error {
 	f.BoolVar(&opt.MCPClient, "mcp-client", opt.MCPClient, "enable MCP client mode to connect to external MCP servers")
 	f.StringVar(&opt.MCPServerMode, "mcp-server-mode", opt.MCPServerMode, "mode of the MCP server. Supported values: stdio, streamable-http")
 	f.IntVar(&opt.HTTPPort, "http-port", opt.HTTPPort, "port for the HTTP endpoint in MCP server mode (used with --mcp-server when --mcp-server-mode is streamable-http)")
+	f.StringVar(&opt.MCPHTTPBindAddress, "mcp-http-bind-address", opt.MCPHTTPBindAddress, "host the MCP HTTP server binds to. Defaults to 127.0.0.1 because the endpoint exposes the built-in bash and kubectl tools without authentication; set explicitly (e.g. 0.0.0.0) only after putting auth/firewall in front")
 	f.BoolVar(&opt.EnableToolUseShim, "enable-tool-use-shim", opt.EnableToolUseShim, "enable tool use shim")
 	f.BoolVar(&opt.Quiet, "quiet", opt.Quiet, "run in non-interactive mode, requires a query to be provided as a positional argument")
 
@@ -694,7 +700,7 @@ func startMCPServer(ctx context.Context, opt Options) error {
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
 		return fmt.Errorf("error creating work directory: %w", err)
 	}
-	mcpServer, err := newKubectlMCPServer(ctx, opt.KubeConfigPath, tools.Default(), workDir, opt.ExternalTools, opt.MCPServerMode, opt.HTTPPort)
+	mcpServer, err := newKubectlMCPServer(ctx, opt.KubeConfigPath, tools.Default(), workDir, opt.ExternalTools, opt.MCPServerMode, opt.MCPHTTPBindAddress, opt.HTTPPort)
 	if err != nil {
 		return fmt.Errorf("creating mcp server: %w", err)
 	}
