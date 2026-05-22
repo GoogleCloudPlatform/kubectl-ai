@@ -16,6 +16,8 @@ package agent
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -224,6 +226,95 @@ func TestAgentEndToEndToolExecution(t *testing.T) {
 	default:
 		if st := a.AgentState(); st != api.AgentStateDone && st != api.AgentStateWaitingForInput {
 			t.Fatalf("unexpected state after tool run: %s (want Done or WaitingForInput)", st)
+		}
+	}
+}
+
+func TestAgentSuggestOnlySkipsMutatingTool(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	store := sessions.NewInMemoryChatStore()
+	client := mocks.NewMockClient(ctrl)
+	chat := mocks.NewMockChat(ctrl)
+
+	client.EXPECT().StartChat(gomock.Any(), "test-model").Return(chat)
+	chat.EXPECT().Initialize(gomock.Any()).Return(nil)
+	chat.EXPECT().SetFunctionDefinitions(gomock.Any()).Return(nil)
+
+	firstResp := chatWith(fCalls("mocktool", map[string]any{"command": "apply"}))
+	secondResp := chatWith(fText("suggested manifest"))
+	firstIter := gollm.ChatResponseIterator(func(yield func(gollm.ChatResponse, error) bool) {
+		yield(firstResp, nil)
+	})
+	secondIter := gollm.ChatResponseIterator(func(yield func(gollm.ChatResponse, error) bool) {
+		yield(secondResp, nil)
+	})
+	gomock.InOrder(
+		chat.EXPECT().SendStreaming(gomock.Any(), gomock.Any()).Return(firstIter, nil),
+		chat.EXPECT().SendStreaming(gomock.Any(), gomock.Any()).Return(secondIter, nil),
+	)
+
+	tool := mocks.NewMockTool(ctrl)
+	tool.EXPECT().Name().Return("mocktool").AnyTimes()
+	tool.EXPECT().Description().Return("mock tool").AnyTimes()
+	tool.EXPECT().FunctionDefinition().Return(&gollm.FunctionDefinition{Name: "mocktool"}).AnyTimes()
+	tool.EXPECT().IsInteractive(gomock.Any()).Return(false, nil).AnyTimes()
+	tool.EXPECT().CheckModifiesResource(gomock.Any()).Return("yes").AnyTimes()
+
+	var toolset tools.Tools
+	toolset.Init()
+	toolset.RegisterTool(tool)
+
+	a := &Agent{
+		ChatMessageStore: store,
+		LLM:              client,
+		Model:            "test-model",
+		Tools:            toolset,
+		MaxIterations:    4,
+		SuggestOnly:      true,
+		Session: &api.Session{
+			ID:               "test-session",
+			ChatMessageStore: store,
+			AgentState:       api.AgentStateIdle,
+		},
+	}
+
+	if err := a.Init(ctx); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	if err := a.Run(ctx, ""); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	if m := recvMsg(t, ctx, a.Output); m.Type != api.MessageTypeUserInputRequest {
+		t.Fatalf("expected user-input-request, got %v", m.Type)
+	}
+	a.Input <- &api.UserInputResponse{Query: "test"}
+
+	sawSkip, sawFinal := false, false
+	for !(sawSkip && sawFinal) {
+		select {
+		case v := <-a.Output:
+			m, ok := v.(*api.Message)
+			if !ok {
+				t.Fatalf("expected *api.Message on output, got %T", v)
+			}
+			if m.Type == api.MessageTypeUserChoiceRequest || m.Type == api.MessageTypeToolCallRequest {
+				t.Fatalf("suggest-only should not request approval or execute tools, got %v", m.Type)
+			}
+			if m.Type == api.MessageTypeText && m.Source == api.MessageSourceAgent &&
+				strings.Contains(fmt.Sprint(m.Payload), "Suggest-only mode skipped execution") {
+				sawSkip = true
+			}
+			if m.Type == api.MessageTypeText && m.Source == api.MessageSourceModel {
+				sawFinal = true
+			}
+		case <-ctx.Done():
+			t.Fatalf("timeout waiting for suggest-only skip and final response")
 		}
 	}
 }
