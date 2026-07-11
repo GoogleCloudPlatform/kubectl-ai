@@ -82,6 +82,13 @@ func TestKubectlModifiesResource(t *testing.T) {
 			{"Dry run apply", "kubectl apply -f deployment.yaml --dry-run", "no"},
 			{"Apply with server dry-run", "kubectl apply -f pod.yaml --dry-run=server", "no"},
 			{"Delete with dry-run", "kubectl delete pod nginx --dry-run client", "no"},
+			// --dry-run=none / --dry-run=false mean the command executes FOR REAL and
+			// must stay classified as a write op (not bypass the approval gate).
+			{"Delete with dry-run=none executes", "kubectl delete pod nginx --dry-run=none", "yes"},
+			{"Delete with dry-run=false executes", "kubectl delete pod nginx --dry-run=false", "yes"},
+			{"Apply with dry-run=none executes", "kubectl apply -f deployment.yaml --dry-run=none", "yes"},
+			{"Delete with spaced dry-run none executes", "kubectl delete pod nginx --dry-run none", "yes"},
+			{"Delete with empty dry-run value executes", "kubectl delete pod nginx --dry-run=", "yes"},
 		},
 		"edge cases": {
 			{"Command with pipe", "kubectl get pods | grep nginx", "unknown"},
@@ -172,6 +179,11 @@ func TestKubectlAnalyzerComponents(t *testing.T) {
 			{"kubectl get pods --dry", "get", "pods", false}, // Not a valid dry-run flag
 			{"echo --dry-run", "", "", true},                 // The current implementation doesn't check if it's kubectl
 			{"kubectl rollout status deployment nginx", "rollout", "status", false},
+			// Executing dry-run values must NOT set hasDryRun (they run for real).
+			{"kubectl delete pod nginx --dry-run=none", "delete", "pod", false},
+			{"kubectl delete pod nginx --dry-run=false", "delete", "pod", false},
+			{"kubectl delete pod nginx --dry-run none", "delete", "pod", false},
+			{"kubectl delete pod nginx --dry-run=", "delete", "pod", false},
 		}
 
 		for _, tt := range tests {
