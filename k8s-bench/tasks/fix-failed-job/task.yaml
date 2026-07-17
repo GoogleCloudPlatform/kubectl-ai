@@ -1,0 +1,6 @@
+script:
+- prompt: "The job 'data-processor' in namespace 'job-test' keeps failing. Please investigate and fix it so it completes successfully."
+setup: "setup.sh"
+verifier: "verify.sh"
+cleanup: "cleanup.sh"
+difficulty: "medium"
