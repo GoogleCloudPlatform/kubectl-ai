@@ -160,6 +160,20 @@ var defaultConfigPaths = []string{
 	filepath.Join("{HOME}", ".config", "kubectl-ai", "config.yaml"),
 }
 
+// kubectlAICacheDir returns a user-specific cache directory for kubectl-ai files.
+// This avoids permission conflicts when multiple users share a system.
+func kubectlAICacheDir() string {
+	cacheDir, err := os.UserCacheDir()
+	if err != nil {
+		// Fallback: use a user-specific subdirectory under the system temp dir
+		cacheDir = filepath.Join(os.TempDir(), fmt.Sprintf("kubectl-ai-user-%d", os.Getuid()))
+	} else {
+		cacheDir = filepath.Join(cacheDir, "kubectl-ai")
+	}
+	os.MkdirAll(cacheDir, 0o700)
+	return cacheDir
+}
+
 func (o *Options) InitDefaults() {
 	o.ProviderID = "gemini"
 	o.ModelID = "gemini-2.5-pro"
@@ -178,7 +192,7 @@ func (o *Options) InitDefaults() {
 	o.KubeConfigPath = ""
 	o.PromptTemplateFilePath = ""
 	o.ExtraPromptPaths = []string{}
-	o.TracePath = filepath.Join(os.TempDir(), "kubectl-ai-trace.txt")
+	o.TracePath = filepath.Join(kubectlAICacheDir(), "kubectl-ai-trace.txt")
 	o.RemoveWorkDir = false
 	o.ToolConfigPaths = defaultToolConfigPaths
 	// Default to terminal UI
@@ -288,7 +302,7 @@ func run(ctx context.Context) error {
 	klog.InitFlags(klogFlags)
 
 	klogFlags.Set("logtostderr", "false")
-	klogFlags.Set("log_file", filepath.Join(os.TempDir(), "kubectl-ai.log"))
+	klogFlags.Set("log_file", filepath.Join(kubectlAICacheDir(), "kubectl-ai.log"))
 
 	defer klog.Flush()
 
@@ -710,8 +724,8 @@ func resolveKubeConfigPath(opt *Options) error {
 }
 
 func startMCPServer(ctx context.Context, opt Options) error {
-	workDir := filepath.Join(os.TempDir(), "kubectl-ai-mcp")
-	if err := os.MkdirAll(workDir, 0o755); err != nil {
+	workDir := filepath.Join(kubectlAICacheDir(), "mcp")
+	if err := os.MkdirAll(workDir, 0o700); err != nil {
 		return fmt.Errorf("error creating work directory: %w", err)
 	}
 
