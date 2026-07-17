@@ -93,6 +93,7 @@ type Agent struct {
 	SandboxImage string
 
 	SkipPermissions bool
+	SuggestOnly     bool
 
 	Tools tools.Tools
 
@@ -754,6 +755,13 @@ func (c *Agent) Run(ctx context.Context, initialQuery string) error {
 					continue // Skip execution for interactive commands
 				}
 
+				if c.SuggestOnly && modifiesResourceToolCallIndex >= 0 {
+					c.skipSuggestedToolCalls()
+					c.pendingFunctionCalls = []ToolCallAnalysis{}
+					c.currIteration = c.currIteration + 1
+					continue
+				}
+
 				if !c.SkipPermissions && modifiesResourceToolCallIndex >= 0 {
 					// In RunOnce mode, exit with error if permission is required
 					if c.RunOnce {
@@ -812,6 +820,30 @@ func (c *Agent) Run(ctx context.Context, initialQuery string) error {
 	}()
 
 	return nil
+}
+
+func (c *Agent) skipSuggestedToolCalls() {
+	var commandDescriptions []string
+	for _, call := range c.pendingFunctionCalls {
+		commandDescriptions = append(commandDescriptions, call.ParsedToolCall.Description())
+		result := map[string]any{
+			"error":     "Suggest-only mode is enabled; tool execution was skipped.",
+			"status":    "skipped",
+			"retryable": false,
+		}
+		if c.EnableToolUseShim {
+			c.currChatContent = append(c.currChatContent, fmt.Sprintf("Result of running %q:\n%v",
+				call.FunctionCall.Name, result["error"]))
+			continue
+		}
+		c.currChatContent = append(c.currChatContent, gollm.FunctionCallResult{
+			ID:     call.FunctionCall.ID,
+			Name:   call.FunctionCall.Name,
+			Result: result,
+		})
+	}
+	c.addMessage(api.MessageSourceAgent, api.MessageTypeText,
+		"Suggest-only mode skipped execution for:\n* "+strings.Join(commandDescriptions, "\n* "))
 }
 
 func (c *Agent) handleMetaQuery(ctx context.Context, query string) (answer string, handled bool, err error) {

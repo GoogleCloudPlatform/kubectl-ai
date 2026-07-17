@@ -85,6 +85,8 @@ type Options struct {
 	// SkipPermissions is a flag to skip asking for confirmation before executing kubectl commands
 	// that modifies resources in the cluster.
 	SkipPermissions bool `json:"skipPermissions,omitempty"`
+	// SuggestOnly skips execution of tool calls that would modify resources.
+	SuggestOnly bool `json:"suggestOnly,omitempty"`
 	// EnableToolUseShim is a flag to enable tool use shim.
 	// TODO(droot): figure out a better way to discover if the model supports tool use
 	// and set this automatically.
@@ -332,6 +334,7 @@ func (opt *Options) bindCLIFlags(f *pflag.FlagSet) error {
 	f.StringVar(&opt.ProviderID, "llm-provider", opt.ProviderID, "language model provider")
 	f.StringVar(&opt.ModelID, "model", opt.ModelID, "language model e.g. gemini-2.0-flash-thinking-exp-01-21, gemini-2.0-flash")
 	f.BoolVar(&opt.SkipPermissions, "skip-permissions", opt.SkipPermissions, "(dangerous) skip asking for confirmation before executing kubectl commands that modify resources")
+	f.BoolVar(&opt.SuggestOnly, "suggest-only", opt.SuggestOnly, "show suggested changes without executing tool calls that modify resources")
 	f.BoolVar(&opt.MCPServer, "mcp-server", opt.MCPServer, "run in MCP server mode")
 	f.BoolVar(&opt.ExternalTools, "external-tools", opt.ExternalTools, "in MCP server mode, discover and expose external MCP tools")
 	f.StringArrayVar(&opt.ToolConfigPaths, "custom-tools-config", opt.ToolConfigPaths, "path to custom tools config file or directory")
@@ -465,6 +468,7 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 			Recorder:           recorder,
 			RemoveWorkDir:      opt.RemoveWorkDir,
 			SkipPermissions:    opt.SkipPermissions,
+			SuggestOnly:        opt.SuggestOnly,
 			EnableToolUseShim:  opt.EnableToolUseShim,
 			MCPClientEnabled:   opt.MCPClient,
 			Sandbox:            opt.Sandbox,
