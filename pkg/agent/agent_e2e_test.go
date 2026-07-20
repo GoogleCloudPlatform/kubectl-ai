@@ -16,6 +16,8 @@ package agent
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -309,5 +311,78 @@ func TestAgentEndToEndMetaClear(t *testing.T) {
 	}
 	if msgs[0].Payload != "Cleared the conversation." {
 		t.Fatalf("first message after clear = %q, want %q", msgs[0].Payload, "Cleared the conversation.")
+	}
+}
+
+func TestAgentEndToEndLLMErrorReportsError(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	store := sessions.NewInMemoryChatStore()
+
+	client := mocks.NewMockClient(ctrl)
+	chat := mocks.NewMockChat(ctrl)
+
+	client.EXPECT().StartChat(gomock.Any(), "test-model").Return(chat)
+	chat.EXPECT().Initialize(gomock.Any()).Return(nil)
+	chat.EXPECT().SetFunctionDefinitions(gomock.Any()).Return(nil)
+
+	// Simulate LLM connection failure
+	llmErr := fmt.Errorf("connection refused: no LLM available")
+	chat.EXPECT().SendStreaming(gomock.Any(), gomock.Any()).Return(nil, llmErr)
+
+	var toolset tools.Tools
+	toolset.Init()
+
+	a := &Agent{
+		ChatMessageStore: store,
+		LLM:              client,
+		Model:            "test-model",
+		Tools:            toolset,
+		MaxIterations:    4,
+		RunOnce:          true,
+		InitialQuery:     "fix the oomkilled pod",
+		Session: &api.Session{
+			ID:               "test-session",
+			ChatMessageStore: store,
+			AgentState:       api.AgentStateIdle,
+		},
+	}
+
+	if err := a.Init(ctx); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	if err := a.Run(ctx, "fix the oomkilled pod"); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	// The agent should emit an error message, not silently succeed
+	sawError := false
+	timeout := time.After(3 * time.Second)
+	for !sawError {
+		select {
+		case v := <-a.Output:
+			m, ok := v.(*api.Message)
+			if !ok {
+				continue
+			}
+			if m.Type == api.MessageTypeError {
+				sawError = true
+				errPayload, _ := m.Payload.(string)
+				if !strings.Contains(errPayload, "connection refused") {
+					t.Errorf("expected error message to contain 'connection refused', got %q", errPayload)
+				}
+			}
+		case <-timeout:
+			t.Fatalf("timed out waiting for error message; agent silently swallowed LLM error")
+		}
+	}
+
+	// Verify state
+	if a.LastErr() == nil {
+		t.Error("expected LastErr to be set after LLM failure")
 	}
 }
