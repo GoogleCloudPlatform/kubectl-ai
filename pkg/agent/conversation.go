@@ -1338,6 +1338,8 @@ func toMap(v any) (map[string]any, error) {
 func candidateToShimCandidate(iterator gollm.ChatResponseIterator) (gollm.ChatResponseIterator, error) {
 	return func(yield func(gollm.ChatResponse, error) bool) {
 		buffer := ""
+		hasToolCalls := false
+		
 		for response, err := range iterator {
 			if err != nil {
 				yield(nil, err)
@@ -1352,28 +1354,41 @@ func candidateToShimCandidate(iterator gollm.ChatResponseIterator) (gollm.ChatRe
 			candidate := response.Candidates()[0]
 
 			for _, part := range candidate.Parts() {
+				// Check if it's a text response
 				if text, ok := part.AsText(); ok {
 					buffer += text
 					klog.Infof("text is %q", text)
-				} else {
-					yield(nil, fmt.Errorf("no text part found in candidate"))
-					return
 				}
+				
+				// Check if it's a function call
+				if calls, ok := part.AsFunctionCalls(); ok && len(calls) > 0 {
+					hasToolCalls = true
+					klog.Infof("function calls detected in shim candidate: %v", calls)
+				}
+			}
+			
+			// If we detected tool calls in streaming response, pass through original response
+			// to avoid parsing as ReActResponse which would lose the tool calls
+			if hasToolCalls {
+				yield(response, nil)
 			}
 		}
 
-		if buffer == "" {
-			yield(nil, nil)
-			return
-		}
+		// If no tool calls were found, convert text buffer to ReActResponse
+		if !hasToolCalls {
+			if buffer == "" {
+				yield(nil, nil)
+				return
+			}
 
-		parsedReActResp, err := parseReActResponse(buffer)
-		if err != nil {
-			yield(nil, fmt.Errorf("parsing ReAct response %q: %w", buffer, err))
-			return
+			parsedReActResp, err := parseReActResponse(buffer)
+			if err != nil {
+				yield(nil, fmt.Errorf("parsing ReAct response %q: %w", buffer, err))
+				return
+			}
+			buffer = "" // TODO: any trailing text?
+			yield(&ShimResponse{candidate: parsedReActResp}, nil)
 		}
-		buffer = "" // TODO: any trailing text?
-		yield(&ShimResponse{candidate: parsedReActResp}, nil)
 	}, nil
 }
 
