@@ -37,6 +37,22 @@ First, ensure that kubectl is installed and configured.
 curl -sSL https://raw.githubusercontent.com/GoogleCloudPlatform/kubectl-ai/main/install.sh | bash
 ```
 
+The installation script supports several options:
+
+```shell
+# View help and available options
+curl -sSL https://raw.githubusercontent.com/GoogleCloudPlatform/kubectl-ai/main/install.sh | bash -s -- --help
+
+# Preview what will be installed without making changes
+curl -sSL https://raw.githubusercontent.com/GoogleCloudPlatform/kubectl-ai/main/install.sh | bash -s -- --dry-run
+
+# Install to a custom directory
+curl -sSL https://raw.githubusercontent.com/GoogleCloudPlatform/kubectl-ai/main/install.sh | INSTALL_DIR="$HOME/.local/bin" bash
+
+# Use GitHub token to avoid rate limiting
+curl -sSL https://raw.githubusercontent.com/GoogleCloudPlatform/kubectl-ai/main/install.sh | GITHUB_TOKEN=your_token bash
+```
+
 <details>
 <summary>Other Installation Methods</summary>
 
