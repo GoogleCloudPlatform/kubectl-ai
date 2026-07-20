@@ -353,6 +353,247 @@ func TestAgent_Init_CreatesSessionInStore(t *testing.T) {
 	}
 }
 
+// --- Test helpers for candidateToShimCandidate ---
+
+type testPart struct {
+	text          string
+	functionCalls []gollm.FunctionCall
+}
+
+func (p *testPart) AsText() (string, bool) {
+	return p.text, p.text != ""
+}
+
+func (p *testPart) AsFunctionCalls() ([]gollm.FunctionCall, bool) {
+	if len(p.functionCalls) > 0 {
+		return p.functionCalls, true
+	}
+	return nil, false
+}
+
+type testCandidate struct {
+	parts []gollm.Part
+}
+
+func (c *testCandidate) String() string { return "testCandidate" }
+func (c *testCandidate) Parts() []gollm.Part {
+	return c.parts
+}
+
+type testChatResponse struct {
+	candidates []gollm.Candidate
+}
+
+func (r *testChatResponse) UsageMetadata() any        { return nil }
+func (r *testChatResponse) Candidates() []gollm.Candidate { return r.candidates }
+
+func TestCandidateToShimCandidate_TextOnly_ReAct(t *testing.T) {
+	// When the model returns only text with a ReAct JSON block,
+	// candidateToShimCandidate should parse it into a ShimResponse.
+	reactJSON := "```json\n{\"thought\": \"checking pods\", \"action\": {\"name\": \"kubectl\", \"command\": \"get pods\", \"reason\": \"list pods\", \"modifies_resource\": \"no\"}}\n```"
+
+	iter := func(yield func(gollm.ChatResponse, error) bool) {
+		yield(&testChatResponse{
+			candidates: []gollm.Candidate{
+				&testCandidate{parts: []gollm.Part{
+					&testPart{text: reactJSON},
+				}},
+			},
+		}, nil)
+	}
+
+	shimIter, err := candidateToShimCandidate(iter)
+	if err != nil {
+		t.Fatalf("candidateToShimCandidate returned error: %v", err)
+	}
+
+	var gotText string
+	var gotCalls []gollm.FunctionCall
+	for resp, err := range shimIter {
+		if err != nil {
+			t.Fatalf("iterator error: %v", err)
+		}
+		if resp == nil {
+			break
+		}
+		for _, c := range resp.Candidates() {
+			for _, p := range c.Parts() {
+				if text, ok := p.AsText(); ok {
+					gotText += text
+				}
+				if calls, ok := p.AsFunctionCalls(); ok {
+					gotCalls = append(gotCalls, calls...)
+				}
+			}
+		}
+	}
+
+	if len(gotCalls) != 1 {
+		t.Fatalf("expected 1 function call, got %d", len(gotCalls))
+	}
+	if gotCalls[0].Name != "kubectl" {
+		t.Errorf("expected function call name 'kubectl', got %q", gotCalls[0].Name)
+	}
+}
+
+func TestCandidateToShimCandidate_MixedTextAndFunctionCalls(t *testing.T) {
+	// When the model returns both text AND native function calls,
+	// candidateToShimCandidate should bypass ReAct parsing and pass through
+	// the original responses. This is the #427 fix.
+	iter := func(yield func(gollm.ChatResponse, error) bool) {
+		yield(&testChatResponse{
+			candidates: []gollm.Candidate{
+				&testCandidate{parts: []gollm.Part{
+					&testPart{text: "I'll start by checking the logs"},
+					&testPart{functionCalls: []gollm.FunctionCall{
+						{Name: "kubectl", Arguments: map[string]any{"command": "logs my-pod"}},
+					}},
+				}},
+			},
+		}, nil)
+	}
+
+	shimIter, err := candidateToShimCandidate(iter)
+	if err != nil {
+		t.Fatalf("candidateToShimCandidate returned error: %v", err)
+	}
+
+	var gotText string
+	var gotCalls []gollm.FunctionCall
+	for resp, err := range shimIter {
+		if err != nil {
+			t.Fatalf("iterator error: %v", err)
+		}
+		if resp == nil {
+			break
+		}
+		for _, c := range resp.Candidates() {
+			for _, p := range c.Parts() {
+				if text, ok := p.AsText(); ok {
+					gotText += text
+				}
+				if calls, ok := p.AsFunctionCalls(); ok {
+					gotCalls = append(gotCalls, calls...)
+				}
+			}
+		}
+	}
+
+	// Should have the function call passed through (not dropped)
+	if len(gotCalls) != 1 {
+		t.Fatalf("expected 1 function call (passed through), got %d", len(gotCalls))
+	}
+	if gotCalls[0].Name != "kubectl" {
+		t.Errorf("expected function call name 'kubectl', got %q", gotCalls[0].Name)
+	}
+	// Should also have the text passed through
+	if gotText != "I'll start by checking the logs" {
+		t.Errorf("expected text to be passed through, got %q", gotText)
+	}
+}
+
+func TestCandidateToShimCandidate_FunctionCallOnly(t *testing.T) {
+	// When the model returns only function calls (no text),
+	// they should be passed through as-is.
+	iter := func(yield func(gollm.ChatResponse, error) bool) {
+		yield(&testChatResponse{
+			candidates: []gollm.Candidate{
+				&testCandidate{parts: []gollm.Part{
+					&testPart{functionCalls: []gollm.FunctionCall{
+						{Name: "bash", Arguments: map[string]any{"command": "echo hello"}},
+					}},
+				}},
+			},
+		}, nil)
+	}
+
+	shimIter, err := candidateToShimCandidate(iter)
+	if err != nil {
+		t.Fatalf("candidateToShimCandidate returned error: %v", err)
+	}
+
+	var gotCalls []gollm.FunctionCall
+	for resp, err := range shimIter {
+		if err != nil {
+			t.Fatalf("iterator error: %v", err)
+		}
+		if resp == nil {
+			break
+		}
+		for _, c := range resp.Candidates() {
+			for _, p := range c.Parts() {
+				if calls, ok := p.AsFunctionCalls(); ok {
+					gotCalls = append(gotCalls, calls...)
+				}
+			}
+		}
+	}
+
+	if len(gotCalls) != 1 {
+		t.Fatalf("expected 1 function call, got %d", len(gotCalls))
+	}
+	if gotCalls[0].Name != "bash" {
+		t.Errorf("expected function call name 'bash', got %q", gotCalls[0].Name)
+	}
+}
+
+func TestCandidateToShimCandidate_MultiChunkMixed(t *testing.T) {
+	// Simulate multiple streaming chunks where text comes first,
+	// then a function call arrives in a later chunk.
+	iter := func(yield func(gollm.ChatResponse, error) bool) {
+		// First chunk: text only
+		if !yield(&testChatResponse{
+			candidates: []gollm.Candidate{
+				&testCandidate{parts: []gollm.Part{
+					&testPart{text: "Let me check "},
+				}},
+			},
+		}, nil) {
+			return
+		}
+		// Second chunk: more text + function call
+		yield(&testChatResponse{
+			candidates: []gollm.Candidate{
+				&testCandidate{parts: []gollm.Part{
+					&testPart{text: "the pods."},
+					&testPart{functionCalls: []gollm.FunctionCall{
+						{Name: "kubectl", Arguments: map[string]any{"command": "get pods"}},
+					}},
+				}},
+			},
+		}, nil)
+	}
+
+	shimIter, err := candidateToShimCandidate(iter)
+	if err != nil {
+		t.Fatalf("candidateToShimCandidate returned error: %v", err)
+	}
+
+	var gotCalls []gollm.FunctionCall
+	for resp, err := range shimIter {
+		if err != nil {
+			t.Fatalf("iterator error: %v", err)
+		}
+		if resp == nil {
+			break
+		}
+		for _, c := range resp.Candidates() {
+			for _, p := range c.Parts() {
+				if calls, ok := p.AsFunctionCalls(); ok {
+					gotCalls = append(gotCalls, calls...)
+				}
+			}
+		}
+	}
+
+	if len(gotCalls) != 1 {
+		t.Fatalf("expected 1 function call, got %d", len(gotCalls))
+	}
+	if gotCalls[0].Name != "kubectl" {
+		t.Errorf("expected 'kubectl', got %q", gotCalls[0].Name)
+	}
+}
+
 func TestAgent_NewSession_NoDeadlock(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
