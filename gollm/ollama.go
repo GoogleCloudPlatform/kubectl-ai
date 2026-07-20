@@ -43,7 +43,8 @@ const (
 )
 
 type OllamaClient struct {
-	client *api.Client
+	client       *api.Client
+	defaultModel string
 }
 
 type OllamaChat struct {
@@ -60,10 +61,20 @@ var _ Client = &OllamaClient{}
 func NewOllamaClient(ctx context.Context, opts ClientOptions) (*OllamaClient, error) {
 	// Create custom HTTP client with SSL verification option from client options
 	httpClient := createCustomHTTPClient(opts.SkipVerifySSL)
-	client := api.NewClient(envconfig.Host(), httpClient)
 
+	ollamaURL := envconfig.Host()
+	if opts.URL != nil && opts.URL.Host != "" {
+		ollamaURL.Host = opts.URL.Host
+	}
+	client := api.NewClient(ollamaURL, httpClient)
+
+	defaultModel := defaultOllamaModel
+	if opts.URL != nil {
+		defaultModel = opts.URL.Query().Get("model")
+	}
 	return &OllamaClient{
-		client: client,
+		client:       client,
+		defaultModel: defaultModel,
 	}, nil
 }
 
@@ -112,6 +123,9 @@ func (c *OllamaClient) SetResponseSchema(schema *Schema) error {
 }
 
 func (c *OllamaClient) StartChat(systemPrompt, model string) Chat {
+	if model == "" {
+		model = c.defaultModel
+	}
 	return &OllamaChat{
 		client: c.client,
 		model:  model,
