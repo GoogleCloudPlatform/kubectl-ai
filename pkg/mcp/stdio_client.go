@@ -149,11 +149,19 @@ func (c *stdioClient) CallTool(ctx context.Context, toolName string, arguments m
 		return "", err
 	}
 
+	// Serialize arguments to ensure they are JSON-compatible
+	serializedArgs, err := SerializeArgsForMCP(arguments)
+	if err != nil {
+		return "", fmt.Errorf("serializing arguments for MCP tool %s: %w", toolName, err)
+	}
+
+	klog.V(3).InfoS("Serialized arguments for MCP tool", "server", c.name, "tool", toolName, "args", serializedArgs)
+
 	// Create v0.31.0 compatible request
 	request := mcp.CallToolRequest{
 		Params: mcp.CallToolParams{
 			Name:      toolName,
-			Arguments: arguments,
+			Arguments: serializedArgs,
 		},
 	}
 
