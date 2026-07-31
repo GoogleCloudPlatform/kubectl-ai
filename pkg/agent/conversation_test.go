@@ -404,3 +404,82 @@ func TestAgent_NewSession_NoDeadlock(t *testing.T) {
 		t.Fatal("NewSession timed out (potential deadlock)")
 	}
 }
+
+func TestExtractJSON(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		wantData string
+		wantOK   bool
+	}{
+		{
+			name:     "json fenced block",
+			input:    "Here you go:\n```json\n{\"thought\":\"t\"}\n```\nthanks",
+			wantData: "\n{\"thought\":\"t\"}\n",
+			wantOK:   true,
+		},
+		{
+			name:     "bare fenced block (no language tag)",
+			input:    "```\n{\"thought\":\"t\"}\n```",
+			wantData: "\n{\"thought\":\"t\"}\n",
+			wantOK:   true,
+		},
+		{
+			name:   "no fence",
+			input:  "just some text without a code block",
+			wantOK: false,
+		},
+		{
+			name:   "empty string",
+			input:  "",
+			wantOK: false,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			data, ok := extractJSON(tc.input)
+			if ok != tc.wantOK {
+				t.Fatalf("extractJSON ok = %v, want %v", ok, tc.wantOK)
+			}
+			if ok && data != tc.wantData {
+				t.Errorf("extractJSON data = %q, want %q", data, tc.wantData)
+			}
+		})
+	}
+}
+
+func TestParseReActResponse(t *testing.T) {
+	t.Run("json fence with action", func(t *testing.T) {
+		in := "```json\n{\"thought\":\"check pods\",\"action\":{\"name\":\"kubectl\",\"command\":\"get pods\"}}\n```"
+		got, err := parseReActResponse(in)
+		if err != nil {
+			t.Fatalf("parseReActResponse: %v", err)
+		}
+		if got.Thought != "check pods" || got.Action == nil || got.Action.Command != "get pods" {
+			t.Errorf("unexpected parse result: %+v", got)
+		}
+	})
+
+	t.Run("bare fence with action", func(t *testing.T) {
+		in := "```\n{\"thought\":\"done\",\"answer\":\"all good\"}\n```"
+		got, err := parseReActResponse(in)
+		if err != nil {
+			t.Fatalf("parseReActResponse: %v", err)
+		}
+		if got.Answer != "all good" {
+			t.Errorf("answer = %q, want %q", got.Answer, "all good")
+		}
+	})
+
+	t.Run("no code block errors", func(t *testing.T) {
+		if _, err := parseReActResponse("no block here"); err == nil {
+			t.Error("expected error for input without a code block")
+		}
+	})
+
+	t.Run("invalid json errors", func(t *testing.T) {
+		if _, err := parseReActResponse("```json\nnot json\n```"); err == nil {
+			t.Error("expected error for invalid JSON")
+		}
+	})
+}
