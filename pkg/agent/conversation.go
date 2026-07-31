@@ -828,6 +828,15 @@ func (c *Agent) handleMetaQuery(ctx context.Context, query string) (answer strin
 	case "exit", "quit":
 		c.setAgentState(api.AgentStateExited)
 		return "It has been a pleasure assisting you. Have a great day!", true, nil
+	case "enable-confirmations":
+		// Undo a prior "Yes, and don't ask me again" choice (which sets
+		// SkipPermissions) so the agent resumes asking before commands that
+		// modify resources.
+		if !c.SkipPermissions {
+			return "Confirmations are already enabled.", true, nil
+		}
+		c.SkipPermissions = false
+		return "Confirmations re-enabled: you'll be asked before commands that modify resources.", true, nil
 	case "model":
 		return "Current model is `" + c.Model + "`", true, nil
 	case "models":
