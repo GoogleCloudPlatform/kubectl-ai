@@ -173,7 +173,6 @@ func (o *Options) InitDefaults() {
 	// so we don't need shim.
 	o.EnableToolUseShim = false
 	o.Quiet = false
-	o.MCPServer = false
 	o.MaxIterations = 20
 	o.KubeConfigPath = ""
 	o.PromptTemplateFilePath = ""
