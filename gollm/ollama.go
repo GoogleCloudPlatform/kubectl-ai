@@ -210,8 +210,56 @@ func (c *OllamaChat) SendStreaming(ctx context.Context, contents ...any) (ChatRe
 }
 
 func (c *OllamaChat) Initialize(messages []*kctlApi.Message) error {
-	klog.Warning("chat history persistence is not supported for provider 'ollama', using in-memory chat history")
+	history := make([]api.Message, 0, len(c.history)+len(messages))
+
+	// Ollama keeps the system prompt in its message history. Preserve it when
+	// replacing the conversation with a restored session or clearing a session.
+	for _, message := range c.history {
+		if message.Role == "system" {
+			history = append(history, message)
+		}
+	}
+
+	for _, message := range messages {
+		ollamaMessage, err := messageToOllama(message)
+		if err != nil {
+			continue
+		}
+		history = append(history, ollamaMessage)
+	}
+
+	c.history = history
 	return nil
+}
+
+func messageToOllama(message *kctlApi.Message) (api.Message, error) {
+	if message == nil {
+		return api.Message{}, fmt.Errorf("message is nil")
+	}
+
+	var role string
+	switch message.Source {
+	case kctlApi.MessageSourceUser:
+		role = "user"
+	case kctlApi.MessageSourceModel, kctlApi.MessageSourceAgent:
+		role = "assistant"
+	default:
+		return api.Message{}, fmt.Errorf("unknown message source: %s", message.Source)
+	}
+
+	if message.Type != kctlApi.MessageTypeText || message.Payload == nil {
+		return api.Message{}, fmt.Errorf("unsupported message type: %s", message.Type)
+	}
+
+	content, ok := message.Payload.(string)
+	if !ok {
+		content = fmt.Sprintf("%v", message.Payload)
+	}
+	if content == "" {
+		return api.Message{}, fmt.Errorf("message content is empty")
+	}
+
+	return api.Message{Role: role, Content: content}, nil
 }
 
 type OllamaChatResponse struct {
