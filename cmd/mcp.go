@@ -38,14 +38,28 @@ type kubectlMCPServer struct {
 	mcpServerMode string         // Server mode (e.g., "streamable-http", "stdio")
 	httpPort      int            // Port for HTTP-based server modes
 	authConfig    mcpauth.Config // OAuth 2.1 bearer auth (only used in streamable-http mode; disabled when Issuer is empty)
+	readOnly      bool
 }
 
-func newKubectlMCPServer(ctx context.Context, kubectlConfig string, t tools.Tools, workDir string, exposeExternalTools bool, serverMode string, httpPort int, authConfig mcpauth.Config) (*kubectlMCPServer, error) {
+func newKubectlMCPServer(ctx context.Context, kubectlConfig string, t tools.Tools, workDir string, exposeExternalTools bool, serverMode string, httpPort int, authConfig mcpauth.Config, readOnly bool) (*kubectlMCPServer, error) {
+	if readOnly && exposeExternalTools {
+		return nil, fmt.Errorf("read-only MCP mode cannot expose external tools")
+	}
+
 	// Register built-in tools (bash and kubectl) which require an executor.
 	// In MCP server mode, we use a local executor since there's no sandbox.
 	executor := sandbox.NewLocalExecutor()
-	t.RegisterTool(tools.NewBashTool(executor))
-	t.RegisterTool(tools.NewKubectlTool(executor))
+	if readOnly {
+		// Do not trust tools already present in the shared collection. A read-only
+		// server starts from an empty set and exposes only the restricted kubectl
+		// adapter.
+		t = tools.Tools{}
+		t.Init()
+		t.RegisterTool(tools.NewReadOnlyKubectlTool(executor))
+	} else {
+		t.RegisterTool(tools.NewBashTool(executor))
+		t.RegisterTool(tools.NewKubectlTool(executor))
+	}
 
 	s := &kubectlMCPServer{
 		kubectlConfig: kubectlConfig,
@@ -59,6 +73,7 @@ func newKubectlMCPServer(ctx context.Context, kubectlConfig string, t tools.Tool
 		mcpServerMode: serverMode,
 		httpPort:      httpPort,
 		authConfig:    authConfig,
+		readOnly:      readOnly,
 	}
 
 	// Add built-in tools
@@ -246,6 +261,19 @@ func (s *kubectlMCPServer) handleBuiltinToolCall(ctx context.Context, request mc
 				},
 			},
 		}, nil
+	}
+	if s.readOnly {
+		if tool.Name() != "kubectl" || tool.CheckModifiesResource(args) != "no" {
+			return &mcpgo.CallToolResult{
+				IsError: true,
+				Content: []mcpgo.Content{
+					mcpgo.TextContent{
+						Type: "text",
+						Text: fmt.Sprintf("read-only MCP server rejected tool %q because the operation could not be proven read-only", tool.Name()),
+					},
+				},
+			}, nil
+		}
 	}
 
 	// Execute the built-in tool
