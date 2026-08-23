@@ -94,6 +94,9 @@ type Options struct {
 	Quiet     bool `json:"quiet,omitempty"`
 	MCPServer bool `json:"mcpServer,omitempty"`
 	MCPClient bool `json:"mcpClient,omitempty"`
+	// MCPReadOnly exposes only kubectl commands that are proven not to mutate
+	// cluster or local kubeconfig state.
+	MCPReadOnly bool `json:"mcpReadOnly,omitempty"`
 	// ExternalTools enables discovery and exposure of external MCP tools (only works with --mcp-server)
 	ExternalTools bool `json:"externalTools,omitempty"`
 	MaxIterations int  `json:"maxIterations,omitempty"`
@@ -167,6 +170,7 @@ func (o *Options) InitDefaults() {
 	o.SkipPermissions = false
 	o.MCPServer = false
 	o.MCPClient = false
+	o.MCPReadOnly = false
 	// by default, external tools are disabled (only works with --mcp-server)
 	o.ExternalTools = false
 	// We now default to our strongest model (gemini-2.5-pro-exp-03-25) which supports tool use natively.
@@ -333,6 +337,7 @@ func (opt *Options) bindCLIFlags(f *pflag.FlagSet) error {
 	f.StringVar(&opt.ModelID, "model", opt.ModelID, "language model e.g. gemini-2.0-flash-thinking-exp-01-21, gemini-2.0-flash")
 	f.BoolVar(&opt.SkipPermissions, "skip-permissions", opt.SkipPermissions, "(dangerous) skip asking for confirmation before executing kubectl commands that modify resources")
 	f.BoolVar(&opt.MCPServer, "mcp-server", opt.MCPServer, "run in MCP server mode")
+	f.BoolVar(&opt.MCPReadOnly, "mcp-read-only", opt.MCPReadOnly, "expose only kubectl commands proven to be read-only (requires --mcp-server)")
 	f.BoolVar(&opt.ExternalTools, "external-tools", opt.ExternalTools, "in MCP server mode, discover and expose external MCP tools")
 	f.StringArrayVar(&opt.ToolConfigPaths, "custom-tools-config", opt.ToolConfigPaths, "path to custom tools config file or directory")
 	f.BoolVar(&opt.MCPClient, "mcp-client", opt.MCPClient, "enable MCP client mode to connect to external MCP servers")
@@ -364,6 +369,12 @@ func (opt *Options) bindCLIFlags(f *pflag.FlagSet) error {
 
 func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 	var err error
+	if opt.MCPReadOnly && !opt.MCPServer {
+		return fmt.Errorf("--mcp-read-only requires --mcp-server")
+	}
+	if opt.MCPReadOnly && opt.ExternalTools {
+		return fmt.Errorf("--mcp-read-only cannot be combined with --external-tools")
+	}
 
 	// Automatically upgrade backend to filesystem if session persistence flags are requested explicitly
 	if (opt.NewSession || opt.ResumeSession != "" || opt.ListSessions || opt.DeleteSession != "") && opt.SessionBackend == "memory" {
@@ -728,7 +739,7 @@ func startMCPServer(ctx context.Context, opt Options) error {
 		klog.Warningf("--mcp-auth-issuer is set but --mcp-server-mode is %q; authentication only applies to streamable-http and will be ignored", opt.MCPServerMode)
 	}
 
-	mcpServer, err := newKubectlMCPServer(ctx, opt.KubeConfigPath, tools.Default(), workDir, opt.ExternalTools, opt.MCPServerMode, opt.HTTPPort, authConfig)
+	mcpServer, err := newKubectlMCPServer(ctx, opt.KubeConfigPath, tools.Default(), workDir, opt.ExternalTools, opt.MCPServerMode, opt.HTTPPort, authConfig, opt.MCPReadOnly)
 	if err != nil {
 		return fmt.Errorf("creating mcp server: %w", err)
 	}

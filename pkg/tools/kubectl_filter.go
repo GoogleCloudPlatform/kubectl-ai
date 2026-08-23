@@ -15,6 +15,7 @@
 package tools
 
 import (
+	"path/filepath"
 	"strings"
 
 	"k8s.io/klog/v2"
@@ -26,11 +27,10 @@ var (
 	readOnlyOps = map[string]bool{
 		"get": true, "describe": true, "explain": true, "top": true,
 		"logs": true, "api-resources": true, "api-versions": true,
-		"version": true, "config": true, "cluster-info": true,
-		"wait": true, "auth": true, "diff": true, "kustomize": true,
-		"help": true, "options": true, "proxy": true,
+		"version": true, "cluster-info": true,
+		"wait": true, "diff": true, "kustomize": true,
+		"help": true, "options": true,
 		"completion": true, "convert": true, "events": true,
-		"port-forward": true, "can-i": true, "whoami": true,
 	}
 
 	writeOps = map[string]bool{
@@ -48,6 +48,17 @@ var (
 			"history": true,
 			"status":  true,
 		},
+		"config": {
+			"current-context": true,
+			"get-clusters":    true,
+			"get-contexts":    true,
+			"get-users":       true,
+			"view":            true,
+		},
+		"auth": {
+			"can-i":  true,
+			"whoami": true,
+		},
 	}
 
 	writeSubOps = map[string]map[string]bool{
@@ -56,6 +67,21 @@ var (
 			"restart": true,
 			"resume":  true,
 			"undo":    true,
+		},
+		"config": {
+			"delete-cluster":  true,
+			"delete-context":  true,
+			"delete-user":     true,
+			"rename-context":  true,
+			"set":             true,
+			"set-cluster":     true,
+			"set-context":     true,
+			"set-credentials": true,
+			"unset":           true,
+			"use-context":     true,
+		},
+		"auth": {
+			"reconcile": true,
 		},
 	}
 )
@@ -119,7 +145,53 @@ func kubectlModifiesResource(command string) string {
 	return "unknown"
 }
 
+// kubectlReadOnlyEffect accepts only one plain kubectl invocation. It rejects
+// shell features that can change local state or alter what is actually
+// executed, and it does not treat dry-run writes as read-only. It is used by
+// the MCP read-only tool, where commands execute unattended on the server.
+func kubectlReadOnlyEffect(command string) string {
+	parser := syntax.NewParser()
+	file, err := parser.Parse(strings.NewReader(command), "")
+	if err != nil {
+		return "unknown"
+	}
+
+	if len(file.Stmts) != 1 {
+		return "unknown"
+	}
+
+	stmt := file.Stmts[0]
+	if stmt.Negated || stmt.Background || stmt.Coprocess || stmt.Semicolon.IsValid() || len(stmt.Redirs) != 0 {
+		return "unknown"
+	}
+
+	call, ok := stmt.Cmd.(*syntax.CallExpr)
+	if !ok || len(call.Assigns) != 0 {
+		return "unknown"
+	}
+
+	// A command substitution or process substitution contains another call.
+	// Reject it even when the outer kubectl verb itself is read-only.
+	hasNestedCall := false
+	syntax.Walk(call, func(node syntax.Node) bool {
+		if nested, ok := node.(*syntax.CallExpr); ok && nested != call {
+			hasNestedCall = true
+			return false
+		}
+		return true
+	})
+	if hasNestedCall {
+		return "unknown"
+	}
+
+	return analyzeCallWithPolicy(call, false)
+}
+
 func analyzeCall(call *syntax.CallExpr) string {
+	return analyzeCallWithPolicy(call, true)
+}
+
+func analyzeCallWithPolicy(call *syntax.CallExpr, allowDryRunWrites bool) string {
 	if call == nil || len(call.Args) == 0 {
 		klog.Warning("analyzeCall: call is nil or has no args")
 		return "unknown"
@@ -153,8 +225,10 @@ func analyzeCall(call *syntax.CallExpr) string {
 		return "unknown"
 	}
 
-	// Check if this is kubectl
-	if !strings.Contains(firstArg, "kubectl") {
+	// Match only the actual kubectl executable. A substring check would accept
+	// lookalikes such as kubectl.wrapper and make read-only enforcement bypassable.
+	base := filepath.Base(firstArg)
+	if base != "kubectl" && base != "kubectl.exe" {
 		klog.V(2).Infof("analyzeCall: first arg does not contain kubectl: %q", firstArg)
 		return "unknown"
 	}
@@ -181,13 +255,13 @@ func analyzeCall(call *syntax.CallExpr) string {
 	}
 
 	// Check standard operations - write operations first (prioritize immediate detection)
-	if (writeOps[verb] || writeSubOps[verb][subVerb]) && !hasDryRun {
+	if (writeOps[verb] || writeSubOps[verb][subVerb]) && (!hasDryRun || !allowDryRunWrites) {
 		klog.V(1).Infof("analyzeCall: write op for verb=%q subVerb=%q", verb, subVerb)
 		return "yes"
 	}
 
 	// Check read-only operations or dry-run write operations
-	if (readOnlyOps[verb] || readOnlySubOps[verb][subVerb]) || ((writeOps[verb] || writeSubOps[verb][subVerb]) && hasDryRun) {
+	if (readOnlyOps[verb] || readOnlySubOps[verb][subVerb]) || (allowDryRunWrites && (writeOps[verb] || writeSubOps[verb][subVerb]) && hasDryRun) {
 		klog.V(1).Infof("analyzeCall: read op for verb=%q subVerb=%q (dry-run=%v)", verb, subVerb, hasDryRun)
 		return "no"
 	}

@@ -431,6 +431,20 @@ Expose only kubectl-ai's native Kubernetes tools:
 kubectl-ai --mcp-server
 ```
 
+### Read-only MCP Server
+
+Expose only policy-checked kubectl inspection commands and omit `bash`:
+
+```bash
+kubectl-ai --mcp-server --mcp-read-only
+```
+
+The server validates the actual command immediately before execution. Commands
+that mutate resources or local kubeconfig state, compound shell commands, and
+commands whose effect cannot be classified are rejected. Read-only mode cannot
+be combined with `--external-tools`. Kubernetes RBAC remains the authority for
+which cluster data a caller may read.
+
 ### Enhanced MCP Server (With external tool discovery)
 
 Additionally discover and expose tools from other MCP servers as a unified interface:
