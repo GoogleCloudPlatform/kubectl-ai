@@ -280,6 +280,24 @@ func main() {
 	}
 }
 
+// defaultLogFilePath returns a per-user path for kubectl-ai's log file,
+// under the user's cache directory (e.g. ~/.cache/kubectl-ai on Linux,
+// %LocalAppData% on Windows). The previous fixed os.TempDir()-based path was
+// shared by every user on the host: whichever user's process created the
+// file first left it with permissions that made every other user's run fail
+// outright with "unable to create log: ... permission denied" (#564).
+func defaultLogFilePath() (string, error) {
+	cacheDir, err := os.UserCacheDir()
+	if err != nil {
+		return "", fmt.Errorf("getting user cache directory: %w", err)
+	}
+	dir := filepath.Join(cacheDir, "kubectl-ai")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", fmt.Errorf("creating log directory %q: %w", dir, err)
+	}
+	return filepath.Join(dir, "kubectl-ai.log"), nil
+}
+
 func run(ctx context.Context) error {
 	// klog setup must happen before Cobra parses any flags
 
@@ -288,7 +306,15 @@ func run(ctx context.Context) error {
 	klog.InitFlags(klogFlags)
 
 	klogFlags.Set("logtostderr", "false")
-	klogFlags.Set("log_file", filepath.Join(os.TempDir(), "kubectl-ai.log"))
+	logFilePath, err := defaultLogFilePath()
+	if err != nil {
+		// Fall back to the old shared-tmp-dir behavior rather than failing
+		// to start: a permission collision on a multi-user host is better
+		// than kubectl-ai refusing to run at all when the per-user cache
+		// directory can't be determined or created.
+		logFilePath = filepath.Join(os.TempDir(), "kubectl-ai.log")
+	}
+	klogFlags.Set("log_file", logFilePath)
 
 	defer klog.Flush()
 
