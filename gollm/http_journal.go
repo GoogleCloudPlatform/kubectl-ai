@@ -19,11 +19,65 @@ import (
 	"io"
 	"net/http"
 	"net/http/httputil"
+	"regexp"
+	"strings"
 
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/journal"
 
 	"k8s.io/klog/v2"
 )
+
+// sensitiveHeaders lists the header names (case-insensitive) that carry
+// credentials or session identifiers across the LLM providers this package
+// talks to (goog-api-key for Gemini, Authorization for OpenAI/Grok bearer
+// tokens, x-api-key for Anthropic, api-key for Azure OpenAI), plus the
+// generic HTTP auth/session headers. Their values must never reach the
+// trace file.
+var sensitiveHeaders = map[string]bool{
+	"authorization":       true,
+	"proxy-authorization": true,
+	"x-api-key":           true,
+	"x-goog-api-key":      true,
+	"api-key":             true,
+	"cookie":              true,
+	"set-cookie":          true,
+}
+
+const redactedValue = "REDACTED"
+
+// sensitiveHeaderLine matches a single HTTP header line, as produced by
+// httputil.DumpRequestOut, whose name is one of sensitiveHeaders.
+var sensitiveHeaderLine = regexp.MustCompile(`(?im)^(` + sensitiveHeaderNamesPattern() + `):.*$`)
+
+func sensitiveHeaderNamesPattern() string {
+	pattern := ""
+	for name := range sensitiveHeaders {
+		if pattern != "" {
+			pattern += "|"
+		}
+		pattern += regexp.QuoteMeta(name)
+	}
+	return pattern
+}
+
+// redactSensitiveHeaderLines redacts the value of any sensitive header found
+// in a raw HTTP request/response dump (e.g. from httputil.DumpRequestOut),
+// leaving the header name and every other line untouched.
+func redactSensitiveHeaderLines(dump []byte) []byte {
+	return sensitiveHeaderLine.ReplaceAll(dump, []byte("$1: "+redactedValue))
+}
+
+// redactSensitiveHeaderValues returns a copy of headers with the value of
+// any sensitive header replaced, leaving non-sensitive headers untouched.
+func redactSensitiveHeaderValues(headers http.Header) http.Header {
+	redacted := headers.Clone()
+	for name := range redacted {
+		if sensitiveHeaders[strings.ToLower(name)] {
+			redacted[name] = []string{redactedValue}
+		}
+	}
+	return redacted
+}
 
 // journalingRoundTripper wraps an existing http.RoundTripper to record requests and responses.
 type journalingRoundTripper struct {
@@ -41,7 +95,7 @@ func (jrt *journalingRoundTripper) RoundTrip(req *http.Request) (*http.Response,
 	if err == nil {
 		err = recorder.Write(req.Context(), &journal.Event{
 			Action:  journal.ActionHTTPRequest,
-			Payload: map[string]any{"request": string(reqBytes)},
+			Payload: map[string]any{"request": string(redactSensitiveHeaderLines(reqBytes))},
 		})
 		if err != nil {
 			klog.Errorf("Error writing outgoing request to journal: %v", err)
@@ -74,7 +128,7 @@ func (jrt *journalingRoundTripper) RoundTrip(req *http.Request) (*http.Response,
 	// Default payload is the raw body, for non-streaming responses.
 	logPayload := map[string]any{
 		"status":  resp.Status,
-		"headers": resp.Header,
+		"headers": redactSensitiveHeaderValues(resp.Header),
 		"body":    string(bodyBytes),
 	}
 
