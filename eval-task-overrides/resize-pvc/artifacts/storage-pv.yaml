@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: resize-pvc-storage-pv
+spec:
+  capacity:
+    storage: 10Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: resize-pvc-expandable
+  claimRef:
+    namespace: resize-pv
+    name: storage-pvc
+  hostPath:
+    path: /tmp/k8s-ai-bench-resize-pvc
+    type: DirectoryOrCreate

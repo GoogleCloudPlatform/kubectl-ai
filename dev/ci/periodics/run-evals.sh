@@ -23,6 +23,13 @@ curl -sSL https://raw.githubusercontent.com/GoogleCloudPlatform/kubectl-ai/main/
 K8S_AI_BENCH_SRC="${REPO_ROOT}/.build/k8s-ai-bench-src"
 rm -rf "${K8S_AI_BENCH_SRC}"
 git clone https://github.com/gke-labs/k8s-ai-bench "${K8S_AI_BENCH_SRC}"
+
+EVAL_TASK_OVERRIDES_DIR="${REPO_ROOT}/eval-task-overrides"
+if [[ -d "${EVAL_TASK_OVERRIDES_DIR}" ]]; then
+    echo "Applying kubectl-ai eval task overrides from ${EVAL_TASK_OVERRIDES_DIR}"
+    cp -R "${EVAL_TASK_OVERRIDES_DIR}/." "${K8S_AI_BENCH_SRC}/tasks/"
+fi
+
 cd "${K8S_AI_BENCH_SRC}"
 GOWORK=off go build -o "${BINDIR}/k8s-ai-bench" .
 
