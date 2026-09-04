@@ -24,7 +24,7 @@ A custom tool can be described by providing the following four pieces of informa
 - **command** : "your_command" # For example: 'gcloud' or 'gcloud container clusters'
 - **command_desc**: "Detailed information for the LLM, including command syntax and usage examples."
 
-Samples are provided in the `pkg/tools/samples` directory. Below is a sample for the `kustomize` tool:
+Samples are provided in the [`docs/tool-samples`](./tool-samples) directory. Below is a sample for the `kustomize` tool:
 
 ```yaml
 - name: kustomize
@@ -80,13 +80,50 @@ docker run --rm -it \
   "your prompt here"
 ```
 
+## How to Create a Custom Tool Config from Scratch
+
+The following walkthrough shows how to build a config for the GitHub CLI (`gh`). The same pattern applies to any CLI-backed tool.
+
+1. **Pick a short tool name** the LLM will call (for example, `gh`).
+2. **Write a one-line description** that tells the LLM when to use the tool.
+3. **Set `command`** to the binary name on your `PATH`.
+4. **Document subcommands in `command_desc`** with concrete examples the LLM can follow.
+
+```yaml
+- name: gh
+  description: "The official GitHub command-line tool. Use it to interact with GitHub repositories, pull requests, issues, actions, and more, directly from the terminal."
+  command: "gh"
+  command_desc: |
+    The gh command-line interface for GitHub.
+
+    Core subcommands and usage patterns:
+    - `gh auth login`: Authenticate with a GitHub host. This is required before most other commands.
+    - `gh pr list`: List pull requests in the current repository.
+    - `gh pr view <number>`: View a specific pull request.
+    - `gh issue list`: List issues in the current repository.
+
+    Use `gh --help` or `gh <subcommand> --help` for full syntax and available flags.
+```
+
+5. **Save the file** (for example, `~/.config/kubectl-ai/tools/gh.yaml`).
+6. **Point kubectl-ai at the file or directory** with `--custom-tools-config` or `toolConfigPaths` in `~/.config/kubectl-ai/config.yaml`.
+7. **Verify the tool is loaded** by running `tools` in an interactive session.
+
+Tips:
+
+- Focus `command_desc` on the subcommands and flags that matter for your workflows.
+- Keep one tool per YAML file when sharing examples; a single `tools.yaml` can also list multiple tools.
+- Remove or move unused sample files out of your tools directory if you do not want kubectl-ai to load them.
+
 ## Sample Custom Tools
 
-The following sample custom tools are configured by default.
+The following curated example configs ship with kubectl-ai and are copied into the Docker image at `/etc/kubectl-ai/tools`.
 
-| Tool                                                       | Description                                                     | YAML File                                           |
-| :--------------------------------------------------------- | :-------------------------------------------------------------- | :------------------------------------------------------ |
-| Argo CD (`argocd`)      | A declarative, GitOps continuous delivery tool for Kubernetes.  | [argocd.yaml](./tool-samples/argocd.yaml)         |
-| GitHub CLI (`gh`)               | The official command-line tool to interact with GitHub.         | [gh.yaml](./tool-samples/gh.yaml)                 |
-| Google Cloud CLI (`gcloud`) | The primary CLI for managing Google Cloud resources.            | [gcloud.yaml](./tool-samples/gcloud.yaml)               |
-| Kustomize (`kustomize`)           | A tool to customize Kubernetes resource configurations.         | [kustomize.yaml](./tool-samples/kustomize.yaml)   |
+| Tool | Description | YAML File |
+| :--- | :---------- | :-------- |
+| Argo CD (`argocd`) | A declarative, GitOps continuous delivery tool for Kubernetes. | [argocd.yaml](./tool-samples/argocd.yaml) |
+| GitHub CLI (`gh`) | The official command-line tool to interact with GitHub. | [gh.yaml](./tool-samples/gh.yaml) |
+| Google Cloud CLI (`gcloud`) | The primary CLI for managing Google Cloud resources. | [gcloud.yaml](./tool-samples/gcloud.yaml) |
+| Helm (`helm`) | The Helm package manager for Kubernetes. | [helm.yaml](./tool-samples/helm.yaml) |
+| Istio CLI (`istioctl`) | The Istio command-line tool for service mesh operations. | [istioctl.yaml](./tool-samples/istioctl.yaml) |
+| Kustomize (`kustomize`) | A tool to customize Kubernetes resource configurations. | [kustomize.yaml](./tool-samples/kustomize.yaml) |
