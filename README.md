@@ -18,6 +18,7 @@ efficient.
   - [Usage](#usage)
 - [Configuration](#configuration)
 - [Tools](#tools)
+- [Running in Production (guide)](docs/production.md)
 - [Docker Quick Start](#docker-quick-start)
 - [MCP Client Mode](#mcp-client-mode)
 - [Extras](#extras)
@@ -301,6 +302,11 @@ All these settings can be configured through either:
 3. Environment variables (e.g., `GEMINI_API_KEY`)
 
 Command line flags take precedence over configuration file settings.
+
+> **Running against a production cluster?** `skipPermissions`, `sandbox`, `kubeconfig` and the LLM
+> provider choice each change what the agent can do to your cluster. See
+> [Running kubectl-ai safely in production](docs/production.md) for a practical hardening
+> checklist.
 
 ## Tools
 
