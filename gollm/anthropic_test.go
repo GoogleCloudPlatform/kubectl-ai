@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/api"
 	anthropic "github.com/anthropics/anthropic-sdk-go"
 )
 
@@ -490,4 +491,41 @@ func TestGetAnthropicModel(t *testing.T) {
 			t.Errorf("expected 'claude-sonnet-4-6', got %q", got)
 		}
 	})
+}
+
+func TestAnthropicInitialize_FiltersMetaMessages(t *testing.T) {
+	session := &anthropicChatSession{}
+
+	history := []*api.Message{
+		{
+			Source:  api.MessageSourceUser,
+			Type:    api.MessageTypeText,
+			Payload: "How do I create a service?",
+		},
+		{
+			Source:   api.MessageSourceUser,
+			Type:     api.MessageTypeText,
+			Payload:  "models",
+			Metadata: map[string]string{api.MessageMetadataKeyType: api.MessageMetadataValueMeta},
+		},
+		{
+			Source:   api.MessageSourceAgent,
+			Type:     api.MessageTypeText,
+			Payload:  "Available models: claude-3-5-sonnet",
+			Metadata: map[string]string{api.MessageMetadataKeyType: api.MessageMetadataValueMeta},
+		},
+		{
+			Source:  api.MessageSourceModel,
+			Type:    api.MessageTypeText,
+			Payload: "Use kubectl expose...",
+		},
+	}
+
+	if err := session.Initialize(history); err != nil {
+		t.Fatalf("Initialize failed: %v", err)
+	}
+
+	if len(session.messages) != 2 {
+		t.Fatalf("expected 2 messages in session, got %d", len(session.messages))
+	}
 }

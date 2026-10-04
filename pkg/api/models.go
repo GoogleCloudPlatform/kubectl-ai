@@ -65,6 +65,56 @@ type Message struct {
 	Type      MessageType
 	Payload   any
 	Timestamp time.Time
+	Metadata  map[string]string `json:",omitempty"`
+}
+
+const (
+	MessageMetadataKeyType      = "type"
+	MessageMetadataValueMeta    = "meta"
+	MessageMetadataKeyMetaQuery = "meta_query"
+)
+
+// IsMeta returns true if the message is related to a meta query or response.
+func (m *Message) IsMeta() bool {
+	if m == nil || m.Metadata == nil {
+		return false
+	}
+	if m.Metadata[MessageMetadataKeyType] == MessageMetadataValueMeta {
+		return true
+	}
+	if m.Metadata[MessageMetadataKeyMetaQuery] == "true" || m.Metadata["is_meta"] == "true" {
+		return true
+	}
+	return false
+}
+
+// SetMeta marks the message as a meta query/response if isMeta is true.
+func (m *Message) SetMeta(isMeta bool) {
+	if m == nil {
+		return
+	}
+	if m.Metadata == nil {
+		m.Metadata = make(map[string]string)
+	}
+	if isMeta {
+		m.Metadata[MessageMetadataKeyType] = MessageMetadataValueMeta
+		m.Metadata[MessageMetadataKeyMetaQuery] = "true"
+	} else {
+		delete(m.Metadata, MessageMetadataKeyType)
+		delete(m.Metadata, MessageMetadataKeyMetaQuery)
+		delete(m.Metadata, "is_meta")
+	}
+}
+
+// FilterNonMetaMessages returns a slice of messages excluding any meta query request/response messages.
+func FilterNonMetaMessages(messages []*Message) []*Message {
+	filtered := make([]*Message, 0, len(messages))
+	for _, m := range messages {
+		if m != nil && !m.IsMeta() {
+			filtered = append(filtered, m)
+		}
+	}
+	return filtered
 }
 
 type MessageSource string
@@ -154,6 +204,14 @@ func (s *Session) AllMessages() []*Message {
 		return nil
 	}
 	return s.ChatMessageStore.ChatMessages()
+}
+
+// LLMMessages returns the session's chat messages filtered for LLM context (excluding meta queries).
+func (s *Session) LLMMessages() []*Message {
+	if s == nil || s.ChatMessageStore == nil {
+		return nil
+	}
+	return FilterNonMetaMessages(s.ChatMessageStore.ChatMessages())
 }
 
 func (s *Session) String() string {

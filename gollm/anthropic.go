@@ -178,6 +178,9 @@ func (c *anthropicChatSession) Initialize(history []*api.Message) error {
 	c.messages = make([]anthropic.MessageParam, 0, len(history))
 
 	for _, msg := range history {
+		if msg.IsMeta() {
+			continue
+		}
 		var role anthropic.MessageParamRole
 		switch msg.Source {
 		case api.MessageSourceUser:
