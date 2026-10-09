@@ -57,6 +57,7 @@ func (f *filesystemStore) GetSession(id string) (*api.Session, error) {
 		ID:               id,
 		ProviderID:       meta.ProviderID,
 		ModelID:          meta.ModelID,
+		Environment:      meta.Environment,
 		AgentState:       api.AgentStateIdle,
 		CreatedAt:        meta.CreatedAt,
 		LastModified:     meta.LastAccessed,
@@ -78,6 +79,7 @@ func (f *filesystemStore) CreateSession(session *api.Session) error {
 		ModelID:      session.ModelID,
 		CreatedAt:    session.CreatedAt,
 		LastAccessed: session.LastModified,
+		Environment:  session.Environment,
 	}
 
 	data, err := yaml.Marshal(meta)
@@ -108,6 +110,9 @@ func (f *filesystemStore) UpdateSession(session *api.Session) error {
 	meta.ProviderID = session.ProviderID
 	meta.ModelID = session.ModelID
 	meta.LastAccessed = session.LastModified
+	if session.Environment != "" {
+		meta.Environment = session.Environment
+	}
 
 	data, err := yaml.Marshal(meta)
 	if err != nil {
@@ -144,6 +149,22 @@ func (f *filesystemStore) ListSessions() ([]*api.Session, error) {
 	})
 
 	return sessions, nil
+}
+
+func (f *filesystemStore) ListSessionsByEnvironment(env string) ([]*api.Session, error) {
+	all, err := f.ListSessions()
+	if err != nil {
+		return nil, err
+	}
+
+	filtered := make([]*api.Session, 0)
+	for _, s := range all {
+		if s.Environment == env {
+			filtered = append(filtered, s)
+		}
+	}
+
+	return filtered, nil
 }
 
 func (f *filesystemStore) DeleteSession(id string) error {

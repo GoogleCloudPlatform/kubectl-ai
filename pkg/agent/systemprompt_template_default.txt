@@ -123,6 +123,11 @@ Before creating ANY manifest, you MUST:
    - Ensure required CRDs are installed
 {{end}}
 
+{{if .EnvironmentMemory}}
+## Environment Operational Preferences & Runbooks ({{.Environment}}):
+{{.EnvironmentMemory}}
+{{end}}
+
 ## Remember:
 - Fetch current state of kubernetes resources relevant to user's query.
 - If using a kubectl command ensure that verb is always prefixed by `kubectl`.

@@ -29,6 +29,7 @@ import (
 	"slices"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/GoogleCloudPlatform/kubectl-ai/gollm"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/agent"
@@ -138,6 +139,12 @@ type Options struct {
 	DeleteSession  string `json:"deleteSession,omitempty"`
 	SessionBackend string `json:"sessionBackend,omitempty"`
 
+	// Session memory and environment retention options
+	EnableSessionMemory bool          `json:"enableSessionMemory,omitempty"`
+	Environment         string        `json:"environment,omitempty"`
+	MaxRetainedSessions int           `json:"maxRetainedSessions,omitempty"`
+	SessionTTL          time.Duration `json:"sessionTTL,omitempty"`
+
 	// ShowToolOutput is a flag to disable truncation of tool output in the terminal UI.
 	ShowToolOutput bool `json:"showToolOutput,omitempty"`
 
@@ -201,6 +208,10 @@ func (o *Options) InitDefaults() {
 	o.ListSessions = false
 	o.DeleteSession = ""
 	o.SessionBackend = "memory"
+	o.EnableSessionMemory = false
+	o.Environment = ""
+	o.MaxRetainedSessions = 0
+	o.SessionTTL = 0
 
 	// By default, hide tool outputs
 	o.ShowToolOutput = false
@@ -358,6 +369,10 @@ func (opt *Options) bindCLIFlags(f *pflag.FlagSet) error {
 	f.BoolVar(&opt.NewSession, "new-session", opt.NewSession, "start a new persistent session")
 	f.StringVar(&opt.SessionBackend, "session-backend", opt.SessionBackend,
 		"session backend to use (memory or filesystem)")
+	f.BoolVar(&opt.EnableSessionMemory, "enable-session-memory", opt.EnableSessionMemory, "enable opt-in environment-scoped session memory retention")
+	f.StringVar(&opt.Environment, "environment", opt.Environment, "environment name/scope for session memory isolation (defaults to current kubeconfig context)")
+	f.IntVar(&opt.MaxRetainedSessions, "max-retained-sessions", opt.MaxRetainedSessions, "maximum number of sessions to retain per environment (0 for unlimited)")
+	f.DurationVar(&opt.SessionTTL, "session-ttl", opt.SessionTTL, "maximum age of sessions before eviction (e.g. 720h for 30d, 0 for no expiry)")
 
 	return nil
 }
@@ -366,7 +381,7 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 	var err error
 
 	// Automatically upgrade backend to filesystem if session persistence flags are requested explicitly
-	if (opt.NewSession || opt.ResumeSession != "" || opt.ListSessions || opt.DeleteSession != "") && opt.SessionBackend == "memory" {
+	if (opt.NewSession || opt.ResumeSession != "" || opt.ListSessions || opt.DeleteSession != "" || opt.EnableSessionMemory) && opt.SessionBackend == "memory" {
 		klog.Infof("Upgrading session-backend to 'filesystem' based on provided flags")
 		opt.SessionBackend = "filesystem"
 	}
@@ -379,6 +394,13 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 	// resolve kubeconfig path with priority: flag/env > KUBECONFIG > default path
 	if err = resolveKubeConfigPath(&opt); err != nil {
 		return fmt.Errorf("failed to resolve kubeconfig path: %w", err)
+	}
+
+	if opt.EnableSessionMemory {
+		if opt.Environment == "" {
+			opt.Environment = sessions.ResolveEnvironment(opt.Environment, opt.KubeConfigPath)
+		}
+		klog.Infof("Session memory enabled for environment: %s", opt.Environment)
 	}
 
 	if opt.MCPServer {
@@ -435,7 +457,18 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 	var session *api.Session
 	var sessionManager *sessions.SessionManager
 
-	sessionManager, err = sessions.NewSessionManager(opt.SessionBackend)
+	var smOpts []sessions.ManagerOption
+	if opt.Environment != "" {
+		smOpts = append(smOpts, sessions.WithEnvironment(opt.Environment))
+	}
+	if opt.MaxRetainedSessions > 0 || opt.SessionTTL > 0 {
+		smOpts = append(smOpts, sessions.WithRetentionPolicy(sessions.RetentionPolicy{
+			MaxSessions: opt.MaxRetainedSessions,
+			TTL:         opt.SessionTTL,
+		}))
+	}
+
+	sessionManager, err = sessions.NewSessionManager(opt.SessionBackend, smOpts...)
 	if err != nil {
 		return fmt.Errorf("failed to create session manager: %w", err)
 	}
@@ -454,24 +487,31 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 		}
 
 		return &agent.Agent{
-			Model:              opt.ModelID,
-			Provider:           opt.ProviderID,
-			Kubeconfig:         opt.KubeConfigPath,
-			LLM:                client,
-			MaxIterations:      opt.MaxIterations,
-			PromptTemplateFile: opt.PromptTemplateFilePath,
-			ExtraPromptPaths:   opt.ExtraPromptPaths,
-			Tools:              tools.Default(),
-			Recorder:           recorder,
-			RemoveWorkDir:      opt.RemoveWorkDir,
-			SkipPermissions:    opt.SkipPermissions,
-			EnableToolUseShim:  opt.EnableToolUseShim,
-			MCPClientEnabled:   opt.MCPClient,
-			Sandbox:            opt.Sandbox,
-			SandboxImage:       opt.SandboxImage,
-			SessionBackend:     opt.SessionBackend,
-			RunOnce:            opt.Quiet,
-			InitialQuery:       queryFromCmd,
+			Model:               opt.ModelID,
+			Provider:            opt.ProviderID,
+			Kubeconfig:          opt.KubeConfigPath,
+			LLM:                 client,
+			MaxIterations:       opt.MaxIterations,
+			PromptTemplateFile:  opt.PromptTemplateFilePath,
+			ExtraPromptPaths:    opt.ExtraPromptPaths,
+			Tools:               tools.Default(),
+			Recorder:            recorder,
+			RemoveWorkDir:       opt.RemoveWorkDir,
+			SkipPermissions:     opt.SkipPermissions,
+			EnableToolUseShim:   opt.EnableToolUseShim,
+			MCPClientEnabled:    opt.MCPClient,
+			Sandbox:             opt.Sandbox,
+			SandboxImage:        opt.SandboxImage,
+			SessionBackend:      opt.SessionBackend,
+			RunOnce:             opt.Quiet,
+			InitialQuery:        queryFromCmd,
+			Environment:         opt.Environment,
+			EnableSessionMemory: opt.EnableSessionMemory,
+			RetentionPolicy: sessions.RetentionPolicy{
+				MaxSessions: opt.MaxRetainedSessions,
+				TTL:         opt.SessionTTL,
+			},
+			SessionManager: sessionManager,
 		}, nil
 	}
 
@@ -503,8 +543,9 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 	// If no session loaded (or resume failed/not requested), create a new one
 	if session == nil {
 		meta := sessions.Metadata{
-			ModelID:    opt.ModelID,
-			ProviderID: opt.ProviderID,
+			ModelID:     opt.ModelID,
+			ProviderID:  opt.ProviderID,
+			Environment: opt.Environment,
 		}
 		session, err = sessionManager.NewSession(meta)
 		if err != nil {
@@ -737,7 +778,11 @@ func startMCPServer(ctx context.Context, opt Options) error {
 
 // handleListSessions lists all available sessions with their metadata.
 func handleListSessions(opt Options) error {
-	manager, err := sessions.NewSessionManager(opt.SessionBackend)
+	var smOpts []sessions.ManagerOption
+	if opt.Environment != "" {
+		smOpts = append(smOpts, sessions.WithEnvironment(opt.Environment))
+	}
+	manager, err := sessions.NewSessionManager(opt.SessionBackend, smOpts...)
 	if err != nil {
 		return fmt.Errorf("failed to create session manager: %w", err)
 	}
@@ -748,21 +793,30 @@ func handleListSessions(opt Options) error {
 	}
 
 	if len(sessionList) == 0 {
-		fmt.Println("No sessions found.")
+		if opt.Environment != "" {
+			fmt.Printf("No sessions found for environment %q.\n", opt.Environment)
+		} else {
+			fmt.Println("No sessions found.")
+		}
 		return nil
 	}
 
 	fmt.Println("Available sessions:")
-	fmt.Println("ID\t\tCreated\t\t\tLast Accessed\t\tModel\t\tProvider")
-	fmt.Println("--\t\t-------\t\t\t-------------\t\t-----\t\t--------")
+	fmt.Println("ID\t\tCreated\t\t\tLast Accessed\t\tModel\t\tProvider\tEnvironment")
+	fmt.Println("--\t\t-------\t\t\t-------------\t\t-----\t\t--------\t-----------")
 
 	for _, session := range sessionList {
-		fmt.Printf("%s\t%s\t%s\t%s\t%s\n",
+		env := session.Environment
+		if env == "" {
+			env = "-"
+		}
+		fmt.Printf("%s\t%s\t%s\t%s\t%s\t%s\n",
 			session.ID,
 			session.CreatedAt.Format("2006-01-02 15:04:05"),
 			session.LastModified.Format("2006-01-02 15:04:05"),
 			session.ModelID,
-			session.ProviderID)
+			session.ProviderID,
+			env)
 	}
 
 	return nil
@@ -770,7 +824,11 @@ func handleListSessions(opt Options) error {
 
 // handleDeleteSession deletes a session by ID.
 func handleDeleteSession(opt Options) error {
-	manager, err := sessions.NewSessionManager(opt.SessionBackend)
+	var smOpts []sessions.ManagerOption
+	if opt.Environment != "" {
+		smOpts = append(smOpts, sessions.WithEnvironment(opt.Environment))
+	}
+	manager, err := sessions.NewSessionManager(opt.SessionBackend, smOpts...)
 	if err != nil {
 		return fmt.Errorf("failed to create session manager: %w", err)
 	}
@@ -783,6 +841,9 @@ func handleDeleteSession(opt Options) error {
 	fmt.Printf("Deleting session %s:\n", opt.DeleteSession)
 	fmt.Printf("  Model: %s\n", session.ModelID)
 	fmt.Printf("  Provider: %s\n", session.ProviderID)
+	if session.Environment != "" {
+		fmt.Printf("  Environment: %s\n", session.Environment)
+	}
 	fmt.Printf("  Created: %s\n", session.CreatedAt.Format("2006-01-02 15:04:05"))
 
 	fmt.Print("Are you sure you want to delete this session? (y/N): ")

@@ -404,3 +404,72 @@ func TestAgent_NewSession_NoDeadlock(t *testing.T) {
 		t.Fatal("NewSession timed out (potential deadlock)")
 	}
 }
+
+func TestAgent_EnvironmentMemoryMetaQueries(t *testing.T) {
+	ctx := context.Background()
+
+	memStore := sessions.NewInMemoryMemoryStore()
+	manager, err := sessions.NewSessionManager("memory", sessions.WithMemoryStore(memStore), sessions.WithEnvironment("prod-cluster"))
+	if err != nil {
+		t.Fatalf("failed to create session manager: %v", err)
+	}
+
+	a := &Agent{
+		SessionBackend:      "memory",
+		Environment:         "prod-cluster",
+		EnableSessionMemory: true,
+		SessionManager:      manager,
+		Session:             &api.Session{ChatMessageStore: sessions.NewInMemoryChatStore()},
+	}
+
+	// 1. Initial empty memory
+	ans, handled, err := a.handleMetaQuery(ctx, "memory")
+	if err != nil || !handled || !strings.Contains(ans, "No memory notes found") {
+		t.Fatalf("expected empty memory message, got: %q, err: %v", ans, err)
+	}
+
+	// 2. Remember command
+	ans, handled, err = a.handleMetaQuery(ctx, "remember drain-preference Always drain nodes with grace period")
+	if err != nil || !handled || !strings.Contains(ans, "Remembered") {
+		t.Fatalf("expected remember confirmation, got: %q, err: %v", ans, err)
+	}
+
+	// 3. Query memory
+	ans, handled, err = a.handleMetaQuery(ctx, "memories")
+	if err != nil || !handled || !strings.Contains(ans, "drain-preference") {
+		t.Fatalf("expected memory to contain drain-preference, got: %q", ans)
+	}
+
+	// 4. Verify cross-environment isolation
+	devMgr, _ := sessions.NewSessionManager("memory", sessions.WithMemoryStore(memStore), sessions.WithEnvironment("dev-cluster"))
+	aDev := &Agent{
+		SessionBackend:      "memory",
+		Environment:         "dev-cluster",
+		EnableSessionMemory: true,
+		SessionManager:      devMgr,
+		Session:             &api.Session{ChatMessageStore: sessions.NewInMemoryChatStore()},
+	}
+	ansDev, handledDev, errDev := aDev.handleMetaQuery(ctx, "memory")
+	if errDev != nil || !handledDev || !strings.Contains(ansDev, "No memory notes found") {
+		t.Fatalf("expected dev environment memory to be empty, got: %q", ansDev)
+	}
+
+	// 5. Forget memory
+	memories, _ := manager.ListMemories("prod-cluster")
+	if len(memories) != 1 {
+		t.Fatalf("expected 1 memory before forget, got %d", len(memories))
+	}
+	memID := memories[0].ID
+
+	ans, handled, err = a.handleMetaQuery(ctx, "forget "+memID)
+	if err != nil || !handled || !strings.Contains(ans, "Forgot memory") {
+		t.Fatalf("expected forget confirmation, got: %q, err: %v", ans, err)
+	}
+
+	// 6. Memory should now be empty
+	ans, handled, err = a.handleMetaQuery(ctx, "memory")
+	if err != nil || !handled || !strings.Contains(ans, "No memory notes found") {
+		t.Fatalf("expected empty memory after forget, got: %q", ans)
+	}
+}
+
