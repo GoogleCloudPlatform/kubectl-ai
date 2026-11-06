@@ -295,8 +295,49 @@ func (c *LlamaCppChat) IsRetryableError(err error) bool {
 	return false
 }
 
+// Initialize initializes the chat with a previous conversation history.
 func (c *LlamaCppChat) Initialize(messages []*api.Message) error {
-	klog.Warning("chat history persistence is not supported for provider 'llamacpp', using in-memory chat history")
+	klog.Info("Initializing llamacpp chat")
+	var newHistory []llamacppChatMessage
+	// Preserve system prompt if present as the first message
+	if len(c.history) > 0 && c.history[0].Role == "system" {
+		newHistory = append(newHistory, c.history[0])
+	}
+
+	for _, msg := range messages {
+		var role string
+		switch msg.Source {
+		case api.MessageSourceUser:
+			role = "user"
+		case api.MessageSourceModel, api.MessageSourceAgent:
+			role = "assistant"
+		default:
+			// Skip unknown message sources
+			continue
+		}
+
+		if msg.Type != api.MessageTypeText || msg.Payload == nil {
+			continue
+		}
+
+		var content string
+		if textPayload, ok := msg.Payload.(string); ok {
+			content = textPayload
+		} else {
+			content = fmt.Sprintf("%v", msg.Payload)
+		}
+
+		if content == "" {
+			continue
+		}
+
+		newHistory = append(newHistory, llamacppChatMessage{
+			Role:    role,
+			Content: ptrTo(content),
+		})
+	}
+
+	c.history = newHistory
 	return nil
 }
 
