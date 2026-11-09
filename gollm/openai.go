@@ -362,12 +362,16 @@ func (cs *openAIChatSession) SendStreaming(ctx context.Context, contents ...any)
 		defer stream.Close()
 
 		var lastResponseChunk *openAIChatStreamResponse
+		var lastChunkWithChoices openai.ChatCompletionChunk
 		var currentContent strings.Builder
 		var currentToolCalls []openai.ChatCompletionMessageToolCall
 
 		// Process stream chunks
 		for stream.Next() {
 			chunk := stream.Current()
+			if len(chunk.Choices) > 0 {
+				lastChunkWithChoices = chunk
+			}
 
 			// Update the accumulator with the new chunk
 			acc.AddChunk(chunk)
@@ -437,6 +441,24 @@ func (cs *openAIChatSession) SendStreaming(ctx context.Context, contents ...any)
 			klog.Errorf("Error in OpenAI streaming: %v", err)
 			yield(nil, fmt.Errorf("OpenAI streaming error: %w", err))
 			return
+		}
+
+		// The accumulator labels each chunk by checking for content before tool calls,
+		// so a chunk that carries "content": "" next to a complete tool call never
+		// fires JustFinishedToolCall. OpenAI-compatible proxies send that shape, for
+		// example LiteLLM when it replays a cached response. Report any tool calls the
+		// accumulator collected but never announced.
+		if missed := unreportedToolCalls(&acc, currentToolCalls); len(missed) > 0 {
+			klog.V(2).InfoS("Recovered tool calls from the accumulated message", "count", len(missed))
+			currentToolCalls = append(currentToolCalls, missed...)
+			recovered := &openAIChatStreamResponse{
+				streamChunk: lastChunkWithChoices,
+				accumulator: acc,
+				toolCalls:   missed,
+			}
+			if !yield(recovered, nil) {
+				return
+			}
 		}
 
 		// Update conversation history with the complete message
@@ -829,6 +851,32 @@ func (cs *openAIChatSession) addContentsToHistory(contents []any) error {
 		}
 	}
 	return nil
+}
+
+// unreportedToolCalls returns the tool calls in the accumulated message whose IDs are
+// not in reported.
+func unreportedToolCalls(acc *openai.ChatCompletionAccumulator, reported []openai.ChatCompletionMessageToolCall) []openai.ChatCompletionMessageToolCall {
+	if len(acc.Choices) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool, len(reported))
+	for _, toolCall := range reported {
+		seen[toolCall.ID] = true
+	}
+	var missed []openai.ChatCompletionMessageToolCall
+	for _, toolCall := range acc.Choices[0].Message.ToolCalls {
+		if seen[toolCall.ID] {
+			continue
+		}
+		missed = append(missed, openai.ChatCompletionMessageToolCall{
+			ID: toolCall.ID,
+			Function: openai.ChatCompletionMessageToolCallFunction{
+				Name:      toolCall.Function.Name,
+				Arguments: toolCall.Function.Arguments,
+			},
+		})
+	}
+	return missed
 }
 
 // convertToolCallsToFunctionCalls converts OpenAI tool calls to gollm function calls
