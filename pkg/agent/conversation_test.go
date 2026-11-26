@@ -24,6 +24,7 @@ import (
 	"github.com/GoogleCloudPlatform/kubectl-ai/gollm"
 	"github.com/GoogleCloudPlatform/kubectl-ai/internal/mocks"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/api"
+	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/memory"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/sessions"
 	"go.uber.org/mock/gomock"
 )
@@ -404,3 +405,162 @@ func TestAgent_NewSession_NoDeadlock(t *testing.T) {
 		t.Fatal("NewSession timed out (potential deadlock)")
 	}
 }
+
+func TestAgent_EnvironmentMemory_Enabled(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockClient := mocks.NewMockClient(ctrl)
+	mockChat := mocks.NewMockChat(ctrl)
+
+	tempDir := t.TempDir()
+	memMgr, err := memory.NewDefaultManager(memory.Config{
+		Enabled:     true,
+		Environment: "test-cluster",
+		StorageDir:  tempDir,
+	}, "")
+	if err != nil {
+		t.Fatalf("failed to create memory manager: %v", err)
+	}
+	if err := memMgr.Set("storageclass", "fast-ssd", "preference"); err != nil {
+		t.Fatalf("failed to set memory entry: %v", err)
+	}
+
+	var capturedPrompt string
+	mockClient.EXPECT().StartChat(gomock.Any(), gomock.Any()).DoAndReturn(func(systemPrompt, model string) gollm.Chat {
+		capturedPrompt = systemPrompt
+		return mockChat
+	}).Times(1)
+	mockChat.EXPECT().Initialize(gomock.Any()).Return(nil).Times(1)
+	mockChat.EXPECT().SetFunctionDefinitions(gomock.Any()).Return(nil).Times(1)
+
+	session := &api.Session{
+		ID:               "mem-test-session",
+		AgentState:       api.AgentStateIdle,
+		ChatMessageStore: sessions.NewInMemoryChatStore(),
+	}
+
+	a := &Agent{
+		SessionBackend: "memory",
+		Input:          make(chan any),
+		Output:         make(chan any),
+		LLM:            mockClient,
+		Session:        session,
+		MemoryManager:  memMgr,
+	}
+
+	if err := a.Init(context.Background()); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+
+	if !strings.Contains(capturedPrompt, "fast-ssd") {
+		t.Fatalf("expected system prompt to contain retained memory 'fast-ssd', got: %s", capturedPrompt)
+	}
+
+	if a.Tools.Lookup("remember_environment_context") == nil {
+		t.Fatalf("expected remember_environment_context tool to be registered when memory is enabled")
+	}
+}
+
+func TestAgent_EnvironmentMemory_Disabled(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockClient := mocks.NewMockClient(ctrl)
+	mockChat := mocks.NewMockChat(ctrl)
+
+	memMgr, err := memory.NewDefaultManager(memory.Config{
+		Enabled:     false,
+		Environment: "test-cluster",
+	}, "")
+	if err != nil {
+		t.Fatalf("failed to create memory manager: %v", err)
+	}
+
+	var capturedPrompt string
+	mockClient.EXPECT().StartChat(gomock.Any(), gomock.Any()).DoAndReturn(func(systemPrompt, model string) gollm.Chat {
+		capturedPrompt = systemPrompt
+		return mockChat
+	}).Times(1)
+	mockChat.EXPECT().Initialize(gomock.Any()).Return(nil).Times(1)
+	mockChat.EXPECT().SetFunctionDefinitions(gomock.Any()).Return(nil).Times(1)
+
+	session := &api.Session{
+		ID:               "mem-disabled-session",
+		AgentState:       api.AgentStateIdle,
+		ChatMessageStore: sessions.NewInMemoryChatStore(),
+	}
+
+	a := &Agent{
+		SessionBackend: "memory",
+		Input:          make(chan any),
+		Output:         make(chan any),
+		LLM:            mockClient,
+		Session:        session,
+		MemoryManager:  memMgr,
+	}
+
+	if err := a.Init(context.Background()); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+
+	if strings.Contains(capturedPrompt, "Environment Scope:") {
+		t.Fatalf("expected system prompt to not contain environment memory, got: %s", capturedPrompt)
+	}
+
+	if a.Tools.Lookup("remember_environment_context") != nil {
+		t.Fatalf("expected remember_environment_context tool to not be registered when memory is disabled")
+	}
+}
+
+func TestHandleMetaQuery_Memory(t *testing.T) {
+	ctx := context.Background()
+	tempDir := t.TempDir()
+
+	memMgr, err := memory.NewDefaultManager(memory.Config{
+		Enabled:     true,
+		Environment: "prod-cluster",
+		StorageDir:  tempDir,
+	}, "")
+	if err != nil {
+		t.Fatalf("failed to create memory manager: %v", err)
+	}
+
+	a := &Agent{
+		MemoryManager: memMgr,
+		Session: &api.Session{
+			ChatMessageStore: sessions.NewInMemoryChatStore(),
+		},
+	}
+
+	// Initial empty list
+	resp, handled, err := a.handleMetaQuery(ctx, "memory")
+	if err != nil || !handled || !strings.Contains(resp, "no entries have been recorded yet") {
+		t.Fatalf("unexpected response for empty memory: resp=%q, handled=%v, err=%v", resp, handled, err)
+	}
+
+	// Add entry via remember command
+	resp, handled, err = a.handleMetaQuery(ctx, "remember namespace=monitoring")
+	if err != nil || !handled || !strings.Contains(resp, "Saved memory") {
+		t.Fatalf("unexpected response for remember: resp=%q, handled=%v, err=%v", resp, handled, err)
+	}
+
+	// List entries
+	resp, handled, err = a.handleMetaQuery(ctx, "memory")
+	if err != nil || !handled || !strings.Contains(resp, "monitoring") {
+		t.Fatalf("unexpected response for memory list: resp=%q, handled=%v, err=%v", resp, handled, err)
+	}
+
+	// Clear memory
+	resp, handled, err = a.handleMetaQuery(ctx, "clear-memory")
+	if err != nil || !handled || !strings.Contains(resp, "Cleared environment memory") {
+		t.Fatalf("unexpected response for clear-memory: resp=%q, handled=%v, err=%v", resp, handled, err)
+	}
+
+	// Check empty again
+	resp, handled, err = a.handleMetaQuery(ctx, "memory")
+	if err != nil || !handled || !strings.Contains(resp, "no entries have been recorded yet") {
+		t.Fatalf("unexpected response after clear: resp=%q, handled=%v, err=%v", resp, handled, err)
+	}
+}
+

@@ -32,6 +32,7 @@ import (
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/api"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/journal"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/mcp"
+	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/memory"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/sandbox"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/sessions"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/tools"
@@ -129,6 +130,9 @@ type Agent struct {
 
 	// SessionBackend is the configured backend for session persistence (e.g., memory, filesystem).
 	SessionBackend string
+
+	// MemoryManager manages environment-scoped memory notes and preferences.
+	MemoryManager *memory.Manager
 
 	// lastErr is the most recent error run into, for use across the stack
 	lastErr error
@@ -285,12 +289,16 @@ func (s *Agent) Init(ctx context.Context) error {
 
 	s.Tools.RegisterTool(tools.NewBashTool(s.executor))
 	s.Tools.RegisterTool(tools.NewKubectlTool(s.executor))
+	if s.MemoryManager != nil && s.MemoryManager.IsEnabled() {
+		s.Tools.RegisterTool(tools.NewMemoryTool(s.MemoryManager))
+	}
 
 	systemPrompt, err := s.generatePrompt(ctx, defaultSystemPromptTemplate, PromptData{
 		Tools:             s.Tools,
 		EnableToolUseShim: s.EnableToolUseShim,
 		// RunOnce is a good proxy to indicate the agentic session is non-interactive mode.
 		SessionIsInteractive: !s.RunOnce,
+		EnvironmentMemory:    s.getEnvironmentMemoryPrompt(),
 	})
 	if err != nil {
 		return fmt.Errorf("generating system prompt: %w", err)
@@ -876,6 +884,54 @@ func (c *Agent) handleMetaQuery(ctx context.Context, query string) (answer strin
 		// close the ```text box
 		availableSessions += "```"
 		return availableSessions, true, nil
+	case "memory":
+		if c.MemoryManager == nil || !c.MemoryManager.IsEnabled() {
+			return "Environment memory is disabled. Use --enable-memory to enable.", true, nil
+		}
+		entries := c.MemoryManager.List()
+		if len(entries) == 0 {
+			return fmt.Sprintf("Environment memory is enabled for %q, but no entries have been recorded yet.", c.MemoryManager.Environment()), true, nil
+		}
+		var b strings.Builder
+		b.WriteString(fmt.Sprintf("Environment memory for %q (%d entries):\n\n", c.MemoryManager.Environment(), len(entries)))
+		for _, e := range entries {
+			if e.Category != "" {
+				b.WriteString(fmt.Sprintf("- [%s] %s: %s\n", e.Category, e.Key, e.Content))
+			} else {
+				b.WriteString(fmt.Sprintf("- %s: %s\n", e.Key, e.Content))
+			}
+		}
+		return b.String(), true, nil
+
+	case "clear-memory":
+		if c.MemoryManager == nil || !c.MemoryManager.IsEnabled() {
+			return "Environment memory is disabled.", true, nil
+		}
+		if err := c.MemoryManager.Clear(); err != nil {
+			return "", false, fmt.Errorf("clearing environment memory: %w", err)
+		}
+		return fmt.Sprintf("Cleared environment memory for %q.", c.MemoryManager.Environment()), true, nil
+	}
+
+	if strings.HasPrefix(query, "remember ") {
+		if c.MemoryManager == nil || !c.MemoryManager.IsEnabled() {
+			return "Environment memory is disabled. Use --enable-memory to enable.", true, nil
+		}
+		rest := strings.TrimPrefix(query, "remember ")
+		var k, v string
+		if idx := strings.Index(rest, "="); idx != -1 {
+			k = strings.TrimSpace(rest[:idx])
+			v = strings.TrimSpace(rest[idx+1:])
+		} else if parts := strings.Fields(rest); len(parts) >= 2 {
+			k = parts[0]
+			v = strings.TrimSpace(rest[len(parts[0]):])
+		} else {
+			return "Usage: remember <key>=<value> or remember <key> <value>", true, nil
+		}
+		if err := c.MemoryManager.Set(k, v, "preference"); err != nil {
+			return "", false, fmt.Errorf("saving to environment memory: %w", err)
+		}
+		return fmt.Sprintf("Saved memory for environment %q: [%s] = %s", c.MemoryManager.Environment(), k, v), true, nil
 	}
 
 	if strings.HasPrefix(query, "resume-session") {
@@ -1217,6 +1273,13 @@ func (c *Agent) handleChoice(ctx context.Context, choice *api.UserChoiceResponse
 	return dispatchToolCalls
 }
 
+func (a *Agent) getEnvironmentMemoryPrompt() string {
+	if a.MemoryManager != nil && a.MemoryManager.IsEnabled() {
+		return a.MemoryManager.BuildPromptContext()
+	}
+	return ""
+}
+
 // generateFromTemplate generates a prompt for LLM. It uses the prompt from the provides template file or default.
 func (a *Agent) generatePrompt(_ context.Context, defaultPromptTemplate string, data PromptData) (string, error) {
 	promptTemplate := defaultPromptTemplate
@@ -1246,7 +1309,11 @@ func (a *Agent) generatePrompt(_ context.Context, defaultPromptTemplate string, 
 	if err != nil {
 		return "", fmt.Errorf("evaluating template for prompt: %w", err)
 	}
-	return result.String(), nil
+	res := result.String()
+	if data.EnvironmentMemory != "" && !strings.Contains(res, data.EnvironmentMemory) {
+		res += "\n\n## Environment Context & Retained Preferences:\n" + data.EnvironmentMemory
+	}
+	return res, nil
 }
 
 // PromptData represents the structure of the data to be filled into the template.
@@ -1256,6 +1323,7 @@ type PromptData struct {
 
 	EnableToolUseShim    bool
 	SessionIsInteractive bool
+	EnvironmentMemory    string
 }
 
 func (a *PromptData) ToolsAsJSON() string {

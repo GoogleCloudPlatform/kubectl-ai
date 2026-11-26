@@ -35,6 +35,7 @@ import (
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/api"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/journal"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/mcpauth"
+	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/memory"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/sessions"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/tools"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/ui"
@@ -148,6 +149,13 @@ type Options struct {
 
 	// SandboxImage is the container image to use for the sandbox
 	SandboxImage string `json:"sandboxImage,omitempty"`
+
+	// EnableMemory enables environment-scoped memory to retain operational notes and preferences.
+	EnableMemory bool `json:"enableMemory,omitempty"`
+	// MemoryEnvironment overrides the environment scope name for environment-scoped memory.
+	MemoryEnvironment string `json:"memoryEnvironment,omitempty"`
+	// MemoryDir specifies the directory to store environment memory files.
+	MemoryDir string `json:"memoryDir,omitempty"`
 }
 
 var defaultToolConfigPaths = []string{
@@ -207,6 +215,10 @@ func (o *Options) InitDefaults() {
 
 	o.Sandbox = ""
 	o.SandboxImage = "bitnami/kubectl:latest"
+
+	o.EnableMemory = false
+	o.MemoryEnvironment = ""
+	o.MemoryDir = ""
 }
 
 func (o *Options) LoadConfiguration(b []byte) error {
@@ -359,6 +371,10 @@ func (opt *Options) bindCLIFlags(f *pflag.FlagSet) error {
 	f.StringVar(&opt.SessionBackend, "session-backend", opt.SessionBackend,
 		"session backend to use (memory or filesystem)")
 
+	f.BoolVar(&opt.EnableMemory, "enable-memory", opt.EnableMemory, "enable environment-scoped memory to retain operational notes and preferences across sessions")
+	f.StringVar(&opt.MemoryEnvironment, "memory-env", opt.MemoryEnvironment, "override the environment name for environment-scoped memory (defaults to current kubeconfig context)")
+	f.StringVar(&opt.MemoryDir, "memory-dir", opt.MemoryDir, "path to directory for storing environment memory files")
+
 	return nil
 }
 
@@ -453,6 +469,16 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 			return nil, fmt.Errorf("creating llm client: %w", err)
 		}
 
+		memConfig := memory.Config{
+			Enabled:     opt.EnableMemory,
+			Environment: opt.MemoryEnvironment,
+			StorageDir:  opt.MemoryDir,
+		}
+		memMgr, err := memory.NewDefaultManager(memConfig, opt.KubeConfigPath)
+		if err != nil {
+			return nil, fmt.Errorf("initializing memory manager: %w", err)
+		}
+
 		return &agent.Agent{
 			Model:              opt.ModelID,
 			Provider:           opt.ProviderID,
@@ -472,6 +498,7 @@ func RunRootCommand(ctx context.Context, opt Options, args []string) error {
 			SessionBackend:     opt.SessionBackend,
 			RunOnce:            opt.Quiet,
 			InitialQuery:       queryFromCmd,
+			MemoryManager:      memMgr,
 		}, nil
 	}
 
