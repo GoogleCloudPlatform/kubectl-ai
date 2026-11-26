@@ -1208,7 +1208,7 @@ func (c *Agent) handleChoice(ctx context.Context, choice *api.UserChoiceResponse
 		c.addMessage(api.MessageSourceAgent, api.MessageTypeError, "Operation was skipped. User declined to run this operation.")
 	default:
 		// This case should technically not be reachable due to AskForConfirmation loop
-		err := fmt.Errorf("invalid confirmation choice: %q", choice.Choice)
+		err := fmt.Errorf("invalid confirmation choice: %d", choice.Choice)
 		log.Error(err, "Invalid choice received from AskForConfirmation")
 		c.pendingFunctionCalls = []ToolCallAnalysis{}
 		dispatchToolCalls = false
