@@ -31,6 +31,7 @@ type Metadata struct {
 	ModelID      string    `json:"modelID"`
 	CreatedAt    time.Time `json:"createdAt"`
 	LastAccessed time.Time `json:"lastAccessed"`
+	Environment  string    `json:"environment,omitempty"`
 }
 
 var defaultMemoryStore Store = newMemoryStore()
@@ -41,6 +42,7 @@ type Store interface {
 	UpdateSession(session *api.Session) error
 	ListSessions() ([]*api.Session, error)
 	DeleteSession(id string) error
+	ListSessionsByEnvironment(env string) ([]*api.Session, error)
 }
 
 func NewStore(backend string) (Store, error) {

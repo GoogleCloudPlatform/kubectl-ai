@@ -24,6 +24,7 @@ type Session struct {
 	Name             string
 	ProviderID       string
 	ModelID          string
+	Environment      string
 	Messages         []*Message
 	AgentState       AgentState
 	CreatedAt        time.Time
@@ -104,6 +105,7 @@ type SessionInfo struct {
 	Name         string    `json:"name,omitempty"`
 	ModelID      string    `json:"modelId,omitempty"`
 	ProviderID   string    `json:"providerId,omitempty"`
+	Environment  string    `json:"environment,omitempty"`
 	CreatedAt    time.Time `json:"createdAt"`
 	LastModified time.Time `json:"lastModified"`
 	MessageCount int       `json:"messageCount"`
@@ -157,6 +159,10 @@ func (s *Session) AllMessages() []*Message {
 }
 
 func (s *Session) String() string {
-	return fmt.Sprintf("Session ID: %s\nProvider: %s\nModel: %s\nCreated At: %s\nLast Modified: %s\nAgent State: %s",
-		s.ID, s.ProviderID, s.ModelID, s.CreatedAt.Format(time.RFC3339), s.LastModified.Format(time.RFC3339), s.AgentState)
+	envStr := ""
+	if s.Environment != "" {
+		envStr = fmt.Sprintf("\nEnvironment: %s", s.Environment)
+	}
+	return fmt.Sprintf("Session ID: %s\nProvider: %s\nModel: %s%s\nCreated At: %s\nLast Modified: %s\nAgent State: %s",
+		s.ID, s.ProviderID, s.ModelID, envStr, s.CreatedAt.Format(time.RFC3339), s.LastModified.Format(time.RFC3339), s.AgentState)
 }

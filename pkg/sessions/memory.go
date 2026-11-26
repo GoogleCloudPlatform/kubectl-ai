@@ -86,6 +86,24 @@ func (m *memoryStore) ListSessions() ([]*api.Session, error) {
 	return sessions, nil
 }
 
+func (m *memoryStore) ListSessionsByEnvironment(env string) ([]*api.Session, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	sessions := make([]*api.Session, 0)
+	for _, session := range m.sessions {
+		if session.Environment == env {
+			sessions = append(sessions, session)
+		}
+	}
+
+	sort.Slice(sessions, func(i, j int) bool {
+		return sessions[i].LastModified.After(sessions[j].LastModified)
+	})
+
+	return sessions, nil
+}
+
 func (m *memoryStore) DeleteSession(id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

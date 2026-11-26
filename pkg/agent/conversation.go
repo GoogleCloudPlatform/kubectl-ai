@@ -130,6 +130,18 @@ type Agent struct {
 	// SessionBackend is the configured backend for session persistence (e.g., memory, filesystem).
 	SessionBackend string
 
+	// Environment is the optional environment scope for session memory.
+	Environment string
+
+	// RetentionPolicy defines session retention and eviction limits.
+	RetentionPolicy sessions.RetentionPolicy
+
+	// EnableSessionMemory enables opt-in environment-scoped session memory retention.
+	EnableSessionMemory bool
+
+	// SessionManager manages persistent sessions and memory.
+	SessionManager *sessions.SessionManager
+
 	// lastErr is the most recent error run into, for use across the stack
 	lastErr error
 
@@ -286,11 +298,24 @@ func (s *Agent) Init(ctx context.Context) error {
 	s.Tools.RegisterTool(tools.NewBashTool(s.executor))
 	s.Tools.RegisterTool(tools.NewKubectlTool(s.executor))
 
+	var envMemText string
+	if s.EnableSessionMemory && s.Environment != "" && s.SessionManager != nil {
+		memories, _ := s.SessionManager.ListMemories(s.Environment)
+		if len(memories) > 0 {
+			var sb strings.Builder
+			for _, m := range memories {
+				sb.WriteString(fmt.Sprintf("- [%s] %s: %s\n", m.Category, m.Key, m.Content))
+			}
+			envMemText = sb.String()
+		}
+	}
+
 	systemPrompt, err := s.generatePrompt(ctx, defaultSystemPromptTemplate, PromptData{
-		Tools:             s.Tools,
-		EnableToolUseShim: s.EnableToolUseShim,
-		// RunOnce is a good proxy to indicate the agentic session is non-interactive mode.
+		Tools:                s.Tools,
+		EnableToolUseShim:    s.EnableToolUseShim,
 		SessionIsInteractive: !s.RunOnce,
+		Environment:          s.Environment,
+		EnvironmentMemory:    envMemText,
 	})
 	if err != nil {
 		return fmt.Errorf("generating system prompt: %w", err)
@@ -876,6 +901,83 @@ func (c *Agent) handleMetaQuery(ctx context.Context, query string) (answer strin
 		// close the ```text box
 		availableSessions += "```"
 		return availableSessions, true, nil
+
+	case "memory", "memories":
+		sm, err := c.sessionManager()
+		if err != nil {
+			return "", false, err
+		}
+		env := c.Environment
+		if env == "" {
+			env = sm.Environment()
+		}
+		if env == "" {
+			return "No environment is configured for session memory.", true, nil
+		}
+		memories, err := sm.ListMemories(env)
+		if err != nil {
+			return "", false, err
+		}
+		if len(memories) == 0 {
+			return fmt.Sprintf("No memory notes found for environment %q.", env), true, nil
+		}
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("Operational memory for environment %q:\n\n", env))
+		for _, m := range memories {
+			sb.WriteString(fmt.Sprintf("- ID: %s | Key: %s | Content: %s\n", m.ID, m.Key, m.Content))
+		}
+		return sb.String(), true, nil
+	}
+
+	if strings.HasPrefix(query, "remember ") {
+		sm, err := c.sessionManager()
+		if err != nil {
+			return "", false, err
+		}
+		env := c.Environment
+		if env == "" {
+			env = sm.Environment()
+		}
+		if env == "" {
+			return "No environment is configured for session memory.", true, nil
+		}
+		rest := strings.TrimPrefix(query, "remember ")
+		parts := strings.SplitN(rest, " ", 2)
+		if len(parts) < 2 {
+			return "Invalid command. Usage: remember <key> <content>", true, nil
+		}
+		entry := &sessions.MemoryEntry{
+			Environment: env,
+			Key:         strings.TrimSpace(parts[0]),
+			Content:     strings.TrimSpace(parts[1]),
+			Category:    "note",
+		}
+		if err := sm.SaveMemory(entry); err != nil {
+			return "", false, fmt.Errorf("failed to save memory: %w", err)
+		}
+		return fmt.Sprintf("Remembered %q for environment %q.", entry.Key, env), true, nil
+	}
+
+	if strings.HasPrefix(query, "forget ") {
+		sm, err := c.sessionManager()
+		if err != nil {
+			return "", false, err
+		}
+		env := c.Environment
+		if env == "" {
+			env = sm.Environment()
+		}
+		if env == "" {
+			return "No environment is configured for session memory.", true, nil
+		}
+		id := strings.TrimSpace(strings.TrimPrefix(query, "forget "))
+		if id == "" {
+			return "Invalid command. Usage: forget <memory_id>", true, nil
+		}
+		if err := sm.DeleteMemory(env, id); err != nil {
+			return "", false, fmt.Errorf("failed to forget memory: %w", err)
+		}
+		return fmt.Sprintf("Forgot memory %s for environment %q.", id, env), true, nil
 	}
 
 	if strings.HasPrefix(query, "resume-session") {
@@ -893,19 +995,34 @@ func (c *Agent) handleMetaQuery(ctx context.Context, query string) (answer strin
 	return "", false, nil
 }
 
+func (c *Agent) sessionManager() (*sessions.SessionManager, error) {
+	if c.SessionManager != nil {
+		return c.SessionManager, nil
+	}
+	var opts []sessions.ManagerOption
+	if c.Environment != "" {
+		opts = append(opts, sessions.WithEnvironment(c.Environment))
+	}
+	if c.RetentionPolicy.MaxSessions > 0 || c.RetentionPolicy.TTL > 0 || c.RetentionPolicy.MaxMemories > 0 {
+		opts = append(opts, sessions.WithRetentionPolicy(c.RetentionPolicy))
+	}
+	return sessions.NewSessionManager(c.SessionBackend, opts...)
+}
+
 func (c *Agent) NewSession() (string, error) {
 	if _, err := c.SaveSession(); err != nil {
 		return "", fmt.Errorf("failed to save current session: %w", err)
 	}
 
-	manager, err := sessions.NewSessionManager(c.SessionBackend)
+	manager, err := c.sessionManager()
 	if err != nil {
 		return "", fmt.Errorf("failed to create session manager: %w", err)
 	}
 
 	metadata := sessions.Metadata{
-		ModelID:    c.Model,
-		ProviderID: c.Provider,
+		ModelID:     c.Model,
+		ProviderID:  c.Provider,
+		Environment: c.Environment,
 	}
 
 	newSession, err := manager.NewSession(metadata)
@@ -958,7 +1075,7 @@ func (c *Agent) SaveSession() (string, error) {
 	c.sessionMu.Lock()
 	defer c.sessionMu.Unlock()
 
-	manager, err := sessions.NewSessionManager(c.SessionBackend)
+	manager, err := c.sessionManager()
 	if err != nil {
 		return "", fmt.Errorf("failed to create session manager: %w", err)
 	}
@@ -975,6 +1092,7 @@ func (c *Agent) SaveSession() (string, error) {
 		LastAccessed: time.Now(),
 		ModelID:      c.Model,
 		ProviderID:   c.Provider,
+		Environment:  c.Environment,
 	}
 
 	newSession, err := manager.NewSession(metadata)
@@ -1000,7 +1118,7 @@ func (c *Agent) SaveSession() (string, error) {
 
 // LoadSession loads a session by ID (or latest), updates the agent's state, and re-initializes the chat.
 func (c *Agent) LoadSession(sessionID string) error {
-	manager, err := sessions.NewSessionManager(c.SessionBackend)
+	manager, err := c.sessionManager()
 	if err != nil {
 		return fmt.Errorf("failed to create session manager: %w", err)
 	}
@@ -1055,7 +1173,7 @@ func (c *Agent) LoadSession(sessionID string) error {
 
 // ListSessions returns available sessions for UI pickers
 func (c *Agent) ListSessions() ([]api.SessionInfo, error) {
-	manager, err := sessions.NewSessionManager(c.SessionBackend)
+	manager, err := c.sessionManager()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create session manager: %w", err)
 	}
@@ -1076,6 +1194,7 @@ func (c *Agent) ListSessions() ([]api.SessionInfo, error) {
 			Name:         session.Name,
 			ModelID:      session.ModelID,
 			ProviderID:   session.ProviderID,
+			Environment:  session.Environment,
 			CreatedAt:    session.CreatedAt,
 			LastModified: session.LastModified,
 			MessageCount: msgCount,
@@ -1256,6 +1375,8 @@ type PromptData struct {
 
 	EnableToolUseShim    bool
 	SessionIsInteractive bool
+	Environment          string
+	EnvironmentMemory    string
 }
 
 func (a *PromptData) ToolsAsJSON() string {
