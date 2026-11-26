@@ -1,6 +1,8 @@
 module github.com/GoogleCloudPlatform/kubectl-ai
 
-go 1.27.4
+go 1.24.0
+
+toolchain go1.27.4
 
 // Needed for multiple go modules in one repo
 replace github.com/GoogleCloudPlatform/kubectl-ai/gollm => ./gollm

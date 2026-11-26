@@ -1,6 +1,8 @@
 module github.com/GoogleCloudPlatform/kubectl-ai/gollm
 
-go 1.27.4
+go 1.24.0
+
+toolchain go1.27.4
 
 require (
 	github.com/Azure/azure-sdk-for-go/sdk/ai/azopenai v0.7.2
