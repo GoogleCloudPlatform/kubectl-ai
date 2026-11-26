@@ -59,7 +59,7 @@ kubectl-ai uses the standard AWS SDK credential provider chain:
 5. IAM roles for ECS tasks
 6. IAM roles for Lambda functions
 
-For more details, see [AWS SDK Go Configuration](https://aws.github.io/aws-sdk-go-v2/docs/configuring-sdk/).
+For more details, see [AWS SDK Go Configuration](https://docs.aws.amazon.com/sdk-for-go/v2/developer-guide/configure-gosdk.html).
 
 ## Region Configuration
 
