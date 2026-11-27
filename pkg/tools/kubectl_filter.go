@@ -196,11 +196,40 @@ func analyzeCall(call *syntax.CallExpr) string {
 	return "unknown"
 }
 
+// dryRunPrevents reports whether a --dry-run value actually prevents the command
+// from mutating cluster state. Only "client"/"server" (and the legacy boolean
+// "true") are non-executing. Crucially, "none" and "false" mean the command runs
+// FOR REAL, so they must NOT be treated as a dry run — otherwise a write op such as
+// `kubectl delete pod x --dry-run=none` would be reclassified read-only and skip the
+// approval gate. An empty or unrecognized value is treated as executing (fail-safe:
+// require approval).
+func dryRunPrevents(value string) bool {
+	switch value {
+	case "client", "server", "true":
+		return true
+	default: // "none", "false", "", or anything unknown -> real execution
+		return false
+	}
+}
+
 // parseKubectlArgs extracts verb, subverb, and dry-run flag from kubectl arguments
 func parseKubectlArgs(args []string) (verb, subVerb string, hasDryRun bool) {
-	for _, arg := range args {
+	for i, arg := range args {
 		if strings.HasPrefix(arg, "--dry-run") {
-			hasDryRun = true
+			if eq := strings.IndexByte(arg, '='); eq >= 0 {
+				// "--dry-run=<value>" form.
+				hasDryRun = dryRunPrevents(arg[eq+1:])
+			} else if arg == "--dry-run" {
+				// Bare "--dry-run", or spaced "--dry-run <value>" form. Only consume the
+				// next token as the value when it is a recognized dry-run keyword;
+				// otherwise the flag is valueless (kubectl's legacy client dry run).
+				switch {
+				case i+1 < len(args) && isDryRunValue(args[i+1]):
+					hasDryRun = dryRunPrevents(args[i+1])
+				default:
+					hasDryRun = true
+				}
+			}
 		}
 		if !strings.HasPrefix(arg, "-") {
 			if verb == "" {
@@ -211,4 +240,14 @@ func parseKubectlArgs(args []string) (verb, subVerb string, hasDryRun bool) {
 		}
 	}
 	return verb, subVerb, hasDryRun
+}
+
+// isDryRunValue reports whether tok is a value that can follow a spaced "--dry-run".
+func isDryRunValue(tok string) bool {
+	switch tok {
+	case "none", "false", "client", "server", "true":
+		return true
+	default:
+		return false
+	}
 }
