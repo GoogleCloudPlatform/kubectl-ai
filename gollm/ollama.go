@@ -18,6 +18,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
+	"slices"
 
 	"github.com/ollama/ollama/api"
 	"github.com/ollama/ollama/envconfig"
@@ -280,8 +282,9 @@ func (p *OllamaPart) AsFunctionCalls() ([]FunctionCall, bool) {
 		var functionCalls []FunctionCall
 		for _, toolCall := range p.toolCalls {
 			functionCalls = append(functionCalls, FunctionCall{
+				ID:        toolCall.ID,
 				Name:      toolCall.Function.Name,
-				Arguments: toolCall.Function.Arguments,
+				Arguments: toolCall.Function.Arguments.ToMap(),
 			})
 		}
 		return functionCalls, true
@@ -299,41 +302,61 @@ func (c *OllamaChat) SetFunctionDefinitions(functionDefinitions []*FunctionDefin
 }
 
 func fnDefToOllamaTool(fnDef *FunctionDefinition) api.Tool {
-	tool := api.Tool{
+	params := api.ToolFunctionParameters{
+		Type:       "object",
+		Properties: api.NewToolPropertiesMap(),
+	}
+
+	if fnDef.Parameters != nil {
+		if fnDef.Parameters.Type != "" {
+			params.Type = string(fnDef.Parameters.Type)
+		}
+		params.Required = fnDef.Parameters.Required
+		if fnDef.Parameters.Items != nil {
+			params.Items = schemaToOllamaProperty(fnDef.Parameters.Items)
+		}
+		for _, paramName := range slices.Sorted(maps.Keys(fnDef.Parameters.Properties)) {
+			param := fnDef.Parameters.Properties[paramName]
+			if param == nil {
+				continue
+			}
+			params.Properties.Set(paramName, schemaToOllamaProperty(param))
+		}
+	}
+
+	return api.Tool{
 		Type: "function",
 		Function: api.ToolFunction{
 			Name:        fnDef.Name,
 			Description: fnDef.Description,
-			Parameters: struct {
-				Type       string   `json:"type"`
-				Required   []string `json:"required"`
-				Properties map[string]struct {
-					Type        string   `json:"type"`
-					Description string   `json:"description"`
-					Enum        []string `json:"enum,omitempty"`
-				} `json:"properties"`
-			}{
-				Type:     "object",
-				Required: fnDef.Parameters.Required,
-				Properties: map[string]struct {
-					Type        string   `json:"type"`
-					Description string   `json:"description"`
-					Enum        []string `json:"enum,omitempty"`
-				}{},
-			},
+			Parameters:  params,
 		},
 	}
+}
 
-	for paramName, param := range fnDef.Parameters.Properties {
-		tool.Function.Parameters.Properties[paramName] = struct {
-			Type        string   `json:"type"`
-			Description string   `json:"description"`
-			Enum        []string `json:"enum,omitempty"`
-		}{
-			Type:        string(param.Type),
-			Description: param.Description,
-		}
+func schemaToOllamaProperty(s *Schema) api.ToolProperty {
+	var prop api.ToolProperty
+	if s == nil {
+		return prop
 	}
-
-	return tool
+	if s.Type != "" {
+		prop.Type = api.PropertyType{string(s.Type)}
+	}
+	prop.Description = s.Description
+	prop.Required = s.Required
+	if s.Items != nil {
+		prop.Items = schemaToOllamaProperty(s.Items)
+	}
+	if len(s.Properties) > 0 {
+		props := api.NewToolPropertiesMap()
+		for _, k := range slices.Sorted(maps.Keys(s.Properties)) {
+			v := s.Properties[k]
+			if v == nil {
+				continue
+			}
+			props.Set(k, schemaToOllamaProperty(v))
+		}
+		prop.Properties = props
+	}
+	return prop
 }
