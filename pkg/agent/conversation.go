@@ -1338,6 +1338,10 @@ func toMap(v any) (map[string]any, error) {
 func candidateToShimCandidate(iterator gollm.ChatResponseIterator) (gollm.ChatResponseIterator, error) {
 	return func(yield func(gollm.ChatResponse, error) bool) {
 		buffer := ""
+		hasToolCalls := false
+		// Collect original responses so we can pass them through if the model
+		// returned native function calls alongside text.
+		var originalResponses []gollm.ChatResponse
 		for response, err := range iterator {
 			if err != nil {
 				yield(nil, err)
@@ -1355,11 +1359,24 @@ func candidateToShimCandidate(iterator gollm.ChatResponseIterator) (gollm.ChatRe
 				if text, ok := part.AsText(); ok {
 					buffer += text
 					klog.Infof("text is %q", text)
-				} else {
-					yield(nil, fmt.Errorf("no text part found in candidate"))
+				}
+				if calls, ok := part.AsFunctionCalls(); ok && len(calls) > 0 {
+					hasToolCalls = true
+				}
+			}
+			originalResponses = append(originalResponses, response)
+		}
+
+		// If the model returned native function calls, pass through the
+		// original responses instead of trying to parse ReAct JSON.
+		if hasToolCalls {
+			klog.Infof("Response contains native function calls, bypassing shim ReAct parsing")
+			for _, response := range originalResponses {
+				if !yield(response, nil) {
 					return
 				}
 			}
+			return
 		}
 
 		if buffer == "" {
