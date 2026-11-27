@@ -231,16 +231,34 @@ func (t *ToolCall) InvokeTool(ctx context.Context, opt InvokeToolOptions) (any, 
 	return response, err
 }
 
+// maxOutputBytes is the maximum size of stdout/stderr output that will be
+// sent to the LLM. Larger outputs are truncated to avoid exceeding token limits.
+const maxOutputBytes = 16384 // 16KB
+
+// truncateOutput truncates s to maxOutputBytes, appending a note if truncated.
+func truncateOutput(s string) string {
+	if len(s) <= maxOutputBytes {
+		return s
+	}
+	return s[:maxOutputBytes] + fmt.Sprintf("\n... [output truncated: showing %d of %d bytes]", maxOutputBytes, len(s))
+}
+
 // ToolResultToMap converts an arbitrary result to a map[string]any
 func ToolResultToMap(result any) (map[string]any, error) {
 	// Handle simple string results (common with MCP tools)
 	if str, ok := result.(string); ok {
-		return map[string]any{"content": str}, nil
+		return map[string]any{"content": truncateOutput(str)}, nil
 	}
 
 	// Handle nil results
 	if result == nil {
 		return map[string]any{"content": ""}, nil
+	}
+
+	// Truncate large ExecResult outputs before converting
+	if execResult, ok := result.(*sandbox.ExecResult); ok && execResult != nil {
+		execResult.Stdout = truncateOutput(execResult.Stdout)
+		execResult.Stderr = truncateOutput(execResult.Stderr)
 	}
 
 	// Try to convert to map via JSON for structured results
