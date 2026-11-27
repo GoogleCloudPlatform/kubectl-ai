@@ -1290,16 +1290,25 @@ type Action struct {
 }
 
 func extractJSON(s string) (string, bool) {
-	const jsonBlockMarker = "```json"
+	// Prefer an explicit ```json fence, but fall back to a bare ``` fence:
+	// models don't always tag the language, and without the fallback the whole
+	// turn fails to parse.
+	if data, ok := extractFencedBlock(s, "```json"); ok {
+		return data, true
+	}
+	return extractFencedBlock(s, "```")
+}
 
-	first := strings.Index(s, jsonBlockMarker)
+// extractFencedBlock returns the content between the first occurrence of the
+// opening marker and the last ``` fence. The second return value is false when
+// no such block is present.
+func extractFencedBlock(s, opening string) (string, bool) {
+	first := strings.Index(s, opening)
 	last := strings.LastIndex(s, "```")
 	if first == -1 || last == -1 || first == last {
 		return "", false
 	}
-	data := s[first+len(jsonBlockMarker) : last]
-
-	return data, true
+	return s[first+len(opening) : last], true
 }
 
 // parseReActResponse parses the LLM response into a ReActResponse struct
