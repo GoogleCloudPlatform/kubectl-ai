@@ -400,6 +400,36 @@ func (cs *openAIChatSession) SendStreaming(ctx context.Context, contents ...any)
 				toolCallsForThisChunk = []openai.ChatCompletionMessageToolCall{newToolCall}
 			}
 
+			// Handle cases where the tool call is sent in a single chunk
+			if len(chunk.Choices) > 0 && len(chunk.Choices[0].Delta.ToolCalls) > 0 {
+				for _, toolCallChunk := range chunk.Choices[0].Delta.ToolCalls {
+					if toolCallChunk.Function.Name != "" && toolCallChunk.Function.Arguments != "" {
+						klog.V(2).Infof("Detected full tool call in a single chunk: %s %s", toolCallChunk.Function.Name, toolCallChunk.Function.Arguments)
+						newToolCall := openai.ChatCompletionMessageToolCall{
+							ID:   toolCallChunk.ID,
+							Type: "function",
+							Function: openai.ChatCompletionMessageToolCallFunction{
+								Name:      toolCallChunk.Function.Name,
+								Arguments: toolCallChunk.Function.Arguments,
+							},
+						}
+
+						isDuplicate := false
+						for _, existingTool := range currentToolCalls {
+							if existingTool.ID == newToolCall.ID {
+								isDuplicate = true
+								break
+							}
+						}
+
+						if !isDuplicate {
+							currentToolCalls = append(currentToolCalls, newToolCall)
+							toolCallsForThisChunk = append(toolCallsForThisChunk, newToolCall)
+						}
+					}
+				}
+			}
+
 			streamResponse := &openAIChatStreamResponse{
 				streamChunk: chunk,
 				accumulator: acc,
