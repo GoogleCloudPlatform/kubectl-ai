@@ -16,6 +16,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"os"
@@ -372,4 +373,74 @@ func IsBoolParam(name string) bool {
 	}
 
 	return false
+}
+
+// SerializeArgsForMCP ensures arguments are properly serialized for MCP servers.
+func SerializeArgsForMCP(args map[string]any) (map[string]any, error) {
+	if len(args) == 0 {
+		return args, nil
+	}
+
+	// Create a new map to store serialized arguments
+	serialized := make(map[string]any, len(args))
+
+	for key, value := range args {
+		// Convert each value to its JSON-serializable form
+		serializedValue, err := serializeValue(value)
+		if err != nil {
+			return nil, fmt.Errorf("serializing argument %q: %w", key, err)
+		}
+		serialized[key] = serializedValue
+	}
+
+	return serialized, nil
+}
+
+// serializeValue converts a value to its JSON-serializable representation
+func serializeValue(value any) (any, error) {
+	if value == nil {
+		return nil, nil
+	}
+
+	switch v := value.(type) {
+	case string, bool, int, int32, int64, float32, float64:
+		// Primitive types are already JSON-serializable
+		return v, nil
+	case map[string]any:
+		// Recursively serialize nested maps
+		serialized := make(map[string]any, len(v))
+		for k, val := range v {
+			serializedVal, err := serializeValue(val)
+			if err != nil {
+				return nil, fmt.Errorf("serializing nested value %q: %w", k, err)
+			}
+			serialized[k] = serializedVal
+		}
+		return serialized, nil
+	case []any:
+		// Recursively serialize slices
+		serialized := make([]any, len(v))
+		for i, val := range v {
+			serializedVal, err := serializeValue(val)
+			if err != nil {
+				return nil, fmt.Errorf("serializing slice element %d: %w", i, err)
+			}
+			serialized[i] = serializedVal
+		}
+		return serialized, nil
+	default:
+		// For any other type, try to convert through JSON marshal/unmarshal
+		// This handles complex types and ensures they're properly serializable
+		jsonBytes, err := json.Marshal(v)
+		if err != nil {
+			return nil, fmt.Errorf("marshaling value to JSON: %w", err)
+		}
+
+		var result any
+		if err := json.Unmarshal(jsonBytes, &result); err != nil {
+			return nil, fmt.Errorf("unmarshaling JSON back to value: %w", err)
+		}
+
+		return result, nil
+	}
 }
