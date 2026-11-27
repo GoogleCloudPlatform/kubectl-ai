@@ -145,6 +145,9 @@ func (cs *bedrockChat) Initialize(history []*api.Message) error {
 	cs.messages = make([]types.Message, 0, len(history))
 
 	for _, msg := range history {
+		if msg.IsMeta() {
+			continue
+		}
 		// Convert api.Message to types.Message
 		var role types.ConversationRole
 		switch msg.Source {

@@ -152,16 +152,53 @@ func (s *Agent) GetSession() *api.Session {
 	return &sessionCopy
 }
 
-// addMessage creates a new message, adds it to the session, and sends it to the output channel
-func (c *Agent) addMessage(source api.MessageSource, messageType api.MessageType, payload any) *api.Message {
+var metaQueryMetadata = map[string]string{
+	api.MessageMetadataKeyType:      api.MessageMetadataValueMeta,
+	api.MessageMetadataKeyMetaQuery: "true",
+}
+
+// isMetaQuery checks whether a query string corresponds to a meta command.
+func isMetaQuery(query string) bool {
+	switch strings.TrimSpace(query) {
+	case "clear", "reset", "exit", "quit", "model", "models", "tools", "session", "save-session", "sessions":
+		return true
+	}
+	if strings.HasPrefix(strings.TrimSpace(query), "resume-session") {
+		return true
+	}
+	return false
+}
+
+// messagesForLLM returns chat messages filtered for LLM consumption (excluding meta query requests/responses).
+func (c *Agent) messagesForLLM() []*api.Message {
+	if c.Session != nil && c.Session.ChatMessageStore != nil {
+		return api.FilterNonMetaMessages(c.Session.ChatMessageStore.ChatMessages())
+	}
+	if c.ChatMessageStore != nil {
+		return api.FilterNonMetaMessages(c.ChatMessageStore.ChatMessages())
+	}
+	return []*api.Message{}
+}
+
+// addMessage creates a new message, adds it to the session, and sends it to the output channel.
+// Optional metadata can be provided (e.g. for tagging meta query request/response messages).
+func (c *Agent) addMessage(source api.MessageSource, messageType api.MessageType, payload any, metadata ...map[string]string) *api.Message {
 	c.sessionMu.Lock()
 	defer c.sessionMu.Unlock()
+	var meta map[string]string
+	if len(metadata) > 0 && metadata[0] != nil {
+		meta = make(map[string]string, len(metadata[0]))
+		for k, v := range metadata[0] {
+			meta[k] = v
+		}
+	}
 	message := &api.Message{
 		ID:        uuid.New().String(),
 		Source:    source,
 		Type:      messageType,
 		Payload:   payload,
 		Timestamp: time.Now(),
+		Metadata:  meta,
 	}
 
 	// Don't store UI control signals - they're not part of the conversation
@@ -307,7 +344,7 @@ func (s *Agent) Init(ctx context.Context) error {
 			Jitter:         true,
 		},
 	)
-	err = s.llmChat.Initialize(s.Session.ChatMessageStore.ChatMessages())
+	err = s.llmChat.Initialize(s.messagesForLLM())
 	if err != nil {
 		return fmt.Errorf("initializing chat session: %w", err)
 	}
@@ -398,24 +435,28 @@ func (c *Agent) Run(ctx context.Context, initialQuery string) error {
 		}
 
 		if initialQuery != "" {
-			c.addMessage(api.MessageSourceUser, api.MessageTypeText, initialQuery)
+			var userMeta map[string]string
+			if isMetaQuery(initialQuery) {
+				userMeta = metaQueryMetadata
+			}
+			c.addMessage(api.MessageSourceUser, api.MessageTypeText, initialQuery, userMeta)
 			answer, handled, err := c.handleMetaQuery(ctx, initialQuery)
 			if err != nil {
 				log.Error(err, "error handling meta query")
 				c.setAgentState(api.AgentStateDone)
 				c.pendingFunctionCalls = []ToolCallAnalysis{}
-				c.addMessage(api.MessageSourceAgent, api.MessageTypeError, "Error: "+err.Error())
+				c.addMessage(api.MessageSourceAgent, api.MessageTypeError, "Error: "+err.Error(), metaQueryMetadata)
 			} else if handled {
 				// initialQuery is the 'exit' or 'quit' metaquery
 				if c.AgentState() == api.AgentStateExited {
-					c.addMessage(api.MessageSourceAgent, api.MessageTypeText, answer)
+					c.addMessage(api.MessageSourceAgent, api.MessageTypeText, answer, metaQueryMetadata)
 					close(c.Output)
 					return
 				}
 				// we handled the meta query, so we don't need to run the agentic loop
 				c.setAgentState(api.AgentStateDone)
 				c.pendingFunctionCalls = []ToolCallAnalysis{}
-				c.addMessage(api.MessageSourceAgent, api.MessageTypeText, answer)
+				c.addMessage(api.MessageSourceAgent, api.MessageTypeText, answer, metaQueryMetadata)
 			} else {
 				// Start the agentic loop with the initial query
 				c.setAgentState(api.AgentStateRunning)
@@ -447,7 +488,7 @@ func (c *Agent) Run(ctx context.Context, initialQuery string) error {
 					if userInput == io.EOF {
 						log.Info("Agent loop done, EOF received")
 						c.setAgentState(api.AgentStateExited)
-						c.addMessage(api.MessageSourceAgent, api.MessageTypeText, "It has been a pleasure assisting you. Have a great day!")
+						c.addMessage(api.MessageSourceAgent, api.MessageTypeText, "It has been a pleasure assisting you. Have a great day!", metaQueryMetadata)
 						return
 					}
 
@@ -457,9 +498,9 @@ func (c *Agent) Run(ctx context.Context, initialQuery string) error {
 						}
 						if err := c.LoadSession(sessionPickerResp.SessionID); err != nil {
 							log.Error(err, "error loading session")
-							c.addMessage(api.MessageSourceAgent, api.MessageTypeError, "Error loading session: "+err.Error())
+							c.addMessage(api.MessageSourceAgent, api.MessageTypeError, "Error loading session: "+err.Error(), metaQueryMetadata)
 						} else {
-							c.addMessage(api.MessageSourceAgent, api.MessageTypeText, fmt.Sprintf("Switched to session %s", sessionPickerResp.SessionID))
+							c.addMessage(api.MessageSourceAgent, api.MessageTypeText, fmt.Sprintf("Switched to session %s", sessionPickerResp.SessionID), metaQueryMetadata)
 						}
 						continue
 					}
@@ -473,7 +514,11 @@ func (c *Agent) Run(ctx context.Context, initialQuery string) error {
 						log.Info("No query provided, skipping agentic loop")
 						continue
 					}
-					c.addMessage(api.MessageSourceUser, api.MessageTypeText, query.Query)
+					var userMeta map[string]string
+					if isMetaQuery(query.Query) {
+						userMeta = metaQueryMetadata
+					}
+					c.addMessage(api.MessageSourceUser, api.MessageTypeText, query.Query, userMeta)
 					// we don't need the agentic loop for meta queries
 					// for ex. model, tools, etc.
 					answer, handled, err := c.handleMetaQuery(ctx, query.Query)
@@ -481,13 +526,13 @@ func (c *Agent) Run(ctx context.Context, initialQuery string) error {
 						log.Error(err, "error handling meta query")
 						c.setAgentState(api.AgentStateDone)
 						c.pendingFunctionCalls = []ToolCallAnalysis{}
-						c.addMessage(api.MessageSourceAgent, api.MessageTypeError, "Error: "+err.Error())
+						c.addMessage(api.MessageSourceAgent, api.MessageTypeError, "Error: "+err.Error(), metaQueryMetadata)
 						continue
 					}
 					if handled {
 						// metaquery set the state to 'Exited', so we should exit
 						if c.AgentState() == api.AgentStateExited {
-							c.addMessage(api.MessageSourceAgent, api.MessageTypeText, answer)
+							c.addMessage(api.MessageSourceAgent, api.MessageTypeText, answer, metaQueryMetadata)
 							close(c.Output)
 							return
 						}
@@ -499,7 +544,7 @@ func (c *Agent) Run(ctx context.Context, initialQuery string) error {
 						c.setAgentState(api.AgentStateDone)
 						c.pendingFunctionCalls = []ToolCallAnalysis{}
 						if answer != "" {
-							c.addMessage(api.MessageSourceAgent, api.MessageTypeText, answer)
+							c.addMessage(api.MessageSourceAgent, api.MessageTypeText, answer, metaQueryMetadata)
 						}
 						continue
 					}
@@ -526,7 +571,7 @@ func (c *Agent) Run(ctx context.Context, initialQuery string) error {
 					if userInput == io.EOF {
 						log.Info("Agent loop done, EOF received")
 						c.setAgentState(api.AgentStateExited)
-						c.addMessage(api.MessageSourceAgent, api.MessageTypeText, "It has been a pleasure assisting you. Have a great day!")
+						c.addMessage(api.MessageSourceAgent, api.MessageTypeText, "It has been a pleasure assisting you. Have a great day!", metaQueryMetadata)
 						return
 					}
 
@@ -538,9 +583,9 @@ func (c *Agent) Run(ctx context.Context, initialQuery string) error {
 						}
 						if err := c.LoadSession(response.SessionID); err != nil {
 							log.Error(err, "error loading session")
-							c.addMessage(api.MessageSourceAgent, api.MessageTypeError, "Error loading session: "+err.Error())
+							c.addMessage(api.MessageSourceAgent, api.MessageTypeError, "Error loading session: "+err.Error(), metaQueryMetadata)
 						} else {
-							c.addMessage(api.MessageSourceAgent, api.MessageTypeText, fmt.Sprintf("Switched to session %s", response.SessionID))
+							c.addMessage(api.MessageSourceAgent, api.MessageTypeText, fmt.Sprintf("Switched to session %s", response.SessionID), metaQueryMetadata)
 						}
 						c.setAgentState(api.AgentStateDone)
 						continue
@@ -815,6 +860,7 @@ func (c *Agent) Run(ctx context.Context, initialQuery string) error {
 }
 
 func (c *Agent) handleMetaQuery(ctx context.Context, query string) (answer string, handled bool, err error) {
+	query = strings.TrimSpace(query)
 	switch query {
 	case "clear", "reset":
 		c.sessionMu.Lock()
@@ -822,7 +868,8 @@ func (c *Agent) handleMetaQuery(ctx context.Context, query string) (answer strin
 		if err := c.Session.ChatMessageStore.ClearChatMessages(); err != nil {
 			return "Failed to clear the conversation", false, err
 		}
-		c.llmChat.Initialize(c.Session.ChatMessageStore.ChatMessages())
+		c.llmChat.Initialize(c.messagesForLLM())
+		c.Session.Messages = c.Session.ChatMessageStore.ChatMessages()
 		c.sessionMu.Unlock()
 		return "Cleared the conversation.", true, nil
 	case "exit", "quit":
@@ -992,7 +1039,7 @@ func (c *Agent) SaveSession() (string, error) {
 	c.Session.Messages = messages
 
 	if c.llmChat != nil {
-		_ = c.llmChat.Initialize(c.Session.ChatMessageStore.ChatMessages())
+		_ = c.llmChat.Initialize(c.messagesForLLM())
 	}
 
 	return newSession.ID, nil
@@ -1045,7 +1092,7 @@ func (c *Agent) LoadSession(sessionID string) error {
 	}
 
 	if c.llmChat != nil {
-		if err := c.llmChat.Initialize(c.Session.ChatMessageStore.ChatMessages()); err != nil {
+		if err := c.llmChat.Initialize(c.messagesForLLM()); err != nil {
 			return fmt.Errorf("failed to re-initialize chat with new session: %w", err)
 		}
 	}

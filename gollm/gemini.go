@@ -493,6 +493,9 @@ func (c *GeminiChat) Initialize(messages []*api.Message) error {
 	klog.Info("Initializing gemini chat")
 	c.history = make([]*genai.Content, 0, len(messages))
 	for _, msg := range messages {
+		if msg.IsMeta() {
+			continue
+		}
 		content, err := c.messageToContent(msg)
 		if err != nil {
 			continue

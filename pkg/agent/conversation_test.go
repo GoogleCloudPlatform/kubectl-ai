@@ -404,3 +404,99 @@ func TestAgent_NewSession_NoDeadlock(t *testing.T) {
 		t.Fatal("NewSession timed out (potential deadlock)")
 	}
 }
+
+func TestIsMetaQuery(t *testing.T) {
+	metaQueries := []string{
+		"clear",
+		"  clear  ",
+		"reset",
+		"exit",
+		"quit",
+		"model",
+		"models",
+		"tools",
+		"session",
+		"save-session",
+		"sessions",
+		"resume-session 123",
+		"  resume-session abc  ",
+	}
+
+	for _, q := range metaQueries {
+		if !isMetaQuery(q) {
+			t.Errorf("expected %q to be recognized as meta query", q)
+		}
+	}
+
+	nonMetaQueries := []string{
+		"create deployment nginx",
+		"how do I debug crashloopbackoff",
+		"kubectl get pods",
+		"explain why pod failed",
+	}
+
+	for _, q := range nonMetaQueries {
+		if isMetaQuery(q) {
+			t.Errorf("expected %q NOT to be recognized as meta query", q)
+		}
+	}
+}
+
+func TestAgent_MessagesForLLM_FiltersMetaQueries(t *testing.T) {
+	store := sessions.NewInMemoryChatStore()
+	userMsg := &api.Message{
+		ID:      "1",
+		Source:  api.MessageSourceUser,
+		Type:    api.MessageTypeText,
+		Payload: "List all pods in default namespace",
+	}
+	metaUserQuery := &api.Message{
+		ID:       "2",
+		Source:   api.MessageSourceUser,
+		Type:     api.MessageTypeText,
+		Payload:  "models",
+		Metadata: map[string]string{api.MessageMetadataKeyType: api.MessageMetadataValueMeta},
+	}
+	metaAgentResp := &api.Message{
+		ID:       "3",
+		Source:   api.MessageSourceAgent,
+		Type:     api.MessageTypeText,
+		Payload:  "Available models:\n - model-a\n - model-b",
+		Metadata: map[string]string{api.MessageMetadataKeyType: api.MessageMetadataValueMeta},
+	}
+	modelResp := &api.Message{
+		ID:      "4",
+		Source:  api.MessageSourceModel,
+		Type:    api.MessageTypeText,
+		Payload: "Found 2 pods running.",
+	}
+
+	_ = store.AddChatMessage(userMsg)
+	_ = store.AddChatMessage(metaUserQuery)
+	_ = store.AddChatMessage(metaAgentResp)
+	_ = store.AddChatMessage(modelResp)
+
+	sess := &api.Session{
+		ID:               "test-sess",
+		ChatMessageStore: store,
+	}
+	a := &Agent{
+		Session:          sess,
+		ChatMessageStore: store,
+	}
+
+	// Session.AllMessages() should return all 4 messages for UI rendering
+	all := sess.AllMessages()
+	if len(all) != 4 {
+		t.Fatalf("expected 4 messages in store, got %d", len(all))
+	}
+
+	// messagesForLLM() should filter out the 2 meta messages and keep the 2 conversation messages
+	llmMsgs := a.messagesForLLM()
+	if len(llmMsgs) != 2 {
+		t.Fatalf("expected 2 messages for LLM, got %d", len(llmMsgs))
+	}
+	if llmMsgs[0].ID != "1" || llmMsgs[1].ID != "4" {
+		t.Errorf("expected LLM messages [1, 4], got [%s, %s]", llmMsgs[0].ID, llmMsgs[1].ID)
+	}
+}

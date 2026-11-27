@@ -221,7 +221,7 @@ func TestAgentEndToEndToolExecution(t *testing.T) {
 				t.Fatalf("unexpected message after final model text: type=%v", m.Type)
 			}
 		}
-	default:
+	case <-time.After(500 * time.Millisecond):
 		if st := a.AgentState(); st != api.AgentStateDone && st != api.AgentStateWaitingForInput {
 			t.Fatalf("unexpected state after tool run: %s (want Done or WaitingForInput)", st)
 		}
