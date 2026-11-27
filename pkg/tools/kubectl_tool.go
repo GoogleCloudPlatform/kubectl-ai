@@ -28,8 +28,57 @@ type Kubectl struct {
 	executor sandbox.Executor
 }
 
+// ReadOnlyKubectl uses the kubectl executor but advertises only inspection
+// operations. MCP enforcement still validates the actual command immediately
+// before execution; this schema is guidance, not the security boundary.
+type ReadOnlyKubectl struct {
+	*Kubectl
+}
+
 func NewKubectlTool(executor sandbox.Executor) *Kubectl {
 	return &Kubectl{executor: executor}
+}
+
+func NewReadOnlyKubectlTool(executor sandbox.Executor) *ReadOnlyKubectl {
+	return &ReadOnlyKubectl{Kubectl: NewKubectlTool(executor)}
+}
+
+func (t *ReadOnlyKubectl) Description() string {
+	return `Executes a single read-only kubectl inspection command. Mutating, ambiguous, compound, and kubeconfig-changing commands are rejected before execution.`
+}
+
+func (t *ReadOnlyKubectl) FunctionDefinition() *gollm.FunctionDefinition {
+	return &gollm.FunctionDefinition{
+		Name:        t.Name(),
+		Description: t.Description(),
+		Parameters: &gollm.Schema{
+			Type: gollm.TypeObject,
+			Properties: map[string]*gollm.Schema{
+				"command": {
+					Type: gollm.TypeString,
+					Description: `A single read-only kubectl command with the kubectl prefix.
+
+Examples:
+- kubectl get pods --all-namespaces
+- kubectl describe pod api-0 --namespace=demo
+- kubectl logs deployment/api --namespace=demo --tail=200
+- kubectl events --namespace=demo
+- kubectl top pods --namespace=demo`,
+				},
+			},
+		},
+	}
+}
+
+// CheckModifiesResource applies a stricter boundary than the interactive
+// permission classifier: shell redirection and background execution can change
+// local server state even when the kubectl verb itself is read-only.
+func (t *ReadOnlyKubectl) CheckModifiesResource(args map[string]any) string {
+	command, ok := args["command"].(string)
+	if !ok {
+		return "unknown"
+	}
+	return kubectlReadOnlyEffect(command)
 }
 
 func (t *Kubectl) Name() string {

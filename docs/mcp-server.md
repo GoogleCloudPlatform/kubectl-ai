@@ -15,6 +15,24 @@ Start the MCP server with only kubectl-ai's built-in tools:
 kubectl-ai --mcp-server
 ```
 
+### Read-only MCP Server
+
+Start a server that exposes only a restricted kubectl tool:
+
+```bash
+kubectl-ai --mcp-server --mcp-read-only
+```
+
+This mode does not register `bash`, custom tools, or external MCP tools. Before
+each execution it independently classifies the actual kubectl command and
+rejects mutations, local kubeconfig changes, compound commands, and ambiguous
+operations. The client-provided `modifies_resource` argument is not trusted.
+
+The boundary prevents writes; it does not decide which data is appropriate for
+a caller to see. Use a dedicated Kubernetes service account and RBAC rules to
+limit readable namespaces and resources. When using the HTTP transport, enable
+OAuth authentication as described below.
+
 ### Enhanced MCP Server (With external tool discovery)
 
 Start the MCP server with external MCP tool discovery enabled:
@@ -217,6 +235,8 @@ kubectl-ai provides the following native tools:
 - `bash`: Executes a bash command. Use this tool only when you need to execute a shell command.
 - `kubectl`: Executes a kubectl command against the user's Kubernetes cluster. Use this tool only when you need to query or modify the state of the user's Kubernetes cluster.
 
+With `--mcp-read-only`, only the restricted `kubectl` tool is exposed.
+
 ### External Tools (when `--external-tools` is enabled)
 
 Additional tools are available depending on the configured MCP servers:
@@ -232,7 +252,8 @@ Additional tools are available depending on the configured MCP servers:
 | Flag                  | Default          | Description                                                                                                           |
 | --------------------- | ---------------- | --------------------------------------------------------------------------------------------------------------------- |
 | `--mcp-server`        | `false`          | Run in MCP server mode                                                                                                |
-| `--external-tools`    | `false`          | Discover and expose external MCP tools (requires --mcp-server)                                                        |
+| `--mcp-read-only`     | `false`          | Expose only kubectl commands proven read-only (requires `--mcp-server`)                                               |
+| `--external-tools`    | `false`          | Discover and expose external MCP tools (incompatible with `--mcp-read-only`)                                          |
 | `--kubeconfig`        | `~/.kube/config` | Path to kubeconfig file                                                                                               |
 | `--mcp-server-mode`   | `stdio`          | Transport for the MCP server (`stdio` or `streamable-http`)                                                           |
 | `--http-port`         | `9080`           | Port for the HTTP endpoint when using `streamable-http` modes                                                         |

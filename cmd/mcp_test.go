@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -25,7 +26,62 @@ import (
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/mcp"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/mcpauth"
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/tools"
+	mcpgo "github.com/mark3labs/mcp-go/mcp"
 )
+
+func TestMCPReadOnlyServerExposesOnlyKubectlAndBlocksMutation(t *testing.T) {
+	toolset := tools.Tools{}
+	toolset.Init()
+	toolset.RegisterTool(&stubTool{})
+
+	server, err := newKubectlMCPServer(context.Background(), "", toolset, t.TempDir(), false, "stdio", 0, mcpauth.Config{}, true)
+	if err != nil {
+		t.Fatalf("newKubectlMCPServer: %v", err)
+	}
+	if got := server.tools.Names(); len(got) != 1 || got[0] != "kubectl" {
+		t.Fatalf("read-only MCP tools = %v, want [kubectl]", got)
+	}
+
+	kubectlTool := server.tools.Lookup("kubectl")
+	result, err := server.handleBuiltinToolCall(context.Background(), mcpgo.CallToolRequest{
+		Params: mcpgo.CallToolParams{
+			Name: "kubectl",
+			Arguments: map[string]any{
+				"command":           "kubectl delete pod api",
+				"modifies_resource": "no",
+			},
+		},
+	}, kubectlTool)
+	if err != nil {
+		t.Fatalf("handleBuiltinToolCall: %v", err)
+	}
+	if !result.IsError || len(result.Content) == 0 || !strings.Contains(fmt.Sprint(result.Content[0]), "could not be proven read-only") {
+		t.Fatalf("mutating call was not rejected: %+v", result)
+	}
+}
+
+func TestMCPReadOnlyServerRejectsExternalTools(t *testing.T) {
+	toolset := tools.Tools{}
+	toolset.Init()
+	if _, err := newKubectlMCPServer(context.Background(), "", toolset, t.TempDir(), true, "stdio", 0, mcpauth.Config{}, true); err == nil {
+		t.Fatal("read-only MCP server accepted external tools")
+	}
+}
+
+func TestMCPReadOnlyFlagValidation(t *testing.T) {
+	var opt Options
+	opt.InitDefaults()
+	opt.MCPReadOnly = true
+	if err := RunRootCommand(context.Background(), opt, nil); err == nil || !strings.Contains(err.Error(), "requires --mcp-server") {
+		t.Fatalf("MCP read-only without server error = %v", err)
+	}
+
+	opt.MCPServer = true
+	opt.ExternalTools = true
+	if err := RunRootCommand(context.Background(), opt, nil); err == nil || !strings.Contains(err.Error(), "cannot be combined") {
+		t.Fatalf("MCP read-only with external tools error = %v", err)
+	}
+}
 
 func TestKubectlMCPServerHTTPClientIntegration(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -39,7 +95,7 @@ func TestKubectlMCPServerHTTPClientIntegration(t *testing.T) {
 
 	workDir := t.TempDir()
 
-	server, err := newKubectlMCPServer(ctx, "", toolset, workDir, false, "streamable-http", port, mcpauth.Config{})
+	server, err := newKubectlMCPServer(ctx, "", toolset, workDir, false, "streamable-http", port, mcpauth.Config{}, false)
 	if err != nil {
 		t.Fatalf("failed to create MCP server: %v", err)
 	}

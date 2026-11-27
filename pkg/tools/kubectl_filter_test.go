@@ -32,10 +32,10 @@ func TestKubectlModifiesResource(t *testing.T) {
 		"read-only commands": {
 			{"Get pods", "kubectl get pods", "no"},
 			{"Describe pod", "kubectl describe pod nginx", "no"},
-			{"Port-forward", "kubectl port-forward pod/nginx 8080:80", "no"},
-			{"Port-forward with service", "kubectl port-forward svc/nginx 8080:80", "no"},
-			{"Port-forward complex", "kubectl port-forward deployment/myapp 8080:8080 9000:9000", "no"},
-			{"Port-forward background", "kubectl port-forward svc/nginx 8080:80 &", "no"},
+			{"Port-forward", "kubectl port-forward pod/nginx 8080:80", "unknown"},
+			{"Port-forward with service", "kubectl port-forward svc/nginx 8080:80", "unknown"},
+			{"Port-forward complex", "kubectl port-forward deployment/myapp 8080:8080 9000:9000", "unknown"},
+			{"Port-forward background", "kubectl port-forward svc/nginx 8080:80 &", "unknown"},
 			{"Get with output", "kubectl get pods -o yaml", "no"},
 			{"Get with output redirection", "kubectl get pods > pods.txt", "no"},
 			{"Get with name", "kubectl get pod nginx", "no"},
@@ -70,12 +70,13 @@ func TestKubectlModifiesResource(t *testing.T) {
 			{"Exec into pod", "kubectl exec -n demo tgi-pod -- nvidia-smi", "yes"},
 			{"Taint node", "kubectl taint nodes node1 key=value:NoSchedule", "yes"},
 			{"Run pod", "kubectl run nginx --image=nginx", "yes"},
-			{"Config set-context", "kubectl config set-context my-context", "no"},
+			{"Config set-context", "kubectl config set-context my-context", "yes"},
 			{"Exec command", "kubectl exec nginx -- rm -rf /", "yes"},
 			{"Cordon node", "kubectl cordon node1", "yes"},
 			{"Uncordon node", "kubectl uncordon node1", "yes"},
 			{"Drain node", "kubectl drain node1", "yes"},
 			{"Certificate approve", "kubectl certificate approve csr-12345", "yes"},
+			{"Auth reconcile", "kubectl auth reconcile -f rbac.yaml", "yes"},
 		},
 		"special cases": {
 			{"Dry run create", "kubectl create -f pod.yaml --dry-run=client", "no"},
@@ -101,6 +102,7 @@ func TestKubectlModifiesResource(t *testing.T) {
 			{"Mix safe and unsafe with result", "kubectl get pods && kubectl delete pod bad-pod", "yes"},
 			{"Mix with initial unsafe", "kubectl delete pod bad-pod && kubectl get pods", "yes"},
 			{"Kubectl alias k", "k get pods", "unknown"},
+			{"Kubectl lookalike", "kubectl.wrapper get pods", "unknown"},
 			{"Full path with arguments", "/usr/local/custom/kubectl --kubeconfig=/path/config get pods", "no"},
 			{"Complex jsonpath", "kubectl get pods -o=jsonpath='{range .items[*]}{.metadata.name}{\"\\t\"}{.status.phase}{\"\\n\"}{end}'", "no"},
 			{"Custom columns", "kubectl get pods -o=custom-columns=NAME:.metadata.name,STATUS:.status.phase", "no"},
@@ -118,11 +120,11 @@ func TestKubectlModifiesResource(t *testing.T) {
 			{"Field manager", "kubectl apply -f deploy.yaml --field-manager=controller", "yes"},
 			{"Create service account", "kubectl create serviceaccount jenkins", "yes"},
 			{"Create role binding", "kubectl create rolebinding admin --clusterrole=admin --user=user1 --namespace=default", "yes"},
-			{"Versioned kubectl", "kubectl.1.24 get pods", "no"},
-			{"Config set credentials", "kubectl config set-credentials cluster-admin --token=secret", "no"},
+			{"Versioned kubectl", "kubectl.1.24 get pods", "unknown"},
+			{"Config set credentials", "kubectl config set-credentials cluster-admin --token=secret", "yes"},
 			{"Config view with flatten", "kubectl config view --flatten", "no"},
 			{"Config view with output", "kubectl config view -o json", "no"},
-			{"Config use-context", "kubectl config use-context production", "no"},
+			{"Config use-context", "kubectl config use-context production", "yes"},
 			{"Label with special characters", "kubectl label pod nginx 'app.kubernetes.io/name=nginx-controller'", "yes"},
 			{"Jsonpath with quotes", "kubectl get pods -o jsonpath='{.items[0].metadata.name}'", "no"},
 			{"Command with grep", "kubectl get pods | grep -v Completed", "unknown"},
@@ -133,7 +135,7 @@ func TestKubectlModifiesResource(t *testing.T) {
 			{"Multiple input files", "kubectl delete -f file1.yaml -f file2.yaml", "yes"},
 			{"URL as input file", "kubectl apply -f https://example.com/manifest.yaml", "yes"},
 			{"Input from stdin", "cat file.yaml | kubectl apply -f -", "yes"},
-			{"Proxy command", "kubectl proxy --port=8080", "no"},
+			{"Proxy command", "kubectl proxy --port=8080", "unknown"},
 			{"Attach command", "kubectl attach mypod -i", "yes"},
 			{"Copy files", "kubectl cp mypod:/tmp/foo /tmp/bar", "yes"},
 			{"Rollout status with flags", "kubectl rollout --recursive=false status --timeout=0s deployment -w nginx", "no"},
@@ -150,6 +152,39 @@ func TestKubectlModifiesResource(t *testing.T) {
 							tt.command, result, tt.expected)
 					}
 				})
+			}
+		})
+	}
+}
+
+func TestReadOnlyKubectlRejectsShellAndLocalSideEffects(t *testing.T) {
+	tool := NewReadOnlyKubectlTool(nil)
+	tests := []struct {
+		name    string
+		command string
+		allowed bool
+	}{
+		{name: "get", command: "kubectl get pods", allowed: true},
+		{name: "logs", command: "kubectl logs deployment/api --tail=100", allowed: true},
+		{name: "dry run mutation", command: "kubectl apply -f deployment.yaml --dry-run=server", allowed: false},
+		{name: "delete", command: "kubectl delete pod api", allowed: false},
+		{name: "kubeconfig mutation", command: "kubectl config use-context production", allowed: false},
+		{name: "lookalike", command: "kubectl.wrapper get pods", allowed: false},
+		{name: "compound", command: "kubectl get pods | grep api", allowed: false},
+		{name: "redirect", command: "kubectl get pods > /tmp/pods", allowed: false},
+		{name: "background", command: "kubectl get pods &", allowed: false},
+		{name: "environment override", command: "KUBECONFIG=/tmp/other kubectl get pods", allowed: false},
+		{name: "command substitution", command: "kubectl get pod $(touch /tmp/changed)", allowed: false},
+		{name: "subshell", command: "(kubectl get pods)", allowed: false},
+		{name: "loop", command: "for ns in default; do kubectl get pods -n $ns; done", allowed: false},
+		{name: "proxy", command: "kubectl proxy --port=8080", allowed: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tool.CheckModifiesResource(map[string]any{"command": tt.command}) == "no"
+			if got != tt.allowed {
+				t.Fatalf("read-only classification for %q = %v, want %v", tt.command, got, tt.allowed)
 			}
 		})
 	}
@@ -235,7 +270,7 @@ func TestKubectlCommandParsing(t *testing.T) {
 
 		// Non-kubectl commands
 		{"not kubectl", "k get pods", "unknown", "kubectl alias"},
-		{"kubectl suffix", "kubectl-1.28 get pods", "no", "kubectl with version suffix"},
+		{"kubectl suffix", "kubectl-1.28 get pods", "unknown", "kubectl with version suffix"},
 		{"kubectl prefix", "kubectl-proxy --port=8080", "unknown", "kubectl with additional suffix"},
 		{"different command", "kubectx production", "unknown", "different k8s tool"},
 
