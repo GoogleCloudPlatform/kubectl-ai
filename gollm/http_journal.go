@@ -19,6 +19,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httputil"
+	"strings"
 
 	"github.com/GoogleCloudPlatform/kubectl-ai/pkg/journal"
 
@@ -37,7 +38,7 @@ func (jrt *journalingRoundTripper) RoundTrip(req *http.Request) (*http.Response,
 	recorder := journal.RecorderFromContext(req.Context())
 
 	// Log the outgoing request.
-	reqBytes, err := httputil.DumpRequestOut(req, true)
+	reqBytes, err := httputil.DumpRequestOut(redactRequestHeaders(req), true)
 	if err == nil {
 		err = recorder.Write(req.Context(), &journal.Event{
 			Action:  journal.ActionHTTPRequest,
@@ -74,7 +75,7 @@ func (jrt *journalingRoundTripper) RoundTrip(req *http.Request) (*http.Response,
 	// Default payload is the raw body, for non-streaming responses.
 	logPayload := map[string]any{
 		"status":  resp.Status,
-		"headers": resp.Header,
+		"headers": redactHeaders(resp.Header),
 		"body":    string(bodyBytes),
 	}
 
@@ -102,4 +103,31 @@ func withJournaling(client *http.Client) *http.Client {
 	}
 
 	return client
+}
+
+func redactRequestHeaders(req *http.Request) *http.Request {
+	redacted := req.Clone(req.Context())
+	redacted.Header = redactHeaders(req.Header)
+	return redacted
+}
+
+func redactHeaders(headers http.Header) http.Header {
+	redacted := headers.Clone()
+	for name := range redacted {
+		if isSensitiveHeader(name) {
+			redacted.Set(name, "[REDACTED]")
+		}
+	}
+	return redacted
+}
+
+func isSensitiveHeader(name string) bool {
+	name = strings.ToLower(name)
+	return name == "authorization" ||
+		name == "proxy-authorization" ||
+		name == "cookie" ||
+		name == "set-cookie" ||
+		strings.Contains(name, "api-key") ||
+		strings.Contains(name, "token") ||
+		strings.Contains(name, "secret")
 }
