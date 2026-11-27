@@ -106,11 +106,12 @@ func (c *AzureOpenAIClient) Close() error {
 }
 
 func (c *AzureOpenAIClient) GenerateCompletion(ctx context.Context, request *CompletionRequest) (CompletionResponse, error) {
+	deploymentName := azureOpenAIDeploymentName(request.Model)
 	req := azopenai.ChatCompletionsOptions{
 		Messages: []azopenai.ChatRequestMessageClassification{
 			&azopenai.ChatRequestUserMessage{Content: azopenai.NewChatRequestUserMessageContent(request.Prompt)},
 		},
-		DeploymentName: &request.Model,
+		DeploymentName: &deploymentName,
 	}
 
 	resp, err := c.client.GetChatCompletions(ctx, req, nil)
@@ -206,11 +207,20 @@ func (c *AzureOpenAIClient) SetResponseSchema(schema *Schema) error {
 func (c *AzureOpenAIClient) StartChat(systemPrompt string, model string) Chat {
 	return &AzureOpenAIChat{
 		client: c.client,
-		model:  model,
+		model:  azureOpenAIDeploymentName(model),
 		history: []azopenai.ChatRequestMessageClassification{
 			&azopenai.ChatRequestSystemMessage{Content: azopenai.NewChatRequestSystemMessageContent(systemPrompt)},
 		},
 	}
+}
+
+func azureOpenAIDeploymentName(model string) string {
+	for _, prefix := range []string{"azure/", "azopenai/"} {
+		if name, ok := strings.CutPrefix(model, prefix); ok {
+			return name
+		}
+	}
+	return model
 }
 
 type AzureOpenAICompletionResponse struct {
