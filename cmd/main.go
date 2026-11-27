@@ -310,6 +310,9 @@ func run(ctx context.Context) error {
 	// We add just the klog flags we want, not all the klog flags (there are a lot, most of them are very niche)
 	rootCmd.PersistentFlags().AddGoFlag(klogFlags.Lookup("v"))
 	rootCmd.PersistentFlags().AddGoFlag(klogFlags.Lookup("alsologtostderr"))
+	// Expose log_file so the log destination is customizable instead of always
+	// <tmpdir>/kubectl-ai.log. Set --log_file=/dev/null to disable file logging.
+	rootCmd.PersistentFlags().AddGoFlag(klogFlags.Lookup("log_file"))
 
 	// do this early, before the third-party code logs anything.
 	redirectStdLogToKlog()
