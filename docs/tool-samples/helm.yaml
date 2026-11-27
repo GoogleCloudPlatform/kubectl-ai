@@ -1,0 +1,18 @@
+- name: helm
+  description: "The Helm package manager for Kubernetes. Use it to install, upgrade, roll back, and manage Helm charts and releases."
+  command: "helm"
+  command_desc: |
+    The helm command-line interface for managing Kubernetes applications packaged as charts.
+
+    Core subcommands and usage patterns:
+    - `helm list -A`: List all releases across all namespaces.
+    - `helm list -n <namespace>`: List releases in a specific namespace.
+    - `helm status <release-name> -n <namespace>`: Show the status of a release.
+    - `helm get values <release-name> -n <namespace>`: Retrieve the values used for a release.
+    - `helm get manifest <release-name> -n <namespace>`: Render the Kubernetes manifests for a release.
+    - `helm upgrade <release-name> <chart> [flags]`: Upgrade a release to a new chart version or configuration.
+    - `helm rollback <release-name> <revision> -n <namespace>`: Roll back a release to a previous revision.
+    - `helm uninstall <release-name> -n <namespace>`: Remove a release and its resources.
+    - `helm template <release-name> <chart> [flags]`: Render chart templates locally without installing.
+
+    Use `helm --help` or `helm <subcommand> --help` for full syntax and available flags.

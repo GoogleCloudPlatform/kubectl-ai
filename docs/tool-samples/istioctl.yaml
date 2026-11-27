@@ -1,0 +1,16 @@
+- name: istioctl
+  description: "The Istio command-line tool. Use it to inspect, configure, and troubleshoot Istio service mesh resources in a Kubernetes cluster."
+  command: "istioctl"
+  command_desc: |
+    The istioctl command-line interface for Istio.
+
+    Core subcommands and usage patterns:
+    - `istioctl version`: Show client and control plane versions.
+    - `istioctl proxy-status`: Show sync status of Envoy proxies in the mesh.
+    - `istioctl analyze -n <namespace>`: Analyze Istio configuration for potential issues.
+    - `istioctl describe pod <pod-name> -n <namespace>`: Describe how Istio is configured for a pod.
+    - `istioctl proxy-config cluster <pod-name> -n <namespace>`: Show cluster configuration for a proxy.
+    - `istioctl proxy-config route <pod-name> -n <namespace>`: Show route configuration for a proxy.
+    - `istioctl experimental authz check <pod-name> -n <namespace>`: Check authorization policy enforcement.
+
+    Use `istioctl --help` or `istioctl <subcommand> --help` for full syntax and available flags.
