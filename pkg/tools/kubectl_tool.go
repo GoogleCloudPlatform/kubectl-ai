@@ -127,6 +127,10 @@ func (t *Kubectl) Run(ctx context.Context, args map[string]any) (any, error) {
 		env = append(env, "KUBECONFIG="+kubeconfig)
 	}
 
+	// Set a wide column width so kubectl tabular output (especially -o wide)
+	// is not truncated in the non-TTY execution environment.
+	env = append(env, "COLUMNS=256")
+
 	return ExecuteWithStreamingHandling(ctx, t.executor, command, workDir, env, DetectKubectlStreaming)
 }
 
