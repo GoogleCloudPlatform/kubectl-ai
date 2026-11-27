@@ -404,3 +404,178 @@ func TestAgent_NewSession_NoDeadlock(t *testing.T) {
 		t.Fatal("NewSession timed out (potential deadlock)")
 	}
 }
+
+// --- Mock types for multi-candidate testing ---
+
+type mockPart struct {
+	text      string
+	hasText   bool
+	calls     []gollm.FunctionCall
+	hasCalls  bool
+}
+
+func (p *mockPart) AsText() (string, bool) {
+	return p.text, p.hasText
+}
+
+func (p *mockPart) AsFunctionCalls() ([]gollm.FunctionCall, bool) {
+	return p.calls, p.hasCalls
+}
+
+type mockCandidate struct {
+	parts []gollm.Part
+}
+
+func (c *mockCandidate) Parts() []gollm.Part {
+	return c.parts
+}
+
+func (c *mockCandidate) String() string {
+	return "mockCandidate"
+}
+
+type mockChatResponse struct {
+	candidates []gollm.Candidate
+}
+
+func (r *mockChatResponse) Candidates() []gollm.Candidate {
+	return r.candidates
+}
+
+func (r *mockChatResponse) UsageMetadata() any {
+	return nil
+}
+
+// TestMultiCandidateProcessing verifies that the agentic loop processes
+// ALL candidates from a ChatResponse, not just the first one.
+// This is the fix for bug #421: OpenAI reasoning models return tool calls
+// and text as separate candidates.
+func TestMultiCandidateProcessing(t *testing.T) {
+	tests := []struct {
+		name              string
+		response          gollm.ChatResponse
+		expectedText      string
+		expectedCallCount int
+		expectedCallNames []string
+	}{
+		{
+			name: "single candidate with text only",
+			response: &mockChatResponse{
+				candidates: []gollm.Candidate{
+					&mockCandidate{parts: []gollm.Part{
+						&mockPart{text: "hello", hasText: true},
+					}},
+				},
+			},
+			expectedText:      "hello",
+			expectedCallCount: 0,
+		},
+		{
+			name: "single candidate with tool call only",
+			response: &mockChatResponse{
+				candidates: []gollm.Candidate{
+					&mockCandidate{parts: []gollm.Part{
+						&mockPart{
+							calls:    []gollm.FunctionCall{{Name: "kubectl", Arguments: map[string]any{"command": "kubectl get pods"}}},
+							hasCalls: true,
+						},
+					}},
+				},
+			},
+			expectedText:      "",
+			expectedCallCount: 1,
+			expectedCallNames: []string{"kubectl"},
+		},
+		{
+			name: "multiple candidates - tool call and text (reasoning model pattern)",
+			response: &mockChatResponse{
+				candidates: []gollm.Candidate{
+					&mockCandidate{parts: []gollm.Part{
+						&mockPart{
+							calls:    []gollm.FunctionCall{{Name: "kubectl", Arguments: map[string]any{"command": "kubectl get nodes"}}},
+							hasCalls: true,
+						},
+					}},
+					&mockCandidate{parts: []gollm.Part{
+						&mockPart{text: "I will get the nodes for you", hasText: true},
+					}},
+				},
+			},
+			expectedText:      "I will get the nodes for you",
+			expectedCallCount: 1,
+			expectedCallNames: []string{"kubectl"},
+		},
+		{
+			name: "multiple candidates - text then tool call",
+			response: &mockChatResponse{
+				candidates: []gollm.Candidate{
+					&mockCandidate{parts: []gollm.Part{
+						&mockPart{text: "Let me check that", hasText: true},
+					}},
+					&mockCandidate{parts: []gollm.Part{
+						&mockPart{
+							calls:    []gollm.FunctionCall{{Name: "bash", Arguments: map[string]any{"command": "echo test"}}},
+							hasCalls: true,
+						},
+					}},
+				},
+			},
+			expectedText:      "Let me check that",
+			expectedCallCount: 1,
+			expectedCallNames: []string{"bash"},
+		},
+		{
+			name: "multiple candidates - multiple tool calls across candidates",
+			response: &mockChatResponse{
+				candidates: []gollm.Candidate{
+					&mockCandidate{parts: []gollm.Part{
+						&mockPart{
+							calls:    []gollm.FunctionCall{{Name: "kubectl", Arguments: map[string]any{"command": "kubectl get pods"}}},
+							hasCalls: true,
+						},
+					}},
+					&mockCandidate{parts: []gollm.Part{
+						&mockPart{
+							calls:    []gollm.FunctionCall{{Name: "bash", Arguments: map[string]any{"command": "echo done"}}},
+							hasCalls: true,
+						},
+					}},
+				},
+			},
+			expectedText:      "",
+			expectedCallCount: 2,
+			expectedCallNames: []string{"kubectl", "bash"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var streamedText string
+			var functionCalls []gollm.FunctionCall
+
+			// Simulate how conversation.go processes candidates
+			for _, candidate := range tt.response.Candidates() {
+				for _, part := range candidate.Parts() {
+					if text, ok := part.AsText(); ok {
+						streamedText += text
+					}
+					if calls, ok := part.AsFunctionCalls(); ok && len(calls) > 0 {
+						functionCalls = append(functionCalls, calls...)
+					}
+				}
+			}
+
+			if streamedText != tt.expectedText {
+				t.Errorf("expected text %q, got %q", tt.expectedText, streamedText)
+			}
+			if len(functionCalls) != tt.expectedCallCount {
+				t.Errorf("expected %d function calls, got %d", tt.expectedCallCount, len(functionCalls))
+			}
+			for i, name := range tt.expectedCallNames {
+				if i < len(functionCalls) && functionCalls[i].Name != name {
+					t.Errorf("expected call[%d].Name = %q, got %q", i, name, functionCalls[i].Name)
+				}
+			}
+		})
+	}
+}
