@@ -404,3 +404,36 @@ func TestAgent_NewSession_NoDeadlock(t *testing.T) {
 		t.Fatal("NewSession timed out (potential deadlock)")
 	}
 }
+
+func TestHandleMetaQuery_EnableConfirmations(t *testing.T) {
+	ctx := context.Background()
+
+	// A prior "Yes, and don't ask me again" sets SkipPermissions; the meta
+	// command undoes it.
+	a := &Agent{SkipPermissions: true}
+	answer, handled, err := a.handleMetaQuery(ctx, "enable-confirmations")
+	if err != nil {
+		t.Fatalf("handleMetaQuery: %v", err)
+	}
+	if !handled {
+		t.Fatal("expected the query to be handled")
+	}
+	if a.SkipPermissions {
+		t.Error("SkipPermissions should be false after enable-confirmations")
+	}
+	if !strings.Contains(answer, "re-enabled") {
+		t.Errorf("unexpected answer: %q", answer)
+	}
+
+	// Idempotent: calling again when already enabled says so and stays false.
+	answer, handled, err = a.handleMetaQuery(ctx, "enable-confirmations")
+	if err != nil || !handled {
+		t.Fatalf("second call: handled=%v err=%v", handled, err)
+	}
+	if a.SkipPermissions {
+		t.Error("SkipPermissions should remain false")
+	}
+	if !strings.Contains(answer, "already enabled") {
+		t.Errorf("unexpected answer: %q", answer)
+	}
+}
