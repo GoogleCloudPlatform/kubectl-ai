@@ -603,6 +603,7 @@ func (c *Agent) Run(ctx context.Context, initialQuery string) error {
 					log.Error(err, "error sending streaming LLM response")
 					c.setAgentState(api.AgentStateDone)
 					c.pendingFunctionCalls = []ToolCallAnalysis{}
+					c.addMessage(api.MessageSourceAgent, api.MessageTypeError, "Error: "+err.Error())
 					c.lastErr = err
 					continue
 				}
@@ -616,6 +617,8 @@ func (c *Agent) Run(ctx context.Context, initialQuery string) error {
 					if err != nil {
 						c.setAgentState(api.AgentStateDone)
 						c.pendingFunctionCalls = []ToolCallAnalysis{}
+						c.addMessage(api.MessageSourceAgent, api.MessageTypeError, "Error: "+err.Error())
+						c.lastErr = err
 
 						// In RunOnce mode, exit on shim conversion error
 						if c.RunOnce {
